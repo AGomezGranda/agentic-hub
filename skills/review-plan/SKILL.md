@@ -1,6 +1,6 @@
 ---
 name: review-plan
-description: Review an implementation plan through multiple quality lenses (architecture, security, tests, etc.) using parallel subagents, then collaboratively iterate the plan. Use before implementing a plan.
+description: Review an implementation plan through multiple quality lenses (architecture, security, tests, etc.) using parallel subagents, then collaboratively iterate the plan. Use before implementing a plan. Not writing the plan (create-plan) or executing it (implement-plan).
 ---
 
 # Review Plan
@@ -10,7 +10,9 @@ description: Review an implementation plan through multiple quality lenses (arch
 Read the plan file and anything it references (no offset/limit). Note its
 scope: what layers/technologies it touches, complexity, risk.
 
-Before picking a path, check for an existing plans  or reviews dir: `find . -type d -iname plans -not -path '*/node_modules/*'`  `find . -type d -iname reviews -not -path '*/node_modules/*'`.
+Before picking a path, check for an existing plans or reviews dir:
+`find . -type d -iname plans -not -path '*/node_modules/*'`
+`find . -type d -iname reviews -not -path '*/node_modules/*'`
 
 If one exists (e.g. `meta/reviews/`, `docs/reviews/`), use it as reference for the review folder.
 
@@ -20,21 +22,7 @@ what recurs vs. what's been fixed — but still review the plan fresh.
 
 ## 2. Pick lenses
 
-| Lens | Focus |
-|---|---|
-| Architecture | modularity, coupling, scalability, tradeoffs |
-| Security | authn/authz, input handling, secrets, STRIDE/OWASP |
-| Test Coverage | test-first/TDD, pyramid balance, edge cases, isolation, right-level coverage |
-| Code Quality | design principles, error handling, complexity |
-| Correctness | logical validity, boundaries, state, concurrency |
-| Standards | conventions, API shape, accessibility |
-| Usability | DX, API ergonomics, config, onboarding |
-| Performance | efficiency, resource use, caching |
-| Documentation | completeness, accuracy for the audience |
-| Database | migration safety, schema, query correctness |
-| Compatibility | API contracts, deps, versioning |
-| Portability | env independence, deployment, vendor lock |
-| Safety | data-loss prevention, ops safety on critical paths |
+Full lens table (focus area per lens): `references/lenses.md`.
 
 Architecture, Code Quality, Test Coverage, and Correctness are near-always
 relevant. Pick the rest by what the plan actually touches — skip lenses that
@@ -45,29 +33,40 @@ for a routine review).
 
 ## 3. Spawn reviewers in parallel
 
-One `subagent` workflow call, one child per lens, fanned out together (not a
-loop of sequential single calls). Each child's task:
+One child per lens, dispatched together per host — see "Fanning out" below.
+Each child's task:
 
 ```
 Review the plan at <path> through the [LENS] lens: [1-line focus from the table].
 Read the plan fully, and read whatever source it references for context.
 Return: a short summary, a list of strengths, and a list of findings. Each
-finding needs: severity (critical/major/minor/suggestion), confidence
-(high/medium/low), a location (which plan section), and a one-paragraph body.
-Be specific and reference the plan section, not vague.
+finding needs: severity (P0/P1/P2), confidence (high/medium/low), a location
+(which plan section), and a one-paragraph body. Be specific and reference the
+plan section, not vague.
 ```
 
 Wait for all children before continuing. If a child's output doesn't parse
-into that shape, keep its raw text as a single "major" finding under its lens
+into that shape, keep its raw text as a single P1 finding under its lens
 name rather than dropping it.
+
+This is the same P0/P1/P2 vocabulary `code-quality-audit`/`testing-strategy`
+use for their judgement findings — one vocabulary, no mapping needed if a
+finding from either of those ever needs folding in here.
+
+### Fanning out
+
+Bundled agent for this skill: `plan-lens`; fall back to the packaged
+`reviewer`, then a generic child, if it isn't installed.
+
+<!-- agentic-hub: fanout -->
 
 ## 4. Aggregate
 
 - Merge findings across lenses; only merge two findings if they're about the
   *same* underlying concern from different angles, not just nearby text.
-- Sort by severity (critical > major > minor > suggestion), then confidence.
-- Verdict: `REVISE` if any critical finding or 2+ major findings exist,
-  `COMMENT` if only minor/suggestion findings, `APPROVE` if none.
+- Sort by severity (P0 > P1 > P2), then confidence.
+- Verdict: `REVISE` if any P0 finding or 2+ P1 findings exist, `COMMENT` if
+  only P2 findings, `APPROVE` if none.
 - Call out cross-cutting themes (2+ lenses flagging the same thing) and any
   tradeoffs where lenses conflict (e.g. security wants more validation,
   usability wants less friction) — present both sides, don't referee for
@@ -83,7 +82,7 @@ unused number), formatted:
 
 ### Cross-Cutting Themes
 ### Findings
-#### Critical / Major / Minor / Suggestions
+#### Critical / Major / Minor
 - 🔴/🟡/🔵 **{lens}**: {title} — **Location**: {section} — {summary}
 
 ### Strengths

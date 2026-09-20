@@ -1,6 +1,6 @@
 ---
 name: implement-plan
-description: Execute an approved implementation plan phase by phase with verification checkpoints. Use when implementing a previously written plan.
+description: Execute an approved implementation plan phase by phase with verification checkpoints. Use when implementing a previously written plan. Not writing the plan (create-plan) or reviewing it before execution (review-plan).
 ---
 
 # Implement Plan

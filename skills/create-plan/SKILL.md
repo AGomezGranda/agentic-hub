@@ -1,6 +1,6 @@
 ---
 name: create-plan
-description: Create a detailed implementation plan through interactive, iterative collaboration with the user before writing code. Use when the user needs to plan a feature, refactor, or non-trivial task.
+description: Create a detailed implementation plan through interactive, iterative collaboration with the user before writing code. Use when the user needs to plan a feature, refactor, or non-trivial task. Not reviewing an existing plan (review-plan) or open-ended research with no plan to write (research-codebase).
 ---
 
 # Create Plan
@@ -14,11 +14,13 @@ skeptical, thorough, collaborative. Don't write the whole plan in one shot.
 - If given nothing, ask for: the task description, relevant constraints, and
   links to prior research or related code. Wait for the reply.
 - Research the codebase yourself first (`grep`/`read`). For larger surfaces,
-  fan out parallel read-only research subagents in one `subagent` workflow call
-  (e.g. "find all files handling X", "explain how Y currently works",
-  "find a similar existing pattern") instead of exploring serially. Read every
-  file the research turns up FULLY into your own context — don't plan off a
-  subagent's summary alone.
+  fan out instead of exploring serially, using `research-codebase`'s own
+  decomposition, child task template, and evidence schema (its §2-4)
+  rather than a second copy of them here — see "Fanning out" below for
+  dispatch, per host. A subagent's `path:line` claim is a lead, not
+  confirmed evidence: read the file yourself before a plan decision rests
+  on it, and a targeted `sed -n`/`grep -n` check is enough for anything the
+  plan doesn't hinge on.
 - Cross-reference the request against what the code actually does. Present your
   understanding plus only the questions you genuinely can't answer by reading
   code:
@@ -29,6 +31,13 @@ skeptical, thorough, collaborative. Don't write the whole plan in one shot.
   ```
 - If the user corrects a misunderstanding, go re-verify it in the code — don't
   just accept the correction blind.
+
+### Fanning out
+
+Bundled agent for this skill: `repo-scout`; fall back to the packaged
+`scout`, then a generic child, if it isn't installed.
+
+<!-- agentic-hub: fanout -->
 
 ## 2. Agree on structure before details
 

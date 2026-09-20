@@ -40,3 +40,38 @@ def test_parse_frontmatter_no_leading_dashes_returns_unchanged() -> None:
 
     assert fm == {}
     assert body == text
+
+
+def test_parse_frontmatter_warns_on_folded_scalar(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    text = "---\ndescription: >\n  line one\n  line two\n---\nBody.\n"
+
+    with caplog.at_level("WARNING"):
+        fm, _ = catalog.parse_frontmatter(text)
+
+    assert fm["description"] == ">"
+    assert any("folded" in r.message for r in caplog.records)
+
+
+def test_parse_frontmatter_strips_matching_quotes() -> None:
+    text = "---\nname: demo\ndescription: 'a quoted demo'\n---\nBody.\n"
+
+    fm, _ = catalog.parse_frontmatter(text)
+
+    assert fm["description"] == "a quoted demo"
+
+
+def test_real_skills_corpus_has_valid_frontmatter() -> None:
+    """No monkeypatch, no synthetic fixture: runs against the real skills/ dir."""
+    for name in catalog.discover_skills():
+        text = (catalog.SKILLS_DIR / name / "SKILL.md").read_text()
+        fm, _ = catalog.parse_frontmatter(text)
+        description = fm.get("description", "")
+        assert description.strip() not in (">", "|"), (
+            f"{name}: description is a broken folded/literal YAML block"
+        )
+        assert description, f"{name}: missing description"
+        assert "\n" not in description, (
+            f"{name}: description spans multiple lines, not a single-line scalar"
+        )

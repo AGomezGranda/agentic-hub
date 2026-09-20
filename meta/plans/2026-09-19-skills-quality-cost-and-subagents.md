@@ -819,7 +819,7 @@ This turns Phases 3-5 from prose conventions into enforced configuration
 
 ---
 
-## Phase 7 — Evals
+## Phase 7 — Evals [DISCARD]
 
 ### Overview
 
@@ -901,7 +901,7 @@ rather than hidden inside a precision score.
 
 ---
 
-## Phase 8 — Tune the Pi host setup
+## Phase 8 — Tune the Pi host setup [DISCARD]
 
 ### Overview
 

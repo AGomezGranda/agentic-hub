@@ -1,6 +1,6 @@
 ---
 name: research-codebase
-description: Research how something in the codebase actually works — fanning out parallel read-only subagents and synthesising the findings into a cited research document. Use when the user needs to understand an area deeply before planning or changing it.
+description: Research how something in the codebase actually works — fanning out parallel read-only subagents and synthesising the findings into a cited research document. Use when the user needs to understand an area deeply before planning or changing it. Not planning a change (create-plan), reviewing an existing plan (review-plan), or auditing code quality (code-quality-audit).
 ---
 
 # Research Codebase
@@ -37,15 +37,22 @@ answers — *where does X live*, *how does Y work*, *what calls Z*, *is there an
 existing pattern for W*. Overlapping sub-questions waste agents; sequential
 ones ("find X, then analyse X") should be one agent's job, not two.
 
-Spawn them in **one** subagent workflow call, fanned out together, not a loop of
-sequential single calls. Give each child:
+See "Fanning out" below for how to dispatch children together, per host. A
+child cannot see this skill, so its task text is everything it gets — give
+each child:
 
 ```
 Read-only investigation. Question: [specific sub-question].
 Return: a short answer, and the concrete evidence for it as file:line
-references with a 1-2 line quote or paraphrase of each. If you can't find
-something, say so explicitly rather than guessing. Do not modify files.
+references with a verbatim 1-2 line excerpt (with line numbers) of each —
+not a paraphrase, so the parent can cite it without re-reading the file to
+confirm the wording. If you can't find something, say so using the exact
+format in the "Child evidence schema" below rather than guessing. Do not
+modify files.
 ```
+
+If a child's output doesn't parse into that shape, keep its raw text as-is
+under its sub-question rather than dropping it.
 
 Two useful shapes beyond "how does this work":
 - **Pattern hunt** — "find existing implementations of a similar thing, with
@@ -57,14 +64,54 @@ Two useful shapes beyond "how does this work":
 Only search the web if the user explicitly asks; if you do, carry the links
 through into the document.
 
+### Child evidence schema
+
+Every child reports its evidence in this shape:
+
+```
+location: path:line
+excerpt: verbatim quoted line(s) with line numbers, not a paraphrase
+answer: one paragraph — what this evidence establishes
+```
+
+If a child cannot resolve its sub-question, it says exactly:
+`Not found. Searched: <what>. Expected to find: <what>.`
+
+### Fanning out
+
+Bundled agent for this skill: `repo-scout`; fall back to the packaged
+`scout`, then a generic child, if it isn't installed.
+
+<!-- agentic-hub: fanout -->
+
 ## 4. Verify before you synthesise
 
 Wait for **all** children before writing anything.
 
-Then open the key files yourself. A subagent summary is a lead, not a citation
-— read enough of each cited file to confirm the claim and that the line number
-is real. Never write a `file:line` you haven't personally seen. Drop or
-downgrade anything that doesn't survive that check.
+A subagent's summary is a lead, not a citation — never write a `file:line`
+you haven't personally seen — but not every claim needs the same depth of
+looking:
+
+- **A finding the document's answer rests on** — read the full file. A
+  `sed -n 'X,Yp'` window confirms the quote is real, not that the finding is
+  correctly understood in context.
+- **A corroborating finding** (supports the answer but isn't the reason for
+  it) — a targeted `sed -n 'X,Yp'` / `grep -n` against the cited lines is
+  enough.
+- **Everything else** — spot-check. (Pi, with `evidence-auditor` installed:
+  hand the finding set to it in bulk instead of doing every targeted read
+  yourself.)
+
+Drop or downgrade anything that doesn't survive its tier's check.
+
+Dispatch children with `outputMode: "file-only"`. Their chat response
+is a pointer, not their findings. For a spot-check-tier finding, read
+only the short-answer line at the top of the child's file — never the evidence
+beneath it. For a top-two-tier finding, or one you're citing in the
+document, read the whole file; a repo-scout child's output is one
+sub-question's evidence, not a multi-finding report, so there's no
+heading to open in isolation. If the short answer is too thin to judge on
+its own, that is itself the finding.
 
 Mark confidence honestly:
 - **verified** — you read the code

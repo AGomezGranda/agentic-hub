@@ -19,6 +19,9 @@ agentic-hub = "agentic_hub.cli:main"
 [dependency-groups]
 dev = ["pytest"]
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
 [tool.pyrefly]
 project-includes = ["src", "tests"]
 

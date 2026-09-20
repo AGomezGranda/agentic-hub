@@ -1,12 +1,6 @@
 ---
 name: code-quality-audit
-description: >
-  Audit code against SOLID, DRY, KISS, typing discipline, error handling and
-  DDD modeling for a full repo, a bounded context/domain, or a git diff/PR.
-  Use when asked to review code quality, check design principles, review a
-  PR for design smells, or audit a domain's structure. Not for
-  over-engineering/simplification (use ponytail-review/ponytail-audit),
-  test coverage (use testing-strategy), security, or performance.
+description: 'Audit code against SOLID, DRY, KISS, typing discipline, error handling and DDD modeling for a full repo, a bounded context/domain, or a git diff/PR. Use when asked to review code quality, check design principles, review a PR for design smells, or audit a domain structure. Not over-engineering (ponytail-review/audit), tests (testing-strategy), security or performance.'
 argument-hint: '[repo | path/domain | diff/PR ref]'
 ---
 
@@ -16,7 +10,9 @@ Audit code against six design-correctness dimensions — SOLID, DRY, KISS,
 typing, error handling, DDD — and report findings worth acting on.
 
 **Audit, don't rewrite.** Produce a report. Only change code if the user asks
-for that after seeing it.
+for that after seeing it. (On Pi, dispatching dimension children to
+`reviewer` enforces this structurally — its toolset has no write
+capability, so it can't rewrite even if asked.)
 
 ## Boundary — read this before starting
 
@@ -40,12 +36,14 @@ skills.
 - **Full repo** — audit architecture-wide: layering, cross-cutting SOLID/DRY
   violations, whether DDD boundaries hold across the whole codebase. Broad
   enough to fan out: after step 2's map, spawn one subagent per applicable
-  dimension in a single `subagent` workflow call (fanned out together, not a
-  loop), each given the domain map/conventions from step 2 and told to
-  return that dimension's findings table with `path:line` evidence. Cap it
-  at 4-5 children — if all six dimensions genuinely apply, merge the two
-  most related into one child's task (e.g. SOLID+DDD, or KISS+typing) rather
-  than spawning a sixth. Wait for all before synthesizing the report.
+  dimension — see "Fanning out" below for how, per host. A child cannot see
+  this skill (`inheritSkills: false` on every packaged Pi agent, and no
+  skill mechanism at all on Claude Code/Codex), so its task text must paste
+  in, verbatim: the domain map/conventions from step 2, and that
+  dimension's rubric from its `references/<dimension>.md` file (absolute
+  path) — not just the dimension's name. Tell it to return findings in the
+  "Child finding schema" below. Wait for all before synthesizing the
+  report.
 - **Path / domain / bounded context** — audit one module or aggregate in
   depth; still read its neighbours and callers to judge boundary leakage, but
   don't map the whole repo.
@@ -53,7 +51,46 @@ skills.
   files they belong to and their direct callers/callees. A diff review that
   ignores the surrounding contract will misjudge SRP and DDD violations.
 
+### Fanning out
+
+Bundled agent for this skill: `cq-dimension`; fall back to the packaged
+`reviewer`, then a generic child, if it isn't installed.
+
+<!-- agentic-hub: fanout -->
+
+### Child finding schema
+
+Every child — and every dimension you check yourself — reports findings in
+this shape, one block per finding:
+
+```
+severity: P0 | P1 | P2
+confidence: high | medium | low
+location: path:line
+excerpt: verbatim quoted line(s), not a paraphrase
+finding: one paragraph — what's wrong and why it matters
+strengths: optional — what's solid here, not just what's wrong
+```
+
+If a child has nothing to report for its dimension, it says exactly:
+`No issues found. Checked: <what>. Solid because: <one line>.` A bare
+"No issues found." can't feed step 4's "Explicitly fine" section — the
+structured version can. If a child's output doesn't parse into this shape,
+keep its raw text as a single P1 finding under its dimension name rather
+than dropping it.
+
 ## 2. Map before judging
+
+On Pi, for a full-repo scope large enough to warrant fanning out (see
+"Fanning out" below): dispatch the map before judging it, one `runs.all([...])` of
+`repo-scout` children — one for domain vocabulary, one for layering, one
+for existing conventions (typing, error handling, module boundaries) —
+each returning its own evidence (a short answer plus `file:line` proof, or
+an honest "not found"). Assemble their output into the map yourself.
+Judge nothing at this stage; a scout that volunteers a verdict is out of
+contract. Then fan out the dimension children with that map pasted into
+each task. Skip this for a path/domain scope or a diff/PR — the parent
+reads the relevant files directly either way.
 
 You cannot judge design without knowing the model it's supposed to express.
 Before scoring anything, establish:
@@ -75,47 +112,43 @@ already have, and what does the surrounding domain call it.
 
 One findings table per dimension that actually applies to this scope — skip
 a dimension entirely and say so if the codebase has nothing to say about it
-(e.g. a script with no domain layer has no DDD findings).
+(e.g. a script with no domain layer has no DDD findings). Each dimension's
+rubric lives in its own reference file — read it (yourself, or paste it
+into a child's task per §1):
 
-**SOLID** — SRP: a class/function changing for more than one reason. OCP:
-new cases requiring edits to existing branches instead of extension. LSP:
-a subtype that narrows preconditions or breaks a caller's expectation of the
-base type. ISP: callers forced to implement/depend on methods they don't
-use. DIP: high-level logic importing/constructing a concrete low-level
-dependency directly instead of depending on an abstraction it owns.
-
-**DRY** — duplication that will *drift* (the same business rule expressed
-twice, will silently diverge) vs. incidental repetition (two unrelated
-things that happen to look similar today). Only the first is a finding;
-flagging the second creates a false coupling when someone "fixes" it.
-
-**KISS** — the wrong abstraction, not too much abstraction (that's
-`ponytail-review`'s job). A wrapper that doesn't match the problem shape, a
-generic solution for one concrete case, control flow that's hard to trace
-because it's modeling the wrong thing.
-
-**Typing** — leaky `any`/`unknown`/untyped boundaries at the edges of the
-domain, primitive obsession (a `string` where an `Email` or `UserId` type
-would make invalid states unrepresentable), missing discriminated
-unions/exhaustiveness checks on variants, stringly-typed enums.
-
-**Error handling** — swallowed exceptions, catch-and-log-and-continue where
-the caller needed to know, errors that lose type/context crossing a module
-boundary, broad `catch`/`except` hiding a specific failure a caller could
-handle differently.
-
-**DDD** (only where a domain layer exists) — anemic models (all data,
-getters/setters, logic lives in services instead of the entity), logic that
-belongs in the domain leaking into controllers/handlers, a bounded context's
-internals (types, IDs) crossing into another context instead of going
-through its published interface, an aggregate whose invariants can be broken
-by reaching through it instead of its root.
+- **SOLID** — `references/solid.md`
+- **DRY** — `references/dry.md`
+- **KISS** — `references/kiss.md`
+- **Typing** — `references/typing.md`
+- **Error handling** — `references/errors.md`
+- **DDD** — `references/ddd.md` (only where a domain layer exists)
 
 ## 4. Report
 
-If dimensions were fanned out to subagents, open each cited file yourself
-before writing anything down — a subagent's `path:line` claim is a lead, not
-confirmed evidence. Drop or fix anything that doesn't hold up.
+If dimensions were fanned out to subagents, verify before writing anything
+down — a subagent's `path:line` claim is a lead, not confirmed evidence — but
+not at the same depth for every finding:
+
+- **A finding a top-line recommendation rests on** — read the full file. A
+  `sed -n 'X,Yp'` window confirms the quote is real, not that the finding is
+  correct; judging an SRP or DDD claim needs the surrounding contract. This
+  is where you're supposed to pay the read cost.
+- **A corroborating finding** (supports a recommendation but isn't the
+  reason for it) — a targeted `sed -n 'X,Yp'` / `grep -n` against the cited
+  lines is enough.
+- **Everything else** — spot-check. (Pi, with `evidence-auditor` installed:
+  hand a finding set to it in bulk instead of doing every targeted read
+  yourself.)
+
+State which tier each finding is in, so the reader knows what was checked
+and at what depth. Drop or fix anything that doesn't hold up.
+
+Dispatch dimension children with `outputMode: "file-only"`. Their chat
+response is a pointer, not their findings. For a spot-check-tier finding,
+read only the `## Index` line — never open the file for it. For a
+top-two-tier finding, or one you're carrying into the report, open just
+its `### <location>` section by heading, never the file whole. If an
+index line is too thin to judge on its own, that is itself the finding.
 
 1. **Scope and model** — two or three sentences: what was audited, what
    domain layer (if any) exists, which dimensions actually applied.

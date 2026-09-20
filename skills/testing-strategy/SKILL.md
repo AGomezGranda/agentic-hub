@@ -1,6 +1,6 @@
 ---
 name: testing-strategy
-description: 'Audit the testing strategy of a service repository against the microservice test pyramid (unit, integration, component, contract, end-to-end) and propose prioritised improvements. Use when asked to review, audit, or improve how a service is tested, where coverage gaps are, whether the test suite is balanced, why the suite is slow or flaky, what tests a service is missing, or how an event-driven or message-consuming service should be tested.'
+description: 'Audit the testing strategy of a service repository against the microservice test pyramid (unit, integration, component, contract, end-to-end) and propose prioritised improvements. Use when asked to review, audit, or improve how a service is tested, where coverage gaps are, whether the test suite is balanced, why the suite is slow or flaky, what tests a service is missing, or how an event-driven or message-consuming service should be tested. Not general code quality unrelated to tests (code-quality-audit) or fixing a single failing test.'
 argument-hint: '[optional path, service name, or area to focus on]'
 ---
 
@@ -8,19 +8,36 @@ argument-hint: '[optional path, service name, or area to focus on]'
 
 Audit how a service repository tests itself, classify what exists against the
 five strategies, find the gaps, and propose changes worth making. Reference
-material: `AUDIT_STRATEGY.md` in this skill directory — a summary of "Testing
-Strategies in a Microservice Architecture"
-(<https://martinfowler.com/articles/microservice-testing/>). Read it before
-judging anything; everything below assumes its vocabulary.
+material: a summary of "Testing Strategies in a Microservice Architecture"
+(<https://martinfowler.com/articles/microservice-testing/>) — read
+`references/overview.md` in this skill directory before judging anything;
+everything below assumes its vocabulary. Each level's own file
+(`references/unit.md`, `references/integration.md`,
+`references/component.md`, `references/contract.md`, `references/e2e.md`,
+`references/async.md`) goes deeper on that level only — read your own
+level's file (yourself, or paste its path into a child's task per §3), not
+all six.
 
 Scope defaults to the current repository. `$ARGUMENTS` may narrow it to a path,
 a single service in a monorepo, or one concern ("why is CI slow", "our
 contract coverage").
 
 **Audit, don't rewrite.** Produce a report. Only write or change tests if the
-user asks for that after seeing it.
+user asks for that after seeing it. (On Pi, dispatching level children to
+`reviewer` enforces this structurally — its toolset has no write
+capability, so it can't rewrite even if asked.)
 
 ## 1. Map the service before looking at the tests
+
+On Pi, for a service large enough to warrant fanning out (see step 3): dispatch
+the map before judging it, one `runs.all([...])` of `repo-scout` children
+— one per layer, one per boundary class, one for the test inventory —
+each returning its own evidence (a short answer plus `file:line` proof, or
+an honest "not found"). Assemble their output into the map yourself.
+Judge nothing at this stage; a scout that volunteers a verdict is out of
+contract. Then fan out the level children with that map pasted into each
+task. Skip this for a small or single-layer service, or for a diff/PR —
+the parent reads the changed files regardless either way.
 
 You cannot judge a test suite without knowing what it has to cover. Establish:
 
@@ -33,12 +50,13 @@ You cannot judge a test suite without knowing what it has to cover. Establish:
   boundary.
 - **Async surface** — if the service consumes or emits events, identify the
   consumers/subscribers, publishers, serializers and any outbox, plus the
-  broker and its delivery semantics (at-least-once? ordered by key?). §9 of the
-  reference applies and the rest of this audit changes shape.
+  broker and its delivery semantics (at-least-once? ordered by key?).
+  `references/async.md` applies and the rest of this audit changes shape.
 - **Consumers** — who calls this service's API *or reads its events*, and are
   they another team?
 - **Criticality and lifespan** — a central business process versus an
-  experiment. This sets how much testing is *worth* it (§7 of the reference).
+  experiment. This sets how much testing is *worth* it
+  (`references/overview.md`).
 
 Read the build config, CI pipeline definitions and test tooling too: runners,
 fixtures, containers, stub servers, coverage config, how and when each suite
@@ -60,9 +78,9 @@ Produce the real distribution:
 |---|---|---|---|
 
 Then, for unit tests specifically, check the **style matches the code type**
-(§2 of the reference): sociable with real collaborators for domain logic,
-solitary with doubles for plumbing and coordination. Mock-heavy domain tests
-and state-based plumbing tests are both findings.
+(see `references/unit.md`): sociable with real collaborators for domain
+logic, solitary with doubles for plumbing and coordination. Mock-heavy
+domain tests and state-based plumbing tests are both findings.
 
 ## 3. Assess each level
 
@@ -70,15 +88,46 @@ Work through these questions. Evidence in the repo, not impressions.
 
 For a service large enough to have several boundaries and an async surface,
 this fans out cleanly: spawn one subagent per applicable level (unit,
-integration, component, contract, e2e, plus async if present) in a single
-`subagent` workflow call, each given the service map and test inventory from
-steps 1-2 and told to answer that level's questions below with `path:line` /
-suite-name evidence. Cap it at 4-5 children — if all levels apply including
-async, merge two adjacent ones into one child's task (e.g. contract+e2e, or
-async folded into its transport's integration level) rather than spawning a
-sixth. Wait for all before step 4. For a small or single-layer service, work
-through the levels yourself — the fan-out overhead isn't worth it for a
-handful of questions.
+integration, component, contract, e2e, plus async if present) — see
+"Fanning out" below for how, per host. A child cannot see this skill or any
+reference file (`inheritSkills: false` on every packaged Pi agent, and no
+skill mechanism at all on Claude Code/Codex), so its task text must paste
+in, verbatim: the service map and test inventory from steps 1-2, that
+level's own questions from below, and the absolute path to that level's own
+file under `references/` in this skill directory (`unit.md`,
+`integration.md`, `component.md`, `contract.md`, `e2e.md`, or `async.md`)
+for background reading — never the whole set. Tell it to return findings in
+the "Child finding schema" below. Wait for all before step 4. For a small
+or single-layer service, work through the levels yourself — the fan-out
+overhead isn't worth it for a handful of questions.
+
+### Fanning out
+
+Bundled agent for this skill: `test-level`; fall back to the packaged
+`reviewer`, then a generic child, if it isn't installed.
+
+<!-- agentic-hub: fanout -->
+
+### Child finding schema
+
+Every child — and every level you assess yourself — reports findings in this
+shape, one block per finding:
+
+```
+severity: P0 | P1 | P2
+confidence: high | medium | low
+location: path:line or suite name
+excerpt: verbatim quoted line(s) or test name, not a paraphrase
+finding: one paragraph — what's wrong and why it matters
+strengths: optional — what's solid here, not just what's wrong
+```
+
+If a child has nothing to report for its level, it says exactly:
+`No issues found. Checked: <what>. Solid because: <one line>.` A bare
+"No issues found." can't feed step 4's "Explicitly not recommended" section
+— the structured version can. If a child's output doesn't parse into this
+shape, keep its raw text as a single P1 finding under its level name rather
+than dropping it.
 
 **Unit** — Is domain logic tested in isolation from I/O at all, or only
 reachable through slower tests? Do coordination tests need so many doubles that
@@ -131,9 +180,29 @@ strongest evidence of where the strategy is actually failing.
 
 ## 4. Report
 
-If levels were fanned out to subagents, open each cited file/suite yourself
-before writing anything down — a subagent's claim is a lead, not confirmed
-evidence. Drop or fix anything that doesn't hold up.
+If levels were fanned out to subagents, verify before writing anything down
+— a subagent's claim is a lead, not confirmed evidence — but not at the same
+depth for every finding:
+
+- **A finding a top-line recommendation rests on** — read the full file or
+  suite. A `sed -n 'X,Yp'` window confirms the quote is real, not that the
+  finding is correct.
+- **A corroborating finding** (supports a recommendation but isn't the
+  reason for it) — a targeted `sed -n 'X,Yp'` / `grep -n` against the cited
+  lines or CI log is enough.
+- **Everything else** — spot-check. (Pi, with `evidence-auditor` installed:
+  hand a finding set to it in bulk instead of doing every targeted read
+  yourself.)
+
+State which tier each finding is in. Drop or fix anything that doesn't hold
+up.
+
+Dispatch level children with `outputMode: "file-only"`. Their chat
+response is a pointer, not their findings. For a spot-check-tier finding,
+read only the `## Index` line — never open the file for it. For a
+top-two-tier finding, or one you're carrying into the report, open just
+its `### <location>` section by heading, never the file whole. If an
+index line is too thin to judge on its own, that is itself the finding.
 
 Write the findings as markdown. Structure:
 
