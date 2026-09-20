@@ -1,6 +1,6 @@
 ---
 name: research-codebase
-description: Research how something in the codebase actually works — fanning out parallel read-only subagents and synthesising the findings into a cited research document. Use when the user needs to understand an area deeply before planning or changing it. Not planning a change (create-plan), reviewing an existing plan (review-plan), or auditing code quality (code-quality-audit).
+description: Research how something in the codebase actually works and synthesise the findings into a cited research document. Use when the user needs to understand an area deeply before planning or changing it. Not planning a change (create-plan), reviewing an existing plan (review-plan), or auditing code quality (code-quality-audit).
 ---
 
 # Research Codebase
@@ -39,7 +39,7 @@ ones ("find X, then analyse X") should be one agent's job, not two.
 
 See "Fanning out" below for how to dispatch children together, per host. A
 child cannot see this skill, so its task text is everything it gets — give
-each child:
+each child its explicit bounded scope plus:
 
 ```
 Read-only investigation. Question: [specific sub-question].
@@ -51,8 +51,11 @@ format in the "Child evidence schema" below rather than guessing. Do not
 modify files.
 ```
 
-If a child's output doesn't parse into that shape, keep its raw text as-is
-under its sub-question rather than dropping it.
+If a child's output doesn't parse into that shape, normalise recoverable
+fields; request one targeted correction if needed. If still unusable, keep its
+raw text as-is under its sub-question with an investigation-failure note and
+mark that sub-question's scope uncovered. Never manufacture a finding or
+severity from missing formatting. Do not retry in a loop.
 
 Two useful shapes beyond "how does this work":
 - **Pattern hunt** — "find existing implementations of a similar thing, with
@@ -79,8 +82,9 @@ If a child cannot resolve its sub-question, it says exactly:
 
 ### Fanning out
 
-Bundled agent for this skill: `repo-scout`; fall back to the packaged
-`scout`, then a generic child, if it isn't installed.
+Bundled agent for this skill: `repo-scout` (takes an explicit bounded scope
+— see `agents/repo-scout.md`); if it isn't installed, use a host-native
+child or investigate yourself.
 
 <!-- agentic-hub: fanout -->
 
@@ -98,28 +102,39 @@ looking:
 - **A corroborating finding** (supports the answer but isn't the reason for
   it) — a targeted `sed -n 'X,Yp'` / `grep -n` against the cited lines is
   enough.
-- **Everything else** — spot-check. (Pi, with `evidence-auditor` installed:
-  hand the finding set to it in bulk instead of doing every targeted read
-  yourself.)
+- **Everything else** — spot-check.
 
 Drop or downgrade anything that doesn't survive its tier's check.
 
-Dispatch children with `outputMode: "file-only"`. Their chat response
-is a pointer, not their findings. For a spot-check-tier finding, read
-only the short-answer line at the top of the child's file — never the evidence
-beneath it. For a top-two-tier finding, or one you're citing in the
-document, read the whole file; a repo-scout child's output is one
-sub-question's evidence, not a multi-finding report, so there's no
-heading to open in isolation. If the short answer is too thin to judge on
-its own, that is itself the finding.
+Candidate summaries and short answers are navigation aids only. Before citing
+a claim, inspect its full rationale and enough original code, callers,
+configuration, or tests to establish it. Expand reads when the contract is
+unclear; whole-file rereads are not automatically required. A checked
+quotation alone is insufficient.
+
+Coverage ledger: list searched areas and sub-questions as checked, not
+applicable with reason, or unverified with reason. An unverified area is never
+described as clean. Scope may be bounded, but say what was excluded or sampled.
+
+Children return through the host's supported result channel (see "Fanning
+out"). For a spot-check-tier finding, the child's short answer suffices —
+don't re-read its evidence just to confirm wording. For a top-two-tier
+finding, or one you're citing in the document, read its full evidence; a
+repo-scout child's output is one sub-question's evidence, not a
+multi-finding report, so there's no heading to open in isolation. If the
+short answer is too thin to judge on its own, probe it yourself rather than
+citing it.
 
 Mark confidence honestly:
 - **verified** — you read the code
 - **inferred** — follows from what you read, but not directly shown
-- **unknown** — nobody found it
+- **unknown** — nobody found it within the searched scope
 
-"Nobody found it" is a genuine finding. Say the thing is absent rather than
-writing around the hole.
+"Nobody found it" is not a claim of absence. Say "not found within
+<searched scope>" unless a bounded exhaustive inventory establishes absence.
+Preserve the open-question harvest below. Never claim dynamic, reflective,
+config-driven, or external callers do not exist merely because no static
+search located them.
 
 ## 5. Harvest the open questions
 
@@ -164,8 +179,10 @@ the difference between *nothing unknown* and *nobody looked*.
 
 ## 6. Write the document
 
-Save to `research/YYYY-MM-DD-description.md` (create the dir if missing; ask if
-the user uses another convention). Frontmatter: `date`, `title`, `question`,
+Save to the existing research directory if the repo has one (check with
+`find . -type d -iname research -not -path '*/node_modules/*'`, alongside
+`plans/`, `docs/`, ADRs); otherwise save to `research/YYYY-MM-DD-description.md`
+(create the dir if missing). Frontmatter: `date`, `title`, `question`,
 `commit` (from `git rev-parse --short HEAD`) so the doc dates itself against a
 moving codebase.
 
@@ -217,5 +234,7 @@ answer, and answering them in the chat is cheaper than another research pass.
 Fold the answers back into the document and strike them off the list.
 
 For follow-ups, append to the same file — a `## Follow-up: {topic}` section
-plus a bumped `date` — rather than starting a new document. Re-run fresh
-research for the follow-up; don't answer it from the existing text.
+plus a bumped `date` — rather than starting a new document. Run narrow
+follow-up checks when prior evidence remains current; restart the whole
+investigation only when the follow-up's scope outgrows what was already
+verified.

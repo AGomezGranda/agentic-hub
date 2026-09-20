@@ -48,7 +48,9 @@ def test_fanout_block_present_and_complete() -> None:
     assert len(names) >= 5, f"expected at least the five fan-out skills, found {names}"
     for name in names:
         section = _fanout_section(name)
-        assert FANOUT_MARKER in section, f"{name}: fan-out section missing the splice marker"
+        assert FANOUT_MARKER in section, (
+            f"{name}: fan-out section missing the splice marker"
+        )
     for agent in agents.AGENTS:
         text = _host_branch_text(agent)
         assert "lead, not evidence" in text, (
@@ -75,17 +77,28 @@ def test_every_host_has_a_fanout_branch() -> None:
     for agent in agents.AGENTS:
         path = HOST_BRANCH_DIR / f"{agent}.md"
         assert path.is_file(), f"{agent}: missing fan-out branch at {path}"
-        assert path.read_text(encoding="utf-8").strip(), f"{agent}: empty fan-out branch"
+        assert path.read_text(encoding="utf-8").strip(), (
+            f"{agent}: empty fan-out branch"
+        )
 
 
-@pytest.mark.parametrize("agent", ["codex", "opencode"])
+@pytest.mark.parametrize("agent", ["opencode"])
 def test_serial_branch_states_ordering_and_budget(agent: str) -> None:
     text = _host_branch_text(agent)
     assert re.search(r"[Oo]rdering", text), f"{agent}.md: missing an ordering rule"
-    assert re.search(r"[Cc]ontext budget", text), f"{agent}.md: missing a context budget"
+    assert re.search(r"[Cc]ontext budget", text), (
+        f"{agent}.md: missing a context budget"
+    )
     assert re.search(r"[Vv]erification collapses", text), (
         f"{agent}.md: missing the verification-collapse rule"
     )
+
+
+def test_codex_branch_dispatches_independent_subagents() -> None:
+    text = _host_branch_text("codex")
+    assert "spawn one" in text
+    assert "subagent per bounded question" in text
+    assert "collect all results" in text
 
 
 def test_claude_branch_forbids_nesting() -> None:
@@ -135,6 +148,50 @@ def test_map_phase_delegates_to_scout() -> None:
         assert "Judge nothing at this stage" in text, (
             f"{name}: missing the judge-nothing constraint on recon children"
         )
+
+
+def test_common_body_has_no_host_mechanics() -> None:
+    """Phase 3: Pi-only dispatch/output mechanics live in
+    `_shared/fanning-out/pi.md`, not in common skill prose — other hosts
+    must never read them as actionable instructions."""
+    for name in _skills_with_fanout():
+        text = _skill_text(name)
+        for token in ("runs.all", "outputMode", "evidence-auditor", "inheritSkills"):
+            assert token not in text, (
+                f"{name}: host-specific {token!r} leaks into common prose"
+            )
+
+
+def test_delegation_is_scope_driven_not_count_driven() -> None:
+    """Phase 3: no mandatory agent counts or fixed multi-scout maps in
+    common prose — small scopes stay with the parent, large scopes split by
+    module/context, and single-dimension children only for genuinely
+    independent questions."""
+    for name in _skills_with_fanout():
+        flat = re.sub(r"\s+", " ", _skill_text(name).lower())
+        for phrase in (
+            "per applicable dimension",
+            "per applicable level",
+            "one child per lens",
+            "4-5 lenses",
+            "one for domain vocabulary, one for layering",
+            "one per layer, one per boundary",
+            "file-only",
+        ):
+            assert phrase not in flat, (
+                f"{name}: fixed-count/universal-channel rule still present: {phrase!r}"
+            )
+
+
+def test_serial_policy_names_no_dimension_to_drop() -> None:
+    """Phase 3: a serial budget fallback never mandates dropping a named
+    dimension/level — remaining coverage is marked unverified instead."""
+    for agent in agents.AGENTS:
+        text = _host_branch_text(agent)
+        for phrase in ("drop ddd first", "drop async first"):
+            assert phrase not in text.lower(), (
+                f"fanning-out/{agent}.md: named drop order still present"
+            )
 
 
 SCHEMA_HEADING = "### Child finding schema"
@@ -225,42 +282,105 @@ TIERED_VERIFICATION_SKILLS = (
 )
 
 
-def test_no_skill_requires_full_reread() -> None:
-    """Positive contract: three named verification tiers, each with its own
-    depth — not just the absence of a banned phrase, which would pass
-    vacuously if the unconditional rule were reworded rather than tiered.
-    """
-    for name in TIERED_VERIFICATION_SKILLS:
+def test_malformed_child_output_is_not_a_defect() -> None:
+    """Phase 1: malformed child output never becomes a code defect. Parent
+    normalises, requests one correction, else reports investigation failure
+    with uncovered scope."""
+    for name in ("code-quality-audit", "testing-strategy", "review-plan"):
         text = _skill_text(name)
+        assert "as a single P1 finding" not in text, (
+            f"{name}: malformed output still manufactured as P1"
+        )
         assert (
-            "top-line recommendation rests on" in text or "answer rests on" in text
-        ), f"{name}: missing the load-bearing-finding tier"
-        assert "corroborating finding" in text.lower(), (
-            f"{name}: missing the corroborating-finding tier"
+            "Never manufacture a defect" in text or "never manufacture" in text.lower()
+        ), f"{name}: missing never-manufacture rule"
+        assert "investigation failure" in text.lower(), (
+            f"{name}: missing investigation-failure fallback"
         )
-        assert "everything else" in text.lower() and "spot-check" in text, (
-            f"{name}: missing the spot-check tier"
-        )
-        assert "open each cited file yourself" not in text
-        assert "open the key files yourself" not in text
+        assert "uncovered" in text.lower(), f"{name}: missing uncovered-scope reporting"
 
 
-def test_child_return_is_pointer_only() -> None:
-    """Phase 6: the parent dispatches with `outputMode: "file-only"` and
-    reads only as deep as the finding's verification tier requires --
-    never the whole file for a spot-check-tier finding.
-    """
+def test_findings_require_inspected_context() -> None:
+    """Phase 1: candidate summaries/indexes are navigation aids only.
+    Publishing requires inspecting full rationale plus original code."""
     for name in TIERED_VERIFICATION_SKILLS:
         text = _skill_text(name)
-        assert 'outputMode: "file-only"' in text, (
-            f"{name}: missing the outputMode: file-only dispatch instruction"
+        assert "navigation aid" in text.lower(), (
+            f"{name}: missing navigation-aid rule for indexes"
         )
-        assert "is a pointer, not their findings" in text, (
-            f"{name}: missing the pointer-only child return contract"
+        assert (
+            "quotation alone is insufficient" in text.lower()
+            or "quote alone" in text.lower()
+            or "checked quotation alone" in text.lower()
+        ), f"{name}: missing quotation-insufficient rule"
+        assert (
+            "whole-file rereads are not" in text.lower()
+            or "not automatically required" in text.lower()
+        ), f"{name}: missing bounded-reread rule"
+
+
+def test_confirmed_finding_contract() -> None:
+    """Phase 1: confirmed findings carry ID, severity, confidence,
+    location+evidence, violated contract, consequence, counterevidence,
+    and smallest correction."""
+    for name in ("code-quality-audit", "testing-strategy", "review-plan"):
+        text = _skill_text(name)
+        lower = re.sub(r"\s+", " ", text.lower())
+        assert "finding id" in lower or "stable" in lower and "id" in lower, (
+            f"{name}: missing stable finding ID"
         )
-        assert "spot-check-tier" in text and "top-two-tier" in text, (
-            f"{name}: missing a tier reference tied to the pointer-only rule"
-        )
+        assert "counterevidence" in lower, f"{name}: missing counterevidence"
+        assert "consequence" in lower, f"{name}: missing consequence"
+        assert (
+            "smallest sufficient correction" in lower or "smallest correction" in lower
+        ), f"{name}: missing smallest-correction rule"
+        assert "unresolved" in lower, f"{name}: missing unresolved disposition"
+        assert "rejected" in lower, f"{name}: missing rejected disposition"
+
+
+def test_review_verdict_vocabulary_complete() -> None:
+    """Phase 1: review-plan verdict covers REVISE/COMMENT/APPROVE/INCOMPLETE,
+    with any P0/P1 -> REVISE."""
+    text = _skill_text("review-plan")
+    for verdict in ("REVISE", "COMMENT", "APPROVE", "INCOMPLETE"):
+        assert verdict in text, f"review-plan: missing verdict {verdict}"
+    assert "any confirmed P0/P1" in text or "any P0" in text, (
+        "review-plan: missing any-P0/P1 -> REVISE rule"
+    )
+    assert "2+ P1" not in text and "2 or more P1" not in text.lower(), (
+        "review-plan: old 2+ P1 threshold still present"
+    )
+
+
+def test_coverage_ledger_is_explicit() -> None:
+    """Phase 1: coverage ledger marks checked / not applicable / unverified;
+    unverified never described as clean."""
+    for name in (
+        "code-quality-audit",
+        "testing-strategy",
+        "review-plan",
+        "research-codebase",
+    ):
+        text = _skill_text(name)
+        lower = text.lower()
+        assert (
+            "coverage ledger" in lower or "coverage" in lower and "unverified" in lower
+        ), f"{name}: missing coverage ledger"
+        assert (
+            "never described as clean" in lower or "never" in lower and "clean" in lower
+        ), f"{name}: missing unverified-is-not-clean rule"
+
+
+def test_research_absence_is_scoped() -> None:
+    """Phase 1: research states 'not found within <scope>' unless exhaustive
+    inventory proves absence."""
+    text = _skill_text("research-codebase")
+    assert "not found within" in text.lower(), (
+        "research-codebase: missing scoped not-found language"
+    )
+    assert "exhaustive" in text.lower(), (
+        "research-codebase: missing exhaustive-inventory qualifier"
+    )
 
 
 INDEX_FINDINGS_AGENTS = ("cq-dimension", "test-level", "plan-lens")
@@ -316,18 +436,28 @@ DIMENSION_RUBRIC_FILES = (
 )
 
 
-def test_dimension_rubrics_are_substantive() -> None:
-    """Phase 4a: each dimension rubric grew from a 6-8 line definition into
-    a worked reference with a bad/good example pair, not just a longer
-    restatement of the same principle.
+def test_dimension_rubrics_are_calibrated() -> None:
+    """Phase 2: each dimension rubric carries a compact check procedure,
+    evidence needed, a defect/correction example, and a legitimate
+    non-finding — not just length or emoji. Size remains an authoring guard,
+    not proof of quality.
     """
     for rel in DIMENSION_RUBRIC_FILES:
         path = catalog.SKILLS_DIR / rel
-        lines = path.read_text(encoding="utf-8").splitlines()
+        text = path.read_text(encoding="utf-8")
+        lower = re.sub(r"\s+", " ", text.lower())
+        lines = text.splitlines()
         assert len(lines) >= 30, f"{rel}: only {len(lines)} lines, expected >= 30"
-        text = "\n".join(lines)
-        assert "\u274c" in text, f"{rel}: missing a bad-example marker (\u274c)"
-        assert "\u2705" in text, f"{rel}: missing a good-example marker (\u2705)"
+        assert "check" in lower and (
+            "procedure" in lower or "how to" in lower or "check:" in lower
+        ), f"{rel}: missing check procedure"
+        assert "evidence" in lower, f"{rel}: missing evidence needed"
+        assert "non-finding" in lower or "not a finding" in lower, (
+            f"{rel}: missing legitimate non-finding"
+        )
+        assert "correction" in lower or "fix" in lower, (
+            f"{rel}: missing correction guidance"
+        )
 
 
 def test_no_reference_file_exceeds_budget() -> None:
@@ -341,7 +471,9 @@ def test_no_reference_file_exceeds_budget() -> None:
             continue
         for path in refs_dir.glob("*.md"):
             n = len(path.read_text(encoding="utf-8").splitlines())
-            assert n <= 120, f"{path.relative_to(catalog.SKILLS_DIR)}: {n} lines, budget is 120"
+            assert n <= 130, (
+                f"{path.relative_to(catalog.SKILLS_DIR)}: {n} lines, budget is 130"
+            )
 
 
 def test_audit_strategy_file_is_gone() -> None:

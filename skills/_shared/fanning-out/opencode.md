@@ -1,13 +1,11 @@
-**No mechanism confirmed (OpenCode)** — before falling back to the serial
-procedure below, check whether `~/.config/opencode/agent/` exists and
-OpenCode has a subagent mechanism on this machine. If it does, prefer it
-— dispatch children the same way this skill's Pi/Claude Code branches do,
-one message/call per batch, not a loop — and say in one line that you
-used it instead of the serial path below. If it doesn't, or you can't
-tell, proceed exactly as Codex does. This is a scoping instruction for
-this one host, not a repo-wide hedge: OpenCode's fan-out capability is
-unconfirmed from the machine these skills were written on, not assumed
-absent.
+**OpenCode** — first check which dispatch tools this environment actually
+documents. If a subagent mechanism is available, dispatch children the same
+way this skill's Pi/Claude Code branches do — one message/call per batch,
+not a loop — and say in one line that you used it instead of the serial
+path below. A directory's presence (e.g. an `agent/` dir) is not evidence
+of a callable subagent API. If no mechanism is documented, or you can't
+tell, proceed with the serial procedure below. Never emulate Pi/Claude
+calls (`runs.all`, `Agent`/`Task` batch shapes) on this host.
 
 You are both investigator and verifier for every item this skill would
 otherwise fan out to a child (a dimension, a test level, a review lens,
@@ -23,7 +21,7 @@ is a real procedure, not an apology for missing a mechanism:
 - **Context budget.** Finish and record one item's findings — in the
   finding schema below — before opening the next item's files. Never hold
   two items' file sets in context at the same time: read, judge, write
-  down, close, then move to the next. A serial run that keeps every file
+  down, then move to the next. A serial run that keeps every file
   it has ever opened resident is the failure this rule exists to prevent.
 - **Verification collapses to one pass.** The tiered verification this
   skill describes exists for a parent judging *someone else's* claims —
@@ -33,12 +31,8 @@ is a real procedure, not an apology for missing a mechanism:
   number) as you go, and do not re-open files at report-writing time to
   re-confirm what you already saw first-hand.
 - **What to drop when it doesn't fit.** A serial run of every item at full
-  depth may not fit in one context. If it won't, say so and drop items in
-  a named order rather than truncating silently: for code-quality-audit,
-  drop DDD first (it only applies where a domain layer exists), then
-  KISS, then the rest in the skill's own listed order; for
-  testing-strategy, drop async first (only applies with an async
-  surface), then contract, then the rest in listed order; for
-  review-plan, drop the lens the user marked optional, or the least
-  central one, first. Name what you dropped in the final report — never
-  truncate without saying so.
+  depth may not fit in one context. If it won't, say so and drop the
+  lowest-risk, least-central items first rather than truncating silently —
+  never drop a dimension, level, or lens by name as a standing policy. Name
+  what you dropped and mark it unverified in the final report, with the
+  next work to cover it.

@@ -58,7 +58,13 @@ Worked good/bad pairs for each rule above: `references/examples.md`.
 
 5. Re-run the step-2 search and inspect the full diff: every changed line must be comment/docstring prose, its deletion, or the blank-line collapse from step 4. Restore any accidental code or formatting change without disturbing pre-existing edits. If a change can't be proven prose-only, stop and flag it instead of proceeding.
 
-6. Discover and run validation per project: check `CLAUDE.md`, `Makefile`, `pyproject.toml`, `package.json`, and `./go` for lint/format/type-check/test commands (e.g. `uv run ruff check`, `uv run ruff format --check`, `uv run mypy`, `uv run pytest`, `./go app.lint.check`, `make lint`). Run only those that exist; note any that are missing. Run broader repository tests when the cleanup touches unusually broad areas or the user requests full validation.
+6. Run validation scoped to the edit: comment/docstring-prose changes need
+only the project's lint/format checks (e.g. `uv run ruff check`, `uv run ruff
+format --check`). Run the broader test suite only when the cleanup touches
+docstrings consumed at runtime, unusually broad areas, or the user requests
+full validation. Discover commands from `CLAUDE.md`, `Makefile`,
+`pyproject.toml`, `package.json`, or `./go`; run only those that exist and
+note any that are missing.
 
 7. Report the paths cleaned, validation results, and any intentionally retained or flagged comments with their reason (stale-but-unverifiable, ticket text inside executable data/test expectations, generated/vendored code skipped, etc.). If more than ~50 files were touched, summarize by directory/count with notable examples.
 

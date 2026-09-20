@@ -36,5 +36,16 @@ Two warnings the deck is explicit about:
 
 ## Audit heuristic **[not in source]**
 
-Mock-heavy tests over domain logic invert the table above and usually
-indicate the domain is entangled with plumbing.
+Check procedure: name the failure mode missed or maintenance cost incurred
+before calling a style choice a finding. Evidence needed: the test's
+path:line, what it mocks, and the bug class that ships or the refactor cost
+paid because of it.
+
+Mock-heavy tests over domain logic that hide calculation/state bugs, or
+brittle doubles that break on every unrelated refactor, are findings. Mocks,
+sociable vs solitary choice, and suite proportions are context-sensitive —
+a plumbing-heavy service with thin unit coverage is correct when component
+tests carry the load. State-based plumbing assertions are legitimate when
+they verify the boundary (mapping, serialization, error classification).
+A legitimate non-finding: solitary coordination tests whose doubles make
+message-passing assertions repeatable.

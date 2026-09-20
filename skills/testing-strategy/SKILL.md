@@ -23,21 +23,20 @@ a single service in a monorepo, or one concern ("why is CI slow", "our
 contract coverage").
 
 **Audit, don't rewrite.** Produce a report. Only write or change tests if the
-user asks for that after seeing it. (On Pi, dispatching level children to
-`reviewer` enforces this structurally — its toolset has no write
-capability, so it can't rewrite even if asked.)
+user asks for that after seeing it. (Dispatching level children to a
+read-only child enforces this structurally where the host supports it —
+without a write capability it can't rewrite even if asked.)
 
 ## 1. Map the service before looking at the tests
 
-On Pi, for a service large enough to warrant fanning out (see step 3): dispatch
-the map before judging it, one `runs.all([...])` of `repo-scout` children
-— one per layer, one per boundary class, one for the test inventory —
-each returning its own evidence (a short answer plus `file:line` proof, or
-an honest "not found"). Assemble their output into the map yourself.
+One inventory pass suffices for the map: ask a `repo-scout` for layers,
+boundary classes, and the test inventory — or gather them yourself for a
+small or single-layer service — each with evidence (a short answer plus
+`file:line` proof, or an honest "not found"). Assemble the map yourself.
 Judge nothing at this stage; a scout that volunteers a verdict is out of
-contract. Then fan out the level children with that map pasted into each
-task. Skip this for a small or single-layer service, or for a diff/PR —
-the parent reads the changed files regardless either way.
+contract. Then delegate per step 3 with that map pasted into each task.
+Skip separate mapping for a small service or a diff/PR — read the changed
+files directly either way.
 
 You cannot judge a test suite without knowing what it has to cover. Establish:
 
@@ -79,32 +78,42 @@ Produce the real distribution:
 
 Then, for unit tests specifically, check the **style matches the code type**
 (see `references/unit.md`): sociable with real collaborators for domain
-logic, solitary with doubles for plumbing and coordination. Mock-heavy
-domain tests and state-based plumbing tests are both findings.
+logic, solitary with doubles for plumbing and coordination. A style mismatch
+is a finding only with the failure mode missed or maintenance cost incurred —
+e.g. mock-heavy domain tests that hide a calculation bug, or brittle doubles
+that break on every refactor. State-based plumbing assertions are legitimate
+when they verify the boundary (mapping, error classification). Mocks,
+sociable/solitary choice, integration counts, and pyramid proportions are
+context-sensitive; missing runtime/flakiness history is unknown, not an
+invented statistic.
 
 ## 3. Assess each level
 
 Work through these questions. Evidence in the repo, not impressions.
 
 For a service large enough to have several boundaries and an async surface,
-this fans out cleanly: spawn one subagent per applicable level (unit,
-integration, component, contract, e2e, plus async if present) — see
-"Fanning out" below for how, per host. A child cannot see this skill or any
-reference file (`inheritSkills: false` on every packaged Pi agent, and no
-skill mechanism at all on Claude Code/Codex), so its task text must paste
-in, verbatim: the service map and test inventory from steps 1-2, that
-level's own questions from below, and the absolute path to that level's own
-file under `references/` in this skill directory (`unit.md`,
-`integration.md`, `component.md`, `contract.md`, `e2e.md`, or `async.md`)
-for background reading — never the whole set. Tell it to return findings in
-the "Child finding schema" below. Wait for all before step 4. For a small
+delegate to keep reads independent: prefer splitting by module/bounded
+context when per-level children would re-read the same suites, or one child
+for a single level (unit, integration, component, contract, e2e, plus
+async if present) when that level's question is genuinely independent — see
+"Fanning out" below for how, per host. Each child's task text must carry
+everything it needs — don't depend on inherited context: the service map
+and test inventory from steps 1-2, that level's own questions from below,
+the absolute path to that level's own file under `references/` in this
+skill directory (`unit.md`, `integration.md`, `component.md`,
+`contract.md`, `e2e.md`, or `async.md`) for background reading — never the
+whole set — plus the output/evidence rules from "Child finding schema"
+below and a read-only restriction. Tell it to return findings in the "Child
+finding schema" below. Wait for all before step 4. For a small
 or single-layer service, work through the levels yourself — the fan-out
 overhead isn't worth it for a handful of questions.
 
 ### Fanning out
 
-Bundled agent for this skill: `test-level`; fall back to the packaged
-`reviewer`, then a generic child, if it isn't installed.
+Bundled agent for this skill: `test-level` (takes an explicit bounded scope
+and one or more applicable levels — see `agents/test-level.md`); if it
+isn't installed, use a host-native child or work through the level
+yourself.
 
 <!-- agentic-hub: fanout -->
 
@@ -114,20 +123,29 @@ Every child — and every level you assess yourself — reports findings in this
 shape, one block per finding:
 
 ```
+finding ID: <stable ID, unique per finding even at the same location>
 severity: P0 | P1 | P2
 confidence: high | medium | low
 location: path:line or suite name
 excerpt: verbatim quoted line(s) or test name, not a paraphrase
+violated contract: the testing obligation or invariant broken
+consequence: concrete failure mode missed or maintenance cost incurred
+counterevidence considered: what was checked that could disprove it
+correction: smallest sufficient change
 finding: one paragraph — what's wrong and why it matters
 strengths: optional — what's solid here, not just what's wrong
 ```
+
+Keep each block compact; these are fields, not verbose paragraphs.
 
 If a child has nothing to report for its level, it says exactly:
 `No issues found. Checked: <what>. Solid because: <one line>.` A bare
 "No issues found." can't feed step 4's "Explicitly not recommended" section
 — the structured version can. If a child's output doesn't parse into this
-shape, keep its raw text as a single P1 finding under its level name rather
-than dropping it.
+shape, normalise recoverable fields; request one targeted correction if
+needed. If still unusable, report an investigation failure with its uncovered
+scope. Never manufacture a defect or severity from missing formatting. Do not
+retry in a loop.
 
 **Unit** — Is domain logic tested in isolation from I/O at all, or only
 reachable through slower tests? Do coordination tests need so many doubles that
@@ -190,19 +208,26 @@ depth for every finding:
 - **A corroborating finding** (supports a recommendation but isn't the
   reason for it) — a targeted `sed -n 'X,Yp'` / `grep -n` against the cited
   lines or CI log is enough.
-- **Everything else** — spot-check. (Pi, with `evidence-auditor` installed:
-  hand a finding set to it in bulk instead of doing every targeted read
-  yourself.)
+- **Everything else** — spot-check.
 
 State which tier each finding is in. Drop or fix anything that doesn't hold
 up.
 
-Dispatch level children with `outputMode: "file-only"`. Their chat
-response is a pointer, not their findings. For a spot-check-tier finding,
-read only the `## Index` line — never open the file for it. For a
-top-two-tier finding, or one you're carrying into the report, open just
-its `### <location>` section by heading, never the file whole. If an
-index line is too thin to judge on its own, that is itself the finding.
+Candidate summaries and indexes are navigation aids only. Before publishing
+a finding, inspect its full rationale and enough original code, callers,
+configuration, or tests to establish the claim. Expand reads when the
+contract is unclear; whole-file rereads are not automatically required.
+A checked quotation alone is insufficient.
+
+Keep an internal candidate disposition: confirmed, rejected, or unresolved.
+Only confirmed findings enter the prioritised defect list. Unresolved
+concerns name the missing evidence and next probe. Do not publish a dump of
+rejected candidates.
+
+Coverage ledger: list in-scope areas and applicable levels as checked,
+not applicable with reason, or unverified with reason. An unverified area is
+never described as clean. Scope may be bounded, but say what was excluded or
+sampled.
 
 Write the findings as markdown. Structure:
 
@@ -210,20 +235,36 @@ Write the findings as markdown. Structure:
    sentences.
 2. **Current distribution** — the table from step 2, plus how it departs from a
    pyramid, with the actual numbers and runtimes.
-3. **Findings** — each one: what is wrong, the evidence (`path:line`, suite
-   names, CI timings), and what it costs (a class of bug that ships, slow
-   feedback, flakiness, maintenance). Order by cost, worst first.
+3. **Findings** — one entry per confirmed finding with its finding ID,
+   severity, confidence, location and evidence, violated contract,
+   consequence, counterevidence considered, and smallest sufficient
+   correction. Rank by severity, then consequence/confidence; levels are tags
+   or secondary grouping. State effort separately.
 4. **Recommendations** — prioritised. For each: the change, the level it
    belongs at, why that level, and rough effort. Separate "do now" from "worth
    doing" from "only if this service grows".
 5. **Explicitly not recommended** — what a naive reading of the pyramid would
-   suggest here and why it's wrong for this service. Include this section; it
-   keeps the audit honest.
+   suggest here and why it's wrong for this service, with a bounded claim and
+   evidence; there is no quota for strengths or defects. Include this section;
+   it keeps the audit honest.
+6. **Coverage and unresolved** — the ledger plus any unresolved concerns with
+   missing evidence and next probe.
 
 ## Judgement rules
 
 - **Cite evidence.** Every finding points at a file, a suite, a CI job, or an
   incident. No generic testing advice that would read the same for any repo.
+  Positive findings require a bounded claim and evidence; there is no quota
+  for strengths or defects.
+- **Severity is consequence-based.** P0 = critical failure requiring immediate
+  action; P1 = substantial correctness/design consequence requiring correction
+  before proceeding with the affected change; P2 = material, nonblocking
+  maintainability or reliability improvement. Preference-only suggestions are
+  not defects. Confidence is independent of severity; low-confidence concerns
+  remain unresolved rather than being inflated or disguised as P2.
+- **Treat repository conventions as context.** Group a systemic problem once
+  with representative instances and affected scope, while keeping independent
+  root causes separate. Consistency does not excuse harmful practices.
 - **Push tests down, but only where they fit.** The value of moving a test down
   the pyramid is faster feedback and fewer reasons to fail — not purity. Say
   which of those you are buying.
@@ -240,5 +281,5 @@ Write the findings as markdown. Structure:
   broker with no idempotency, redelivery or poison-message test has a hole that
   no amount of unit coverage compensates for, because the failures are silent
   and surface as corrupt data rather than red builds.
-- **Say when it's fine.** If a level is genuinely well covered, record that in
-  one line and move on. An audit that finds problems everywhere is not credible.
+- **Say when it's fine, with evidence.** If a level is genuinely well covered,
+  record that in one line with a bounded claim and move on.

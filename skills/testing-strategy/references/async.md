@@ -86,13 +86,25 @@ aggregations flake against a live clock.
 
 ## Audit heuristics
 
-- No idempotency test on a consumer of an at-least-once broker is a
-  finding regardless of how good the rest of the suite is.
-- Tests that `sleep` to wait for an event are a finding: future flakes and
-  runtime budget.
-- An in-memory broker with no real-broker integration suite means offsets,
-  redelivery and rebalancing are untested everywhere.
-- Consumers/producers tested only through E2E means schema breakage is
-  caught after deployment, not before.
-- An outbox or dual-write with no crash-case test is silent divergence
-  waiting to happen.
+Check procedure: tie each expectation to the actual delivery and compatibility
+contracts (broker semantics, schema registry mode, consumer dependencies) and
+to existing alternative coverage. Evidence needed: the consumer/publisher
+path:line, the contract it relies on, and the failure the missing test permits.
+
+- Missing idempotency coverage on a consumer of an at-least-once broker is a
+  finding where no alternative (dedupe table, idempotent sink, exactly-once
+  config) covers duplicate delivery — duplicate delivery risk stays explicit
+  either way.
+- Tests that `sleep` to wait for an event are a finding only with the flake or
+  budget cost shown; where no runtime history exists, mark frequency unknown
+  rather than inventing a statistic. Polling with a bounded timeout is the
+  correction.
+- An in-memory broker with no real-broker integration suite leaves offsets,
+  redelivery and rebalancing untested — a finding unless a containerised
+  broker suite or equivalent covers them.
+- Consumers/producers tested only through E2E catch schema breakage after
+  deployment, not before — a finding where no message-contract suite covers
+  the fields the consumer depends on.
+- An outbox or dual-write with no crash-case test is silent divergence waiting
+  to happen: test the crash between writing state and publishing the event.
+  Keep this risk explicit even when other async coverage looks good.

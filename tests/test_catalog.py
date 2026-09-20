@@ -68,9 +68,10 @@ def test_real_skills_corpus_has_valid_frontmatter() -> None:
         text = (catalog.SKILLS_DIR / name / "SKILL.md").read_text()
         fm, _ = catalog.parse_frontmatter(text)
         description = fm.get("description", "")
-        assert description.strip() not in (">", "|"), (
-            f"{name}: description is a broken folded/literal YAML block"
-        )
+        assert description.strip() not in (
+            ">",
+            "|",
+        ), f"{name}: description is a broken folded/literal YAML block"
         assert description, f"{name}: missing description"
         assert "\n" not in description, (
             f"{name}: description spans multiple lines, not a single-line scalar"

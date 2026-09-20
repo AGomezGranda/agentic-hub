@@ -5,6 +5,32 @@ import pytest
 from agentic_hub import agents, catalog
 
 
+def test_codex_uses_native_skill_location() -> None:
+    target, mode = agents.AGENTS["codex"]
+    assert target == Path.home() / ".agents/skills"
+    assert mode == "symlink"
+
+
+def test_codex_installs_native_skill_with_host_branch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    src, fake_agents = setup_agents(tmp_path, monkeypatch)
+    fake_agents["codex"] = (tmp_path / "codex-skills", "symlink")
+    make_fanout_skill(src, "demo")
+    make_fanout_branches(src, ("codex",))
+    reference = src / "demo" / "references"
+    reference.mkdir()
+    (reference / "guide.md").write_text("Reference content.\n")
+
+    assert agents.install_one("codex", "demo")
+    installed = fake_agents["codex"][0] / "demo"
+    skill_text = (installed / "SKILL.md").read_text()
+    assert skill_text.startswith("---\nname: demo\n")
+    assert "[codex branch content]" in skill_text
+    assert (installed / "references").resolve() == reference.resolve()
+    assert agents.status("codex", "demo") == "linked"
+
+
 def make_skill(src_dir: Path, name: str) -> Path:
     d = src_dir / name
     d.mkdir(parents=True)
@@ -68,7 +94,7 @@ def test_install_symlinks_native_agents(
         assert agents.status(agent, "demo") == "linked"
 
 
-def test_install_flattens_codex_prompt(
+def test_legacy_install_flattens_codex_prompt(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     src, fake_agents = setup_agents(tmp_path, monkeypatch)
@@ -87,6 +113,7 @@ def test_remove_only_deletes_our_own(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     src, fake_agents = setup_agents(tmp_path, monkeypatch)
+    fake_agents["codex"] = (tmp_path / "codex-skills", "symlink")
     make_skill(src, "demo")
     agents.install_one("claude", "demo")
     agents.install_one("codex", "demo")
@@ -102,7 +129,7 @@ def test_remove_only_deletes_our_own(
     assert agents.remove_one("claude", "demo")
     assert agents.remove_one("codex", "demo")
     assert not (fake_agents["claude"][0] / "demo").exists()
-    assert not (fake_agents["codex"][0] / "demo.md").exists()
+    assert not (fake_agents["codex"][0] / "demo").exists()
 
     assert stray_link.is_symlink()  # untouched
     assert stray_prompt.read_text() == "hand-written, not ours\n"
@@ -114,7 +141,7 @@ def test_remove_only_deletes_our_own(
     assert stray_prompt.exists()
 
 
-def test_codex_flatten_inlines_sibling_markdown(
+def test_legacy_codex_flatten_inlines_sibling_markdown(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     src, fake_agents = setup_agents(tmp_path, monkeypatch)
@@ -127,7 +154,7 @@ def test_codex_flatten_inlines_sibling_markdown(
     assert "Reference content." in text
 
 
-def test_codex_flatten_inlines_nested_references_dir(
+def test_legacy_codex_flatten_inlines_nested_references_dir(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     src, fake_agents = setup_agents(tmp_path, monkeypatch)
@@ -143,7 +170,7 @@ def test_codex_flatten_inlines_nested_references_dir(
     assert text.index("references/a.md") < text.index("references/b.md")
 
 
-def test_codex_flatten_skips_scripts_and_assets(
+def test_legacy_codex_flatten_skips_scripts_and_assets(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     src, fake_agents = setup_agents(tmp_path, monkeypatch)
@@ -158,7 +185,7 @@ def test_codex_flatten_skips_scripts_and_assets(
     assert "Should not appear" not in text
 
 
-def test_codex_flatten_unchanged_without_siblings(
+def test_legacy_codex_flatten_unchanged_without_siblings(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     src, fake_agents = setup_agents(tmp_path, monkeypatch)
@@ -169,7 +196,7 @@ def test_codex_flatten_unchanged_without_siblings(
     assert "## Bundled reference:" not in text
 
 
-def test_codex_flatten_skips_non_utf8_sibling(
+def test_legacy_codex_flatten_skips_non_utf8_sibling(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     src, fake_agents = setup_agents(tmp_path, monkeypatch)
@@ -181,7 +208,7 @@ def test_codex_flatten_skips_non_utf8_sibling(
     assert "## Bundled reference: BAD.md" not in text
 
 
-def test_codex_install_raises_on_folded_description(
+def test_legacy_codex_install_raises_on_folded_description(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     src, fake_agents = setup_agents(tmp_path, monkeypatch)
@@ -195,7 +222,7 @@ def test_codex_install_raises_on_folded_description(
         agents.install_one("codex", "broken")
 
 
-def test_codex_status_detects_stale_after_source_edit(
+def test_legacy_codex_status_detects_stale_after_source_edit(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     src, fake_agents = setup_agents(tmp_path, monkeypatch)
@@ -218,6 +245,7 @@ def test_splice_injects_only_host_branch(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     src, fake_agents = setup_agents(tmp_path, monkeypatch)
+    fake_agents["codex"] = (tmp_path / "codex-skills", "symlink")
     make_fanout_skill(src, "demo")
     make_fanout_branches(src, ("pi", "claude", "opencode", "codex"))
 
@@ -228,7 +256,7 @@ def test_splice_injects_only_host_branch(
     assert "[pi branch content]" in pi_text
     assert "[codex branch content]" not in pi_text
 
-    codex_text = (fake_agents["codex"][0] / "demo.md").read_text()
+    codex_text = (fake_agents["codex"][0] / "demo" / "SKILL.md").read_text()
     assert "[codex branch content]" in codex_text
     assert "[pi branch content]" not in codex_text
 
@@ -318,8 +346,11 @@ def test_remove_leaves_directory_if_something_unowned_remains(
     assert (tp / "stray.txt").exists()
 
 
-def test_codex_prompt_keeps_all_test_levels_after_reference_split() -> None:
-    """Phase 4b split AUDIT_STRATEGY.md into references/*.md, one file per
+def test_legacy_codex_prompt_keeps_all_test_levels_after_reference_split() -> None:
+    """Legacy: covers the retired flattened Codex prompt format (mode
+    "codex"), not the current native skill-directory install. Kept as a
+    regression guard for `_codex_body` inlining, which still stamps the
+    spliced-SKILL.md marker hash.
     level. Codex has no fan-out, so its flattened prompt must still see
     every level -- `_bundled_references` inlines the whole directory
     regardless of how many files it's split into, so no level should have
@@ -335,3 +366,63 @@ def test_codex_prompt_keeps_all_test_levels_after_reference_split() -> None:
         "# Async and event-driven services",
     ):
         assert heading in body, f"missing level section: {heading!r}"
+
+
+NATIVE_HOSTS = ("pi", "claude", "codex", "opencode")
+
+
+def setup_native_agents(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[Path, dict[str, tuple[Path, agents.Mode]]]:
+    """All four hosts with their current production (native-directory) layout:
+    every base mode is symlink, so a fan-out skill installs spliced."""
+    src = tmp_path / "skills"
+    src.mkdir()
+    monkeypatch.setattr(catalog, "SKILLS_DIR", src)
+    fake_agents: dict[str, tuple[Path, agents.Mode]] = {
+        agent: (tmp_path / f"{agent}-skills", "symlink") for agent in NATIVE_HOSTS
+    }
+    monkeypatch.setattr(agents, "AGENTS", fake_agents)
+    return src, fake_agents
+
+
+@pytest.mark.parametrize("agent", NATIVE_HOSTS)
+def test_native_host_splice_lifecycle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, agent: str
+) -> None:
+    """Phase 3: every host installs fan-out skills natively — only that
+    host's dispatch branch is generated, common rules survive the splice,
+    linked references stay readable, a host-branch edit marks output stale,
+    reinstall updates it, and unrelated files survive removal."""
+    src, fake_agents = setup_native_agents(tmp_path, monkeypatch)
+    skill_dir = make_fanout_skill(src, "demo")
+    skill_md = skill_dir / "SKILL.md"
+    skill_md.write_text(skill_md.read_text() + "\nCommon rule: lead, not evidence.\n")
+    reference = skill_dir / "references"
+    reference.mkdir()
+    (reference / "guide.md").write_text("Reference content.\n")
+    make_fanout_branches(src, NATIVE_HOSTS)
+
+    assert agents.install_one(agent, "demo")
+    tp = fake_agents[agent][0] / "demo"
+    skill_text = (tp / "SKILL.md").read_text()
+    assert f"[{agent} branch content]" in skill_text
+    for other in NATIVE_HOSTS:
+        if other != agent:
+            assert f"[{other} branch content]" not in skill_text
+    assert "Common rule: lead, not evidence." in skill_text
+    assert (tp / "references" / "guide.md").read_text() == "Reference content.\n"
+    assert agents.status(agent, "demo") == "linked"
+
+    branch = src / "_shared" / "fanning-out" / f"{agent}.md"
+    branch.write_text(branch.read_text() + "Edited branch.\n")
+    assert agents.status(agent, "demo") == "stale"
+
+    assert agents.install_one(agent, "demo")
+    assert "Edited branch." in (tp / "SKILL.md").read_text()
+    assert agents.status(agent, "demo") == "linked"
+
+    (tp / "stray.txt").write_text("not ours\n")
+    assert agents.remove_one(agent, "demo")
+    assert not (tp / "SKILL.md").exists()
+    assert (tp / "stray.txt").read_text() == "not ours\n"

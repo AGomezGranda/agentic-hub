@@ -16,22 +16,38 @@ description: Execute an approved implementation plan phase by phase with verific
 
 ## Per phase
 
-Work test-first (TDD) whenever the phase has non-trivial logic:
+Work incrementally, one observable behaviour at a time, with no external
+testing skill needed:
 
-1. Write the phase's tests first, at the level the plan names (favour fast unit
-   tests, fewer integration, a thin e2e top). Run them and watch them fail for
-   the right reason — a test that passes before you write code tests nothing.
-2. Implement the minimum that turns the tests green, then refactor with the
-   tests as a safety net.
-3. Run the phase's full automated success criteria (tests/lint/build from the
-   plan). Fix issues before proceeding.
-4. Check off completed items in the plan file itself as you go.
-5. Pause at natural stopping points for the user to look over the diff —
-   don't batch every phase into one silent pass.
+1. Select one observable behaviour from the phase.
+2. Write one focused test for it first, at the cheapest level that can catch
+   the bug (favour fast unit tests, fewer integration, a thin e2e top). Run
+   it and confirm it fails for the intended reason — a test that passes
+   before you write code tests nothing. A pre-existing passing test stays
+   useful as regression coverage, but it never proves a new test exercised
+   the missing behaviour.
+3. Implement the smallest sufficient change. Rerun the test, then the phase's
+   full automated success criteria (tests/lint/build from the plan).
+4. Refactor while green, with the tests as a safety net.
+5. Repeat for the next behaviour.
 
-Trivial glue (a one-line pass-through, a constant) doesn't need its own test —
-YAGNI applies to tests too. Reuse the project's existing runner and helpers;
-don't stand up a parallel harness.
+Trivial prose/glue changes (a one-line pass-through, a constant, a comment)
+don't need ceremonial tests — YAGNI applies to tests too. Reuse the
+project's existing runner and helpers; don't stand up a parallel harness.
+Test through the appropriate public boundary; use doubles for external
+effects. Avoid tests coupled to private structure and redundant
+higher-level assertions over behaviour a lower-level test already proves,
+while allowing distinct integration contracts to be tested separately.
+
+Report progress as you go and check off completed items in the plan file
+itself; don't pause for approval between routine steps.
+Pause only for a consequential scope change, a genuinely missing user
+choice, or an action requiring fresh authorisation. Handle routine
+implementation discoveries autonomously and record them in the plan.
+
+On resume, trust completed plan items (including existing `- [x]`
+checkmarks) unless changed code or failed checks give reason to revisit
+them. Never replay completed phases automatically.
 
 ## When the plan doesn't match reality
 
@@ -44,7 +60,10 @@ Why this matters: [...]
 How should I proceed?
 ```
 The plan is a guide, not scripture — codebases drift since a plan was
-written. Use judgment, but surface the mismatch instead of quietly diverging.
+written. For trivial mismatches (renamed file, moved import, slightly
+different signature): adapt, note the deviation in the plan file, continue.
+For substantive mismatches (architecture differs, wrong assumption, scope
+impact): stop and ask with the block above instead of diverging silently.
 
 Use subagents sparingly here — mainly for a targeted debugging dive or
 exploring one unfamiliar corner, not as the default way of working.

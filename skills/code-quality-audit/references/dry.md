@@ -1,5 +1,10 @@
 # DRY
 
+Check procedure: trace duplicated business knowledge across callers and
+identify why it must change together — same rule, same change trigger, same
+owner. Evidence needed: each duplicate's path:line plus the shared change
+scenario that would diverge them.
+
 Duplication that will *drift* (the same business rule expressed twice, will
 silently diverge) vs. incidental repetition (two unrelated things that
 happen to look similar today). Only the first is a finding; flagging the
@@ -12,8 +17,10 @@ second creates a false coupling when someone "fixes" it.
 def checkout_total(cart):
     return cart.subtotal * 0.9 if cart.items > 10 else cart.subtotal
 
+
 def invoice_total(order):
     return order.subtotal * 0.9 if order.items > 10 else order.subtotal
+
 
 # ✅ one rule, two callers
 def bulk_discount(subtotal, items):
@@ -21,16 +28,22 @@ def bulk_discount(subtotal, items):
 ```
 Consequence: marketing changes the bulk discount to 15%; whoever edits it
 finds `checkout_total`, ships it, and `invoice_total` silently keeps
-charging the old rate.
+charging the old rate. Correction: extract one source of truth only because
+both callers must move together — no false coupling here.
 
 ## Incidental — not a finding
 
 ```python
 # looks identical today, but for unrelated reasons
-def validate_username(s): return len(s) <= 20
-def validate_tag(s): return len(s) <= 20
+def validate_username(s):
+    return len(s) <= 20
+
+
+def validate_tag(s):
+    return len(s) <= 20
 ```
 Consequence of "fixing" this: extracting a shared `validate_length_20`
 couples a length change to two rules that have no reason to move together
 — the next time either limit changes, it becomes a judgment call whether
-the shared helper still applies to both.
+the shared helper still applies to both. Legitimate non-finding: keep the
+repetition.

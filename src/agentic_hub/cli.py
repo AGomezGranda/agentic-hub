@@ -96,7 +96,8 @@ def cmd_sync(args: argparse.Namespace) -> None:
 
 
 def cmd_tui(args: argparse.Namespace) -> None:
-    from . import tui  # lazy: scripting subcommands shouldn't pay textual's import cost
+    # lazy: scripting subcommands shouldn't pay textual's import cost
+    from . import tui  # noqa: PLC0415
 
     tui.run()
 

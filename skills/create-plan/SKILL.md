@@ -22,20 +22,24 @@ skeptical, thorough, collaborative. Don't write the whole plan in one shot.
   on it, and a targeted `sed -n`/`grep -n` check is enough for anything the
   plan doesn't hinge on.
 - Cross-reference the request against what the code actually does. Present your
-  understanding plus only the questions you genuinely can't answer by reading
-  code:
+  understanding plus only the questions that are consequential and
+  unanswerable by reading code — requirements, tradeoffs, or missing
+  authority you genuinely cannot infer:
   ```
   Based on the request and the codebase, I understand we need to [...].
   Found: [file:line facts]
-  Open questions: [judgment calls only research can't resolve]
+  Open questions: [consequential judgment calls only research can't resolve]
   ```
 - If the user corrects a misunderstanding, go re-verify it in the code — don't
   just accept the correction blind.
+- An already accepted structure, or an explicit request to write the plan, is
+  authorisation to proceed — don't re-confirm phasing that was already agreed.
 
 ### Fanning out
 
-Bundled agent for this skill: `repo-scout`; fall back to the packaged
-`scout`, then a generic child, if it isn't installed.
+Bundled agent for this skill: `repo-scout` (takes an explicit bounded scope
+— see `agents/repo-scout.md`); if it isn't installed, use a host-native
+child or research yourself.
 
 <!-- agentic-hub: fanout -->
 
@@ -52,10 +56,12 @@ Does this phasing make sense?
 ## 3. Write the plan
 
 Before picking a path, check for an existing plans dir: `find . -type d -iname plans -not -path '*/node_modules/*'`.
-If one exists (e.g. `meta/plans/`, `docs/plans/`), save there. Otherwise save
-to `plans/YYYY-MM-DD-description.md` (create the dir; ask the user if they
-use a different convention). Frontmatter: just `date`, `title`,
-`status: draft`. Body, per phase:
+If one exists (e.g. `meta/plans/`, `docs/plans/`), save there without asking.
+Otherwise create `plans/` and save there. Frontmatter: just `date`, `title`,
+`status: draft`. Top-level, where material: **Current State** (key facts with
+`file:line` refs), **Design Decisions** (decision + rationale, else none
+beyond conventions), **Risks & Mitigations** (risk → mitigation). Body, per
+phase:
 
 - **Overview** — 1-2 sentences
 - **Changes** — specific files/functions, not vague intent
@@ -75,7 +81,15 @@ some phases combined into one PR, others standing alone — each an
 independently reviewable, mergeable, revertable unit. Note ordering/dependencies
 between them.
 
-No open questions in the final plan — resolve every one before writing it down.
+No blocking questions in the final plan — resolve every one before writing it
+down. For the rest, record reasonable nonblocking assumptions with a
+validation step each, rather than forcing answers to every unknown. Describe
+behaviours and the appropriate test level for each directly; don't invoke
+another testing skill to say it. No placeholders — never write TODO, TBD,
+or vague intent; every change names the exact file and the exact change
+(types, signatures, commands). Self-review before presenting: (a) every
+requirement maps to a phase, (b) no placeholders, (c) names/types consistent
+across phases.
 
 ## 4. Iterate
 

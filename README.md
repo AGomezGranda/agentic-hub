@@ -1,8 +1,8 @@
 # agentic-hub
 
-Install markdown skills into multiple AI agents from one source. Symlinks
-`skills/<name>/` into Claude Code, Pi, and OpenCode's skill directories, and
-flattens skills into Codex prompt files.
+Install markdown skills into multiple AI agents from one source. Links
+`skills/<name>/` into each host's skill directory. Skills with host-specific
+instructions get a generated `SKILL.md` and linked supporting files.
 
 ## Hosts
 
@@ -13,7 +13,7 @@ unless noted:
 |---|---|---|---|---|
 | **Pi** (primary) | `~/.pi/agent/skills/` | `subagent` tool, `runs.all`, concurrent (cap 20, 64/run) | 4 scopes, incl. `~/.pi/agent/agents/` | fully capable |
 | **Claude Code** | `~/.claude/skills/` | `Agent` tool; children cannot nest (unverified here, same tag as OpenCode) | `~/.claude/agents/` — does not exist | built-in agents only |
-| **Codex** | `~/.codex/prompts/` (flattened) | none | none | serial only |
+| **Codex** | `~/.agents/skills/` | subagents (when requested) | `~/.codex/agents/` | native skills |
 | **OpenCode** | `~/.config/opencode/skill/` | unverified | `agent/` dir absent here | installed on other machines |
 
 OpenCode is a live target on other machines; its subagent capability is
@@ -63,6 +63,17 @@ agentic-hub remove <names...> [--agent claude,pi,...]
 agentic-hub sync       # install every skill to every agent
 ```
 
+## Skill workflow and validation
+
+Implementation follows the test-first loop in `implement-plan` (one focused
+test, confirm it fails, smallest change, rerun) with no external TDD skill
+needed. Shared workflow contracts stay in the skill body; host dispatch and
+output mechanics stay in `skills/_shared/fanning-out/<host>.md` and are
+spliced in at install time — common prose carries no host-specific commands.
+Validate with `uv run pytest -q`; behavioural spot-checks are manual, no
+evals harness. Design baseline:
+`meta/plans/2026-09-20-strict-skill-quality-and-cost.md`.
+
 ## Development
 
 ```
@@ -73,7 +84,13 @@ uv run pytest -q
 Skills live in `skills/<name>/SKILL.md` (optional YAML-ish frontmatter, flat
 `key: value` pairs only). `agentic_hub/catalog.py` reads sources,
 `agentic_hub/agents.py` writes agent targets, `agentic_hub/cli.py` wires the
-CLI, `agentic_hub/tui.py` is the Textual status grid.
+CLI, `agentic_hub/tui.py` is the Textual status grid. Shared workflow
+contracts stay in the skill body; host dispatch and output mechanics stay in
+`skills/_shared/fanning-out/<host>.md` and are spliced in at install time.
+
+Codex discovers the installed folders as skills. Mention one explicitly with
+`$skill-name`, or let Codex select it from its description. If a newly installed
+skill does not appear, restart Codex. Earlier versions generated deprecated
+custom prompts in `~/.codex/prompts/`; those files are separate from skills.
 
 Pi-only subagent definitions live in `agents/*.md`.
-

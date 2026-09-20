@@ -18,3 +18,6 @@ tokens — more children cost more tokens in total, in exchange for running
 at once instead of in sequence. A child's `path:line` claim is
 a lead, not evidence: verify it per this skill's own verification tiers
 before writing anything down.
+
+If no child dispatch is available in this session, do the checks yourself
+serially, highest-risk first, and mark any uncovered scope explicitly.

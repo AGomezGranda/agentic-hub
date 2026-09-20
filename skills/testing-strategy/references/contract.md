@@ -35,5 +35,15 @@ the producing team and an automated readiness signal —
 
 ## Audit heuristic **[not in source]**
 
-No contract tests across a boundary between two teams means changes to the
-producer are validated only by E2E tests — or not at all.
+Check procedure: tie the expectation to the actual compatibility contract
+(who consumes what fields, deploy order, registry mode where present) and to
+existing alternative coverage (E2E, integration, monitoring). Evidence needed:
+the boundary, its consumers, and what validates the producer still satisfies
+what the code needs.
+
+Missing consumer contracts across a two-team boundary is a finding where
+changes are otherwise validated only by E2E or production — but where a
+registry in a real compatibility mode plus message-contract suites already
+cover the consumed fields, that combination satisfies the need. Keep source
+summaries above distinct from this project's audit heuristics: the deck
+describes the mechanism, this section judges the gap.

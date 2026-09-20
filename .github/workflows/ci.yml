@@ -5,9 +5,18 @@ on:
   pull_request:
 
 jobs:
-  test:
+  ci:
+    name: run pyrefly, ruff and pytests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3
-      - run: uv run pytest -q
+      
+      - name: type check
+        run: uv run pyrefly check
+ 
+      - name: formatting
+        run: uv run ruff check .
+
+      - name: test
+        run: uv run pytest -q
