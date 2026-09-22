@@ -113,6 +113,7 @@ FANOUT_ROSTER = {
     "review-plan": "plan-lens",
     "research-codebase": "repo-scout",
     "create-plan": "repo-scout",
+    "remove-comment-slop": "comment-compressor",
 }
 
 

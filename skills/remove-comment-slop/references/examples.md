@@ -1,28 +1,59 @@
 # Examples
 
 ```python
-# ❌ narration — remove
+# Bad: narration adds nothing; delete it.
 # fetch user from database
 user = fetch_user(id)
-
-# ✅ keep — non-obvious constraint
-# ABC API returns 200 on auth failure; check body.error
 ```
 
 ```python
-# ❌ history — shorten to durable reason
-# TODO(ABC-1234): remove once migration finishes
-# Retry on 409 — ABC system is eventually consistent for 2s after POST
+# Bad: the rationale is useful, but five lines are not.
+# The provider updates its replicas asynchronously after creating an account.
+# During that replication window, reads can return 404 even though the create
+# request succeeded. We retry here so callers do not need to understand the
+# provider's consistency model. The window is documented as two seconds.
+account = retry_lookup(account_id)
 
-# ✅
-# Retry on 409 — ABC system is eventually consistent for 2s after POST
+# Good: preserve the operational fact in one line.
+# Retry for 2s while the provider's account replicas converge.
+account = retry_lookup(account_id)
 ```
 
 ```python
-# ❌ commented-out code — remove
+# Bad: accurate but padded with setup, repetition, and justification.
+# We deliberately check the response body here rather than relying only on
+# the HTTP status code. This is necessary because the ABC API is unusual and
+# sends a successful 200 status for authentication failures. Without checking
+# the body, those failures would incorrectly be treated as successful calls.
+raise_for_body_error(response)
+
+# Good: keep only the surprising external behavior.
+# ABC reports authentication failures with HTTP 200.
+raise_for_body_error(response)
+```
+
+```python
+# Bad: history obscures the durable reason.
+# Added as part of ABC-1234 after the migration exposed duplicate deliveries.
+# We cannot remove this guard until the downstream rollout has been completed.
+# The event bus may deliver the same message more than once, so skipping an
+# event already recorded in the ledger prevents duplicate charges.
+if ledger.contains(event.id):
+    return
+
+# Good: the invariant survives; project history does not.
+# Event delivery is at-least-once; the ledger prevents duplicate charges.
+if ledger.contains(event.id):
+    return
+```
+
+```python
+# Bad: commented-out code belongs in version control; delete it.
 # result = old_calculation(x, y)
+```
 
-# ❌ verbose docstring — trim to contract
+```python
+# Bad: implementation walkthrough and history overwhelm the contract.
 def calculate(value: int) -> int:
     """Calculate value.
 
@@ -31,7 +62,20 @@ def calculate(value: int) -> int:
     """
 
 
-# ✅
+# Good: one sentence states the contract.
 def calculate(value: int) -> int:
-    """Return adjusted calculation result."""
+    """Return the adjusted value after applying the account rules."""
+```
+
+```python
+# Keep exact functional directives; do not rewrite them as prose.
+result = parse(raw)  # type: ignore[arg-type]
+```
+
+The target is not blindly one physical line. Keep two lines when they carry
+separate facts required to change the code safely:
+
+```python
+# Tokens expire after 30s, but clocks may differ by 5s.
+# Refresh at 25s to avoid presenting an expired token.
 ```
