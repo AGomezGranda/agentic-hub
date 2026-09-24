@@ -1,13 +1,13 @@
 ---
 name: code-quality-audit
-description: 'Audit code against SOLID, DRY, KISS, typing discipline, error handling and DDD modeling for a full repo, a bounded context/domain, or a git diff/PR. Use when asked to review code quality, check design principles, review a PR for design smells, or audit a domain structure. Not over-engineering (ponytail-review/audit), tests (testing-strategy), security or performance.'
-argument-hint: '[repo | path/domain | diff/PR ref]'
+description: 'Audit code-level design against SOLID, DRY, KISS, typing discipline and error handling for a repo, a path, or a git diff/PR. Use when asked to review code quality, check design principles, or review a PR for design smells in classes and functions. Not module boundaries, dependency direction, DDD or responsibility placement across modules (architecture-audit), over-engineering (ponytail-review/audit), tests (testing-strategy), security or performance.'
+argument-hint: '[repo | path | diff/PR ref]'
 ---
 
 # Code Quality Audit
 
-Audit code against six design-correctness dimensions — SOLID, DRY, KISS,
-typing, error handling, DDD — and report findings worth acting on.
+Audit code against five code-level design dimensions — SOLID, DRY, KISS,
+typing, error handling — and report findings worth acting on.
 
 **Audit, don't rewrite.** Produce a report. Only change code if the user asks
 for that after seeing it. (Dispatching dimension children to a read-only
@@ -19,6 +19,11 @@ write capability it can't rewrite even if asked.)
 This skill is about **design correctness**, not simplicity or safety. Route
 findings that belong elsewhere instead of duplicating those skills:
 
+- **Routing rule:** if the correction stays inside one module, it's here.
+  If it moves code between modules or changes what may import what, it's
+  `architecture-audit` — SRP on a class is here, a god *package* is
+  there; DIP on a constructor is here, domain importing infra is there.
+  DDD (aggregates, bounded contexts) lives there entirely.
 - "This is more complex/abstract than it needs to be" → `ponytail-review`
   (diff) or `ponytail-audit` (repo). Not here.
 - Test coverage, test pyramid balance → `testing-strategy`. Not here.
@@ -33,8 +38,8 @@ skills.
 
 ## 1. Resolve scope
 
-- **Full repo** — audit architecture-wide: layering, cross-cutting SOLID/DRY
-  violations, whether DDD boundaries hold across the whole codebase. First
+- **Full repo** — audit cross-cutting SOLID/DRY/typing/error-handling
+  patterns across the codebase (layering itself is `architecture-audit`). First
   produce one compact map (step 2), then choose the cheapest split. A small
   scope — a few files, one module, a focused diff — gets mapped,
   investigated, and checked by you directly, with no mandatory agent count.
@@ -42,9 +47,8 @@ skills.
   minimises duplicate reads. A targeted single-dimension child is allowed
   when its question is genuinely independent. A repository label alone does
   not justify delegation.
-- **Path / domain / bounded context** — audit one module or aggregate in
-  depth; still read its neighbours and callers to judge boundary leakage, but
-  don't map the whole repo.
+- **Path / module** — audit one module in depth; still read its callers to
+  judge contract breaks, but don't map the whole repo.
 - **Diff / PR** — audit issues introduced or materially affected by the
   change, including consequences in unchanged callers. Read referenced
   sections on demand and expand to whole files for cross-cutting contracts;
@@ -102,24 +106,21 @@ in a loop.
 ## 2. Map before judging
 
 One inventory pass suffices for the map: ask a `repo-scout` for domain
-vocabulary, layering, and existing conventions — or gather them yourself
+vocabulary and existing conventions — or gather them yourself
 for a small scope — each with evidence (a short answer plus `file:line`
 proof, or an honest "not found"). Assemble the map yourself. Judge nothing at this stage; a scout that volunteers a verdict is out of contract. Then
-delegate by module/bounded context (per §1) with that map pasted into each
-task. Skip separate mapping for a path/domain scope or a diff/PR — read
+delegate by module (per §1) with that map pasted into each
+task. Skip separate mapping for a path scope or a diff/PR — read
 the relevant files directly either way.
 
 You cannot judge design without knowing the model it's supposed to express.
 Before scoring anything, establish:
 
-- **Domain vocabulary** — what are the entities, value objects, and
-  aggregates actually called in code vs. how the team/docs/tests talk about
-  them? Mismatches here predict most other findings.
-- **Layering** — is there a real domain layer, or is everything
-  controller → ORM model → controller (anemic, no domain to violate DDD in)?
-  Note this explicitly; it changes what's even checkable.
+- **Domain vocabulary** — what the core types are called in code vs. how
+  the team/docs/tests talk about them. Mismatches predict typing and DRY
+  findings.
 - **Existing conventions** — the codebase's own typing strictness, error
-  handling idiom, and module boundaries. Judge against the repo's own
+  handling idiom. Judge against the repo's own
   standard first, the textbook standard second.
 
 For a diff/PR, this is just: what contract did the changed function/class
@@ -129,7 +130,7 @@ already have, and what does the surrounding domain call it.
 
 One findings table per dimension that actually applies to this scope — skip
 a dimension entirely and say so if the codebase has nothing to say about it
-(e.g. a script with no domain layer has no DDD findings). Each dimension's
+(e.g. an untyped script has no typing findings). Each dimension's
 rubric lives in its own reference file — read it (yourself, or paste it
 into a child's task per §1). Each rubric gives a compact check procedure,
 evidence needed, a defect/correction example where useful, and a legitimate
@@ -140,7 +141,6 @@ non-finding:
 - **KISS** — `references/kiss.md`
 - **Typing** — `references/typing.md`
 - **Error handling** — `references/errors.md`
-- **DDD** — `references/ddd.md` (only where a domain layer exists)
 
 ## 4. Report
 
@@ -150,7 +150,7 @@ not at the same depth for every finding:
 
 - **A finding a top-line recommendation rests on** — read the full file. A
   `sed -n 'X,Yp'` window confirms the quote is real, not that the finding is
-  correct; judging an SRP or DDD claim needs the surrounding contract. This
+  correct; judging an SRP or LSP claim needs the surrounding contract. This
   is where you're supposed to pay the read cost.
 - **A corroborating finding** (supports a recommendation but isn't the
   reason for it) — a targeted `sed -n 'X,Yp'` / `grep -n` against the cited
@@ -177,7 +177,7 @@ never described as clean. Scope may be bounded, but say what was excluded or
 sampled.
 
 1. **Scope and model** — two or three sentences: what was audited, what
-   domain layer (if any) exists, which dimensions actually applied.
+   conventions it was judged against, which dimensions actually applied.
 2. **Findings** — one entry per confirmed finding with its finding ID,
    severity, confidence, location and evidence, violated contract,
    consequence, counterevidence considered, and smallest sufficient
@@ -187,8 +187,9 @@ sampled.
 3. **Explicitly fine** — dimensions checked and found solid. One line each,
    with a bounded claim and evidence; there is no quota for strengths or
    defects.
-4. **Out of scope, flagged anyway** — anything that's clearly a security,
-   performance, or over-engineering issue spotted along the way; name it and
+4. **Out of scope, flagged anyway** — anything that's clearly an
+   architecture, security, performance, or over-engineering issue spotted
+   along the way; name it and
    point at the right skill instead of addressing it.
 5. **Coverage and unresolved** — the ledger plus any unresolved concerns with
    missing evidence and next probe.

@@ -56,9 +56,9 @@ correction if needed. If still unusable, report an investigation failure with
 its uncovered scope. Never manufacture a defect or severity from missing
 formatting. Do not retry in a loop.
 
-This is the same P0/P1/P2 vocabulary `code-quality-audit`/`testing-strategy`
+This is the same P0/P1/P2 vocabulary `code-quality-audit`/`architecture-audit`/`testing-strategy`
 use for their judgement findings — one vocabulary, no mapping needed if a
-finding from either of those ever needs folding in here.
+finding from any of those ever needs folding in here.
 
 ### Fanning out
 

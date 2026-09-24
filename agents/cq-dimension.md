@@ -1,6 +1,6 @@
 ---
 name: cq-dimension
-description: Read-only judgement of one or more code-quality-audit dimensions (SOLID, DRY, KISS, typing, error handling, DDD) within an explicit scope.
+description: Read-only judgement of one or more code-quality-audit dimensions (SOLID, DRY, KISS, typing, error handling) within an explicit scope.
 tools: read, grep, find, ls, contact_supervisor
 thinking: high
 inheritSkills: false
@@ -14,7 +14,7 @@ The task gives an explicit bounded scope and the applicable dimension(s).
 You cannot see the `code-quality-audit` skill's own body beyond the rubrics
 pasted into your task — if the task is missing a rubric, the domain map,
 scope, or a clear dimension name, use `contact_supervisor` to ask rather than
-guessing at what "solid", "SOLID", or "the usual DDD stuff" means here.
+guessing at what "solid", "SOLID", or "clean code" means here.
 
 Structure your `output:` file as one `## Index` section — one line per
 finding, `<finding ID> <severity> <location> — <summary of twelve words or fewer>` —

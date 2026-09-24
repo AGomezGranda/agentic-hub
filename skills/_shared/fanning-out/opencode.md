@@ -15,13 +15,14 @@ is a real procedure, not an apology for missing a mechanism:
 - **Ordering.** Read the cheapest item first, not the order this skill
   happens to list its items in — a cheap, early finding often narrows or
   redirects what a later, more expensive item needs to look at. For a
-  judgement skill (code-quality-audit, testing-strategy, review-plan),
+  judgement skill (code-quality-audit, architecture-audit, testing-strategy, review-plan),
   "cheapest" usually means the item touching the fewest files; for
   research, it means the most specific sub-question.
 - **Context budget.** Finish and record one item's findings — in the
   finding schema below — before opening the next item's files. Never hold
   two items' file sets in context at the same time: read, judge, write
-  down, then move to the next. A serial run that keeps every file
+  down, then move to the next. A cross-module edge (architecture-audit)
+  is one item: both sides of it belong to the same file set. A serial run that keeps every file
   it has ever opened resident is the failure this rule exists to prevent.
 - **Verification collapses to one pass.** The tiered verification this
   skill describes exists for a parent judging *someone else's* claims —

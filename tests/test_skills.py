@@ -109,6 +109,7 @@ def test_claude_branch_forbids_nesting() -> None:
 
 FANOUT_ROSTER = {
     "code-quality-audit": "cq-dimension",
+    "architecture-audit": "arch-lens",
     "testing-strategy": "test-level",
     "review-plan": "plan-lens",
     "research-codebase": "repo-scout",
@@ -132,7 +133,7 @@ def test_fanout_roster_line_present_per_skill() -> None:
         )
 
 
-MAP_DELEGATION_SKILLS = ("testing-strategy", "code-quality-audit")
+MAP_DELEGATION_SKILLS = ("testing-strategy", "code-quality-audit", "architecture-audit")
 
 
 def test_map_phase_delegates_to_scout() -> None:
@@ -204,6 +205,7 @@ EVIDENCE_SCHEMA_HEADING = "### Child evidence schema"
 # schema instead: no severity/confidence to fabricate for a location fact.
 FINDING_SCHEMA_SKILLS = (
     "code-quality-audit",
+    "architecture-audit",
     "testing-strategy",
 )
 EVIDENCE_SCHEMA_SKILLS = ("research-codebase",)
@@ -278,6 +280,7 @@ def test_create_plan_delegates_to_research_codebase() -> None:
 
 TIERED_VERIFICATION_SKILLS = (
     "code-quality-audit",
+    "architecture-audit",
     "testing-strategy",
     "research-codebase",
 )
@@ -287,7 +290,7 @@ def test_malformed_child_output_is_not_a_defect() -> None:
     """Phase 1: malformed child output never becomes a code defect. Parent
     normalises, requests one correction, else reports investigation failure
     with uncovered scope."""
-    for name in ("code-quality-audit", "testing-strategy", "review-plan"):
+    for name in ("code-quality-audit", "architecture-audit", "testing-strategy", "review-plan"):
         text = _skill_text(name)
         assert "as a single P1 finding" not in text, (
             f"{name}: malformed output still manufactured as P1"
@@ -324,7 +327,7 @@ def test_confirmed_finding_contract() -> None:
     """Phase 1: confirmed findings carry ID, severity, confidence,
     location+evidence, violated contract, consequence, counterevidence,
     and smallest correction."""
-    for name in ("code-quality-audit", "testing-strategy", "review-plan"):
+    for name in ("code-quality-audit", "architecture-audit", "testing-strategy", "review-plan"):
         text = _skill_text(name)
         lower = re.sub(r"\s+", " ", text.lower())
         assert "finding id" in lower or "stable" in lower and "id" in lower, (
@@ -358,6 +361,7 @@ def test_coverage_ledger_is_explicit() -> None:
     unverified never described as clean."""
     for name in (
         "code-quality-audit",
+        "architecture-audit",
         "testing-strategy",
         "review-plan",
         "research-codebase",
@@ -384,7 +388,7 @@ def test_research_absence_is_scoped() -> None:
     )
 
 
-INDEX_FINDINGS_AGENTS = ("cq-dimension", "test-level", "plan-lens")
+INDEX_FINDINGS_AGENTS = ("cq-dimension", "arch-lens", "test-level", "plan-lens")
 
 
 def test_agents_declare_index_then_findings_structure() -> None:
@@ -433,7 +437,8 @@ DIMENSION_RUBRIC_FILES = (
     "code-quality-audit/references/kiss.md",
     "code-quality-audit/references/typing.md",
     "code-quality-audit/references/errors.md",
-    "code-quality-audit/references/ddd.md",
+    "architecture-audit/references/boundaries.md",
+    "architecture-audit/references/responsibilities.md",
 )
 
 

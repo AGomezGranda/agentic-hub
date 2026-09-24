@@ -6,7 +6,7 @@ Evidence needed: the handling site's path:line, the swallowed/lost context,
 and the false signal the caller acts on.
 
 Swallowed exceptions, catch-and-log-and-continue where the caller needed to
-know, errors that lose type/context crossing a module boundary, broad
+know, errors that lose type/context when re-raised or wrapped, broad
 `catch`/`except` hiding a specific failure a caller could handle
 differently, success reported after failure.
 
