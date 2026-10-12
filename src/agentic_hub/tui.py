@@ -1,21 +1,33 @@
+import asyncio
 from collections import Counter
 from collections.abc import Callable
 from pathlib import Path
 
 from rich.text import Text
+from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, VerticalScroll
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.theme import Theme
-from textual.widgets import Footer, Header, Input, Markdown, Static
+from textual.widgets import (
+    Button,
+    Footer,
+    Header,
+    Input,
+    Markdown,
+    Static,
+    TabbedContent,
+    TabPane,
+)
 
-from . import agents, catalog
+from . import agents, catalog, coach
 
 STATUS_GLYPHS: dict[agents.Status, tuple[str, str]] = {
     "linked": ("✓", "bold green"),
     "stale": ("↻", "bold yellow"),
     "missing": ("·", "dim"),
     "conflict": ("✗", "bold red"),
+    "error": ("!", "bold red"),
 }
 
 _THEME_FILE = Path.home() / ".config" / "agentic-hub" / "theme.txt"
@@ -59,16 +71,44 @@ class AgenticHubApp(App):
     AUTO_FOCUS = None
 
     CSS = """
+    #coach-indicator { height: 1; padding: 0 1; text-style: bold; }
+    #coach-indicator.on { color: $success; }
+    #coach-indicator.off { color: $text-muted; }
+    #coach-indicator.mixed { color: $warning; }
+    #coach-indicator.error { color: $error; }
+    #pages, #pages > ContentSwitcher, #pages TabPane { height: 1fr; }
+    #pages Tabs { background: $surface; }
+    #pages Tab.-active { color: $primary; text-style: bold; }
+    #pages Tabs:focus Tab.-active { color: $accent; background: $accent 10%; }
+    #pages Tabs .underline--bar { color: $primary; }
+    #pages Tabs:focus .underline--bar { color: $accent; }
+    #coach-card {
+        height: 1fr; border: heavy $panel; margin: 0 1; padding: 0 1;
+        border-title-color: $foreground; border-title-style: bold;
+    }
+    #coach-summary { height: 1fr; min-height: 1; }
+    #coach-summary:focus { background: $accent 10%; }
+    #coach-status { height: auto; }
+    #coach-buttons { height: 3; }
+    #coach-buttons Button { width: 1fr; min-width: 0; border: heavy $panel; }
+    #coach-enable { margin-right: 1; }
+    #coach-buttons Button:focus { border: heavy $accent; }
+    #coach-buttons Button:disabled {
+        color: $text-muted; text-opacity: 1; text-style: none;
+    }
+    #coach-restart { height: auto; color: $text-muted; }
     #filter { display: none; }
     #body { height: 1fr; }
     #detail { width: 50%; border: heavy $panel; padding: 1; display: none; }
     #grid { height: 1fr; }
     .card { border: heavy $panel; margin: 0 1; padding: 0 1; height: auto; }
-    .-focused { border: heavy $accent; }
-    .-selected { background: $accent 10%; }
+    .card.-focused { border: heavy $accent; }
+    .card.-selected { background: $accent 10%; }
     """
 
     BINDINGS = [
+        ("1", "show_skills", "Skills"),
+        ("2", "show_behavior", "Behavior"),
         ("i", "install", "Install"),
         ("r", "remove", "Remove"),
         ("I", "install_all", "Install (all agents)"),
@@ -77,6 +117,8 @@ class AgenticHubApp(App):
         ("/", "open_filter", "Filter"),
         Binding("escape", "close_filter", "Close filter", show=False),
         ("ctrl+r", "refresh", "Refresh"),
+        ("c", "toggle_coach", "Toggle coach"),
+        ("C", "disable_coach", "Disable coach"),
         ("p", "toggle_preview", "Preview"),
         ("s", "cycle_sort", "Sort"),
         ("S", "flip_sort", "Reverse sort"),
@@ -97,22 +139,174 @@ class AgenticHubApp(App):
         self._sort_index = 0
         self._sort_reverse = False
         self._preview_visible = False
+        self._coach_busy = False
 
     def compose(self) -> ComposeResult:
         yield Header()
-        yield Input(placeholder="filter skills\u2026", id="filter")
-        yield Static(id="stats")
-        yield Static(id="empty-state")
-        with Horizontal(id="body"):
-            yield VerticalScroll(id="grid", can_focus=False)
-            yield Markdown(id="detail")
+        yield Static(id="coach-indicator")
+        with TabbedContent(id="pages", initial="skills-page"):
+            with TabPane("Skills", id="skills-page"):
+                yield Input(placeholder="filter skills\u2026", id="filter")
+                yield Static(id="stats")
+                yield Static(id="empty-state")
+                with Horizontal(id="body"):
+                    yield VerticalScroll(id="grid", can_focus=False)
+                    yield Markdown(id="detail")
+            with TabPane("Behavior", id="behavior-page"):
+                with Vertical(id="coach-card") as card:
+                    card.border_title = "Coding coach"
+                    with VerticalScroll(id="coach-summary"):
+                        yield Static(id="coach-status")
+                    with Horizontal(id="coach-buttons"):
+                        yield Button("Enable all", id="coach-enable")
+                        yield Button("Disable all", id="coach-disable")
+                    yield Static(
+                        "Restart the harness and start a new chat to apply changes.",
+                        id="coach-restart",
+                    )
         yield Footer()
+
+    def _focus_page(self) -> None:
+        if self.query_one("#pages", TabbedContent).active == "skills-page":
+            input_ = self.query_one("#filter", Input)
+            self.set_focus(input_ if input_.display else None)
+        else:
+            button = self.query_one("#coach-enable", Button)
+            self.set_focus(
+                self.query_one("#coach-summary") if button.disabled else button
+            )
+
+    def action_show_skills(self) -> None:
+        self.query_one("#pages", TabbedContent).active = "skills-page"
+        self._focus_page()
+
+    def action_show_behavior(self) -> None:
+        self.query_one("#pages", TabbedContent).active = "behavior-page"
+        self._focus_page()
+
+    def on_tabbed_content_tab_activated(
+        self, event: TabbedContent.TabActivated
+    ) -> None:
+        self.refresh_bindings()
+        if self.focused is not None and any(
+            not node.display for node in self.focused.ancestors_with_self
+        ):
+            self._focus_page()
+
+    def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
+        if action in {
+            "install",
+            "remove",
+            "install_all",
+            "remove_all",
+            "toggle_select",
+            "open_filter",
+            "close_filter",
+            "toggle_preview",
+            "cycle_sort",
+            "flip_sort",
+            "cursor_up",
+            "cursor_down",
+            "cursor_left",
+            "cursor_right",
+        }:
+            return self.query_one("#pages", TabbedContent).active == "skills-page"
+        if action in {"toggle_coach", "disable_coach"}:
+            if self.query_one("#pages", TabbedContent).active != "behavior-page":
+                return False
+            return None if self._coach_busy else True
+        return super().check_action(action, parameters)
 
     async def on_mount(self) -> None:
         self.register_theme(TACTICAL_THEME)
         self.theme = _load_theme()
         self.theme_changed_signal.subscribe(self, lambda theme: _save_theme(theme.name))
+        self.refresh_coach()
         await self.refresh_grid()
+
+    def refresh_coach(
+        self, statuses: dict[str, coach.CoachStatus] | None = None
+    ) -> dict[str, coach.CoachStatus]:
+        if statuses is None:
+            try:
+                statuses = coach.inspect()
+            except Exception as exc:
+                statuses = {
+                    host: coach.CoachStatus("error", None, str(exc))
+                    for host in agents.AGENTS
+                }
+        states = {status.state for status in statuses.values()}
+        combined = coach.combined_state(statuses)
+        indicator = self.query_one("#coach-indicator", Static)
+        indicator.update(f"COACH: {combined}")
+        indicator.set_classes(combined.lower())
+        summary = Text(
+            "Guidance, hints, and review while you write the implementation.\n"
+            f"Scope: all hosts\n\nCoding coach: {combined}\n"
+        )
+        summary.append("  ".join(f"{host}: {s.state}" for host, s in statuses.items()))
+        for host, status in statuses.items():
+            if status.detail:
+                summary.append(f"\n{host}: {status.detail}")
+        self.query_one("#coach-status", Static).update(summary)
+        if states & {"error", "stale"} or any(s.detail for s in statuses.values()):
+            details = "\n".join(
+                f"{host}: {s.detail or s.state}"
+                for host, s in statuses.items()
+                if s.detail or s.state in ("error", "stale")
+            )
+            self.notify(details, severity="error" if "error" in states else "warning")
+        return statuses
+
+    @work
+    async def _set_coach(self, enabled: bool) -> None:
+        if self._coach_busy:
+            return
+        self._coach_busy = True
+        self.refresh_bindings()
+        buttons = self.query("#coach-buttons Button")
+        focused = self.focused
+        buttons.set(disabled=True)
+        try:
+            try:
+                statuses = await asyncio.to_thread(coach.set_enabled, enabled)
+            except Exception as exc:
+                statuses = {
+                    host: coach.CoachStatus(
+                        "error", s.path, f"{exc}; observed state: {s.state}"
+                    )
+                    for host, s in self.refresh_coach().items()
+                }
+            requested = "on" if enabled else "off"
+            for status in statuses.values():
+                if status.state != requested and not status.detail:
+                    status.detail = f"requested {requested}, observed {status.state}; retry or disable."
+            self.refresh_coach(statuses)
+        finally:
+            self._coach_busy = False
+            buttons.set(disabled=False)
+            self.refresh_bindings()
+            if (
+                self.query_one("#pages", TabbedContent).active == "behavior-page"
+                and self.focused is None
+                and focused is not None
+                and focused in buttons
+            ):
+                self.set_focus(focused)
+
+    def action_toggle_coach(self) -> None:
+        if not self._coach_busy:
+            statuses = self.refresh_coach()
+            self._set_coach(not all(s.state == "on" for s in statuses.values()))
+
+    def action_disable_coach(self) -> None:
+        self._set_coach(False)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "coach-enable":
+            self._set_coach(True)
+        elif event.button.id == "coach-disable":
+            self.action_disable_coach()
 
     def _sort_fields(self) -> tuple[str, ...]:
         return ("name", *agents.AGENTS)
@@ -150,7 +344,7 @@ class AgenticHubApp(App):
         self.query_one("#stats", Static).update(
             f"SKILLS {len(self._visible)}  LINKED {counts['linked']}  "
             f"STALE {counts['stale']}  MISSING {counts['missing']}  "
-            f"CONFLICT {counts['conflict']}  SORT {field}  "
+            f"CONFLICT {counts['conflict']}  ERROR {counts['error']}  SORT {field}  "
             f"FILTER {filter_display}"
         )
         self._sync_detail()
@@ -169,8 +363,8 @@ class AgenticHubApp(App):
             text = (catalog.SKILLS_DIR / name / "SKILL.md").read_text()
             fm, _ = catalog.parse_frontmatter(text)
             description = fm.get("description", "(no description)")
-        except OSError:
-            description = "(no description)"
+        except (OSError, UnicodeDecodeError) as exc:
+            description = f"Cannot read SKILL.md: {exc}"
 
         body = Text(description + "\n\n")
         for agent_index, agent in enumerate(agents.AGENTS):
@@ -213,8 +407,8 @@ class AgenticHubApp(App):
             text = (catalog.SKILLS_DIR / name / "SKILL.md").read_text()
             fm, body = catalog.parse_frontmatter(text)
             description = fm.get("description", "")
-        except (OSError, ValueError):
-            description, body = "(no description)", ""
+        except (OSError, ValueError) as exc:
+            description, body = f"Cannot read SKILL.md: {exc}", ""
         markdown = f"# {name}\n\n{description}\n\n{body}"
         self.query_one("#detail", Markdown).update(markdown)
 
@@ -253,7 +447,10 @@ class AgenticHubApp(App):
         for n in names:
             for agent in targets:
                 total += 1
-                ok += fn(agent, n)
+                try:
+                    ok += fn(agent, n)
+                except (OSError, ValueError) as exc:
+                    self.notify(f"{agent}/{n}: {exc}", severity="error")
         self._selected.clear()
         await self.refresh_grid()
         label = f"{len(names)} skill(s)" if len(names) > 1 else names[0]
@@ -307,8 +504,10 @@ class AgenticHubApp(App):
         await self.refresh_grid()
 
     async def action_refresh(self) -> None:
+        if not self._coach_busy:
+            self.refresh_coach()
         await self.refresh_grid()
-        self.notify("rescanned skills/")
+        self.notify("refreshed skills and coach status")
 
     async def action_cycle_sort(self) -> None:
         self._sort_index = (self._sort_index + 1) % len(self._sort_fields())

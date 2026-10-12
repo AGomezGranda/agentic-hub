@@ -94,6 +94,25 @@ def test_install_symlinks_native_agents(
         assert agents.status(agent, "demo") == "linked"
 
 
+@pytest.mark.parametrize("installed", [False, True])
+def test_install_missing_source_does_not_touch_target(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, installed: bool
+) -> None:
+    src, _ = setup_agents(tmp_path, monkeypatch)
+    skill = make_skill(src, "demo")
+    target = agents.target_path("pi", "demo")
+    if installed:
+        assert agents.install_one("pi", "demo")
+    skill.rename(tmp_path / "removed-demo")
+
+    assert not agents.install_one("pi", "demo")
+    assert target.is_symlink() == installed
+    if installed:
+        assert target.readlink() == skill
+    else:
+        assert not target.parent.exists()
+
+
 def test_legacy_install_flattens_codex_prompt(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -107,6 +126,88 @@ def test_legacy_install_flattens_codex_prompt(
     assert "Body for demo." in text
     assert "description:" not in text  # frontmatter stripped
     assert agents.status("codex", "demo") == "linked"
+
+
+@pytest.mark.parametrize("mode", ["symlink", "codex"])
+def test_generated_skill_detects_and_repairs_installed_edits(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: agents.Mode
+) -> None:
+    src, fake_agents = setup_agents(tmp_path, monkeypatch)
+    fake_agents["codex"] = (tmp_path / "codex-skills", mode)
+    make_fanout_skill(src, "demo")
+    make_fanout_branches(src, ("codex",))
+    assert agents.install_one("codex", "demo")
+    target = agents.target_path("codex", "demo")
+    installed = target if mode == "codex" else target / "SKILL.md"
+    original = installed.read_text()
+    installed.write_text(original.replace("Body for demo.", "Edited instructions."))
+
+    assert agents.status("codex", "demo") == "stale"
+    assert agents.install_one("codex", "demo")
+    assert installed.read_text() == original
+    assert agents.status("codex", "demo") == "linked"
+
+
+@pytest.mark.parametrize("failure", ["decode", "read"])
+def test_unreadable_source_reports_error_and_cannot_install(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    failure: str,
+) -> None:
+    src, _ = setup_agents(tmp_path, monkeypatch)
+    source = make_skill(src, "demo") / "SKILL.md"
+    if failure == "decode":
+        source.write_bytes(b"\xffinvalid UTF-8")
+    else:
+        read_text = Path.read_text
+
+        def unreadable(path: Path, *args, **kwargs) -> str:
+            if path == source:
+                raise PermissionError("blocked source")
+            return read_text(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "read_text", unreadable)
+
+    assert agents.status("pi", "demo") == "error"
+    assert "pi/demo" in caplog.text
+    with pytest.raises((OSError, UnicodeDecodeError)):
+        agents.install_one("pi", "demo")
+    assert not agents.target_path("pi", "demo").exists()
+
+
+@pytest.mark.parametrize("fanout", [False, True])
+def test_remove_owned_install_with_invalid_source_utf8(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fanout: bool
+) -> None:
+    src, _ = setup_agents(tmp_path, monkeypatch)
+    skill = make_fanout_skill(src, "demo") if fanout else make_skill(src, "demo")
+    if fanout:
+        make_fanout_branches(src, ("pi",))
+    assert agents.install_one("pi", "demo")
+    (skill / "SKILL.md").write_bytes(b"\xffinvalid source")
+
+    assert agents.remove_one("pi", "demo")
+    assert not agents.target_path("pi", "demo").exists()
+
+
+@pytest.mark.parametrize("mode", ["symlink", "codex"])
+def test_invalid_installed_utf8_is_preserved_as_a_conflict(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: agents.Mode
+) -> None:
+    src, fake_agents = setup_agents(tmp_path, monkeypatch)
+    fake_agents["codex"] = (tmp_path / "codex-skills", mode)
+    make_fanout_skill(src, "demo")
+    make_fanout_branches(src, ("codex",))
+    assert agents.install_one("codex", "demo")
+    target = agents.target_path("codex", "demo")
+    installed = target if mode == "codex" else target / "SKILL.md"
+    installed.write_bytes(b"\xffpersonal content")
+
+    assert agents.status("codex", "demo") == "conflict"
+    assert not agents.install_one("codex", "demo")
+    assert not agents.remove_one("codex", "demo")
+    assert installed.read_bytes() == b"\xffpersonal content"
 
 
 def test_remove_only_deletes_our_own(
@@ -384,6 +485,55 @@ def setup_native_agents(
     }
     monkeypatch.setattr(agents, "AGENTS", fake_agents)
     return src, fake_agents
+
+
+@pytest.mark.parametrize("branch_exists", [False, True])
+def test_splice_upgrade_validates_before_replacing_link(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, branch_exists: bool
+) -> None:
+    src, fake_agents = setup_native_agents(tmp_path, monkeypatch)
+    skill_dir = make_fanout_skill(src, "demo")
+    original = (skill_dir / "SKILL.md").read_bytes()
+    target = fake_agents["pi"][0] / "demo"
+    target.parent.mkdir()
+    target.symlink_to(skill_dir, target_is_directory=True)
+
+    if branch_exists:
+        make_fanout_branches(src, ("pi",))
+        assert agents.install_one("pi", "demo")
+        assert not target.is_symlink()
+        assert "[pi branch content]" in (target / "SKILL.md").read_text()
+        assert agents.status("pi", "demo") == "linked"
+    else:
+        with pytest.raises(ValueError, match="no fan-out branch"):
+            agents.install_one("pi", "demo")
+        assert target.is_symlink()
+        assert target.resolve() == skill_dir.resolve()
+    assert (skill_dir / "SKILL.md").read_bytes() == original
+
+
+def test_splice_reports_conflicting_reference_as_incomplete(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    src, fake_agents = setup_native_agents(tmp_path, monkeypatch)
+    skill_dir = make_fanout_skill(src, "demo")
+    reference = skill_dir / "references"
+    reference.mkdir()
+    (reference / "guide.md").write_text("Required reference.\n")
+    make_fanout_branches(src, ("pi",))
+    target = fake_agents["pi"][0] / "demo"
+    conflicting = target / "references"
+    conflicting.mkdir(parents=True)
+    personal = conflicting / "personal.md"
+    personal.write_text("Personal content.\n")
+    caplog.set_level("INFO", logger="agentic-hub")
+
+    assert not agents.install_one("pi", "demo")
+    assert agents.status("pi", "demo") == "stale"
+    assert personal.read_text() == "Personal content.\n"
+    assert not (conflicting / "guide.md").exists()
+    assert "skip sibling pi/demo/references" in caplog.text
+    assert "spliced pi/demo" not in caplog.text
 
 
 @pytest.mark.parametrize("agent", NATIVE_HOSTS)

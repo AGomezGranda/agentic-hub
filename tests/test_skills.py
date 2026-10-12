@@ -290,7 +290,12 @@ def test_malformed_child_output_is_not_a_defect() -> None:
     """Phase 1: malformed child output never becomes a code defect. Parent
     normalises, requests one correction, else reports investigation failure
     with uncovered scope."""
-    for name in ("code-quality-audit", "architecture-audit", "testing-strategy", "review-plan"):
+    for name in (
+        "code-quality-audit",
+        "architecture-audit",
+        "testing-strategy",
+        "review-plan",
+    ):
         text = _skill_text(name)
         assert "as a single P1 finding" not in text, (
             f"{name}: malformed output still manufactured as P1"
@@ -327,7 +332,12 @@ def test_confirmed_finding_contract() -> None:
     """Phase 1: confirmed findings carry ID, severity, confidence,
     location+evidence, violated contract, consequence, counterevidence,
     and smallest correction."""
-    for name in ("code-quality-audit", "architecture-audit", "testing-strategy", "review-plan"):
+    for name in (
+        "code-quality-audit",
+        "architecture-audit",
+        "testing-strategy",
+        "review-plan",
+    ):
         text = _skill_text(name)
         lower = re.sub(r"\s+", " ", text.lower())
         assert "finding id" in lower or "stable" in lower and "id" in lower, (

@@ -6,10 +6,10 @@ import logging
 import sys
 from pathlib import Path
 
-from . import agents, catalog
+from . import agents, catalog, coach
 
 # Progress/diagnostics go to stderr via logging; stdout stays clean for data
-# (the `list` output) so it can be piped.
+# (list and coach status output) so it can be piped.
 log = logging.getLogger("agentic-hub")
 
 
@@ -34,6 +34,8 @@ def pick_interactive() -> list[str]:
     choice = input("install which? (numbers, space/comma-separated): ")
     try:
         idxs = [int(x) for x in choice.replace(",", " ").split()]
+        if not idxs or any(not 1 <= i <= len(skills) for i in idxs):
+            raise ValueError
         return [skills[i - 1] for i in idxs]
     except (ValueError, IndexError):
         sys.exit("invalid selection")
@@ -60,15 +62,20 @@ def cmd_install(args: argparse.Namespace) -> None:
     agent_names = resolve_agents(args.agent)
     known = catalog.discover_skills()
     log.debug("installing %s to %s", ", ".join(names), ", ".join(agent_names))
-    done = attempted = 0
+    done = 0
+    attempted = len(names) * len(agent_names)
     for name in names:
         if name not in known:
             log.warning("skip: unknown skill '%s'", name)
             continue
         for agent in agent_names:
-            attempted += 1
-            done += agents.install_one(agent, name)
+            try:
+                done += agents.install_one(agent, name)
+            except (OSError, ValueError) as exc:
+                log.error("%s/%s: %s", agent, name, exc)
     report("installed", done, attempted)
+    if done != attempted:
+        sys.exit(1)
 
 
 def cmd_remove(args: argparse.Namespace) -> None:
@@ -91,8 +98,39 @@ def cmd_sync(args: argparse.Namespace) -> None:
     for name in skills:
         for agent in agents.AGENTS:
             attempted += 1
-            done += agents.install_one(agent, name)
+            try:
+                done += agents.install_one(agent, name)
+            except (OSError, ValueError) as exc:
+                log.error("%s/%s: %s", agent, name, exc)
     report("synced", done, attempted)
+    if done != attempted:
+        sys.exit(1)
+
+
+def cmd_coach(args: argparse.Namespace) -> None:
+    statuses = (
+        coach.inspect()
+        if args.action == "status"
+        else coach.set_enabled(args.action == "on")
+    )
+    combined = coach.combined_state(statuses)
+    print(f"Coding coach: {combined}")
+    failed = combined == "ERROR"
+    for host, status in statuses.items():
+        print(f"  {host:10s} {status.state:5s} {status.path or '(unresolved)'}")
+        if status.detail:
+            diagnostic = log.error if status.state == "error" else log.warning
+            diagnostic("%s: %s", host, status.detail)
+        if args.action != "status" and status.state not in (args.action, "error"):
+            log.error("%s: requested %s, observed %s", host, args.action, status.state)
+            failed = True
+    if args.action != "status":
+        print(
+            "Restart the harness and start a new chat to apply changes.",
+            file=sys.stderr,
+        )
+    if failed:
+        sys.exit(1)
 
 
 def cmd_tui(args: argparse.Namespace) -> None:
@@ -126,6 +164,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_remove.set_defaults(func=cmd_remove)
 
     sub.add_parser("sync").set_defaults(func=cmd_sync)
+    p_coach = sub.add_parser("coach", help="persistent coding coach for all hosts")
+    p_coach.add_argument("action", choices=("on", "off", "status"))
+    p_coach.set_defaults(func=cmd_coach)
     sub.add_parser("tui").set_defaults(func=cmd_tui)
     return p
 

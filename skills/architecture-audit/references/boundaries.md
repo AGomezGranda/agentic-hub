@@ -29,6 +29,7 @@ Check, in order:
 from app.db.models import PriceRow
 from app.db.session import session
 
+
 def price_for(sku: str) -> Decimal:
     return session.query(PriceRow).filter_by(sku=sku).one().amount
 ```
@@ -68,7 +69,7 @@ merely lacks an `__all__` is not.
 ```python
 # ❌ the repository port returns the ORM row and raises the driver's error
 class OrderRepository(Protocol):
-    def get(self, id: str) -> OrderRow: ...   # raises psycopg.OperationalError
+    def get(self, id: str) -> OrderRow: ...  # raises psycopg.OperationalError
 ```
 Consequence: callers in the domain now import `OrderRow` and catch driver
 exceptions — the port exists but the dependency still flows through it.

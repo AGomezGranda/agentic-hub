@@ -1,9 +1,12 @@
 import logging
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 
-from agentic_hub import agents, catalog, cli, tui
+from agentic_hub import agents, catalog, cli, coach, tui
+
+pytestmark = pytest.mark.usefixtures("isolated_coach_home")
 
 
 def make_skill(src_dir: Path, name: str) -> None:
@@ -57,8 +60,10 @@ def test_install_dispatches_to_all_agents_and_skips_unknown_skill(
     make_skill(src, "demo")
     caplog.set_level(logging.WARNING, logger="agentic-hub")
 
-    cli.main(["install", "demo", "bogus"])
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["install", "demo", "bogus"])
 
+    assert exc.value.code == 1
     assert agents.status("a1", "demo") == "linked"
     assert agents.status("a2", "demo") == "linked"
     assert "unknown skill 'bogus'" in caplog.text
@@ -106,12 +111,58 @@ def test_sync_installs_every_skill_to_every_agent(
     src = setup_agents(tmp_path, monkeypatch)
     make_skill(src, "demo1")
     make_skill(src, "demo2")
+    toggle = Mock()
+    monkeypatch.setattr(coach, "set_enabled", toggle)
 
     cli.main(["sync"])
 
     for name in ("demo1", "demo2"):
         for agent in ("a1", "a2"):
             assert agents.status(agent, name) == "linked"
+    toggle.assert_not_called()
+
+
+@pytest.mark.parametrize("command", ["install", "sync"])
+@pytest.mark.parametrize("failure", ["conflict", "write"])
+def test_install_batch_finishes_and_exits_one_after_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    command: str,
+    failure: str,
+) -> None:
+    src = setup_agents(tmp_path, monkeypatch)
+    for name in ("first", "last"):
+        make_skill(src, name)
+    blocked = tmp_path / "a1"
+    if failure == "conflict":
+        (blocked / "first").mkdir(parents=True)
+    else:
+        blocked.write_text("Personal content.")
+    caplog.set_level(logging.INFO, logger="agentic-hub")
+
+    with pytest.raises(SystemExit) as exc:
+        cli.main([command, "first", "last"] if command == "install" else [command])
+
+    assert exc.value.code == 1
+    for name in ("first", "last"):
+        assert agents.status("a2", name) == "linked"
+    verb = "installed" if command == "install" else "synced"
+    if failure == "conflict":
+        assert agents.status("a1", "last") == "linked"
+        assert (blocked / "first").is_dir()
+        assert f"{verb} 3/4" in caplog.text
+    else:
+        assert blocked.read_text() == "Personal content."
+        assert "a1/first" in caplog.text and "a1/last" in caplog.text
+        assert f"{verb} 2/4" in caplog.text
+
+
+def test_remove_missing_skill_remains_a_successful_noop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    setup_agents(tmp_path, monkeypatch)
+    assert cli.main(["remove", "missing"]) is None
 
 
 def test_resolve_agents_exits_on_unknown_agent(
@@ -121,3 +172,171 @@ def test_resolve_agents_exits_on_unknown_agent(
 
     with pytest.raises(SystemExit):
         cli.resolve_agents("bogus")
+
+
+@pytest.mark.parametrize("choice", ["0", "-1", "3", "1,0", "x", ""])
+def test_picker_rejects_invalid_selection(
+    monkeypatch: pytest.MonkeyPatch, choice: str
+) -> None:
+    monkeypatch.setattr(catalog, "discover_skills", lambda: ["first", "last"])
+    monkeypatch.setattr("builtins.input", lambda prompt: choice)
+
+    with pytest.raises(SystemExit, match="invalid selection"):
+        cli.pick_interactive()
+
+
+def test_picker_accepts_one_based_numbers(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(catalog, "discover_skills", lambda: ["first", "last"])
+    monkeypatch.setattr("builtins.input", lambda prompt: "2, 1")
+
+    assert cli.pick_interactive() == ["last", "first"]
+
+
+def test_coach_default_status_is_read_only(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    before = list(tmp_path.rglob("*"))
+
+    assert cli.main(["coach", "status"]) is None
+
+    output = capsys.readouterr()
+    assert output.out.splitlines()[0] == "Coding coach: OFF"
+    for host, status in coach.inspect().items():
+        assert f"{host:10s} off" in output.out
+        assert str(status.path) in output.out
+    assert output.err == ""
+    assert list(tmp_path.rglob("*")) == before
+
+
+def test_coach_on_status_off_persists_and_is_idempotent(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    originals = {
+        tmp_path / ".claude/CLAUDE.md": b"private claude instructions\r\n",
+        tmp_path / ".config/opencode/AGENTS.md": b"private opencode instructions",
+    }
+    for path, data in originals.items():
+        path.parent.mkdir(parents=True)
+        path.write_bytes(data)
+
+    for action, expected in (
+        ("on", "on"),
+        ("status", "on"),
+        ("on", "on"),
+        ("off", "off"),
+        ("status", "off"),
+        ("off", "off"),
+    ):
+        assert cli.main(["coach", action]) is None
+        output = capsys.readouterr()
+        assert output.out.splitlines()[0] == f"Coding coach: {expected.upper()}"
+        for host in agents.AGENTS:
+            assert f"{host:10s} {expected}" in output.out
+        for data in originals.values():
+            assert data.decode().strip() not in output.out + output.err
+        if action != "status":
+            assert "restart" in output.err.lower()
+            assert "new chat" in output.err.lower()
+        for path, data in originals.items():
+            if expected == "on":
+                assert coach.PROFILE_PATH.read_bytes() in path.read_bytes()
+            else:
+                assert path.read_bytes() == data
+
+
+@pytest.mark.parametrize("action", ["on", "status", "off"])
+def test_coach_partial_failure_reports_hosts_and_exits_one(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+    action: str,
+) -> None:
+    bad = tmp_path / ".codex/AGENTS.md"
+    bad.parent.mkdir()
+    bad.write_bytes(b"\xffprivate instructions")
+
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["coach", action])
+
+    assert exc.value.code == 1
+    output = capsys.readouterr()
+    assert output.out.splitlines()[0] == "Coding coach: ERROR"
+    assert "codex      error" in output.out
+    expected = "on" if action == "on" else "off"
+    for host in ("claude", "pi", "opencode"):
+        assert f"{host:10s} {expected}" in output.out
+        assert coach.inspect()[host].state == expected
+    assert "codex: not valid UTF-8" in caplog.text
+    assert str(bad) in caplog.text
+    assert "not valid UTF-8" not in output.out
+    assert "private instructions" not in output.out + output.err + caplog.text
+
+
+@pytest.mark.parametrize("action", ["on", "off"])
+def test_coach_unmet_postcondition_exits_one(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+    action: str,
+) -> None:
+    statuses = {
+        host: coach.CoachStatus("on" if action == "on" else "off", tmp_path / host)
+        for host in agents.AGENTS
+    }
+    statuses["pi"] = coach.CoachStatus("stale", tmp_path / "pi", "Leftover block.")
+    monkeypatch.setattr(coach, "set_enabled", lambda enabled: statuses)
+
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["coach", action])
+
+    assert exc.value.code == 1
+    assert capsys.readouterr().out.splitlines()[0] == "Coding coach: MIXED"
+    assert f"pi: requested {action}, observed stale" in caplog.text
+
+
+@pytest.mark.parametrize("state", ["off", "stale"])
+def test_coach_mixed_status_succeeds(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+    state: str,
+) -> None:
+    cli.main(["coach", "on"])
+    path = tmp_path / ".codex/AGENTS.md"
+    if state == "off":
+        path.unlink()
+    else:
+        path.write_bytes(
+            path.read_bytes().replace(b"current objective", b"old objective")
+        )
+    capsys.readouterr()
+
+    assert cli.main(["coach", "status"]) is None
+
+    output = capsys.readouterr()
+    assert output.out.splitlines()[0] == "Coding coach: MIXED"
+    assert f"codex      {state}" in output.out
+    assert "claude     on" in output.out
+    if state == "stale":
+        assert (
+            "codex: Effective file contains an older or edited profile" in caplog.text
+        )
+
+
+@pytest.mark.parametrize("args", [[], ["invalid"], ["on", "--agent", "codex"]])
+def test_coach_invalid_action_exits_two(args: list[str]) -> None:
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["coach", *args])
+    assert exc.value.code == 2
+
+
+def test_coach_off_without_profile_source(capsys: pytest.CaptureFixture[str]) -> None:
+    cli.main(["coach", "on"])
+    coach.PROFILE_PATH.unlink()
+    capsys.readouterr()
+
+    assert cli.main(["coach", "off"]) is None
+
+    assert capsys.readouterr().out.splitlines()[0] == "Coding coach: OFF"
+    assert {status.state for status in coach.inspect().values()} == {"off"}

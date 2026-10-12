@@ -32,9 +32,11 @@ class Order:
     items: list[Item]
     status: str
 
+
 class OrderService:
     def add_item(self, order, item):
         order.items.append(item)  # nothing stops this after status="shipped"
+
 
 # ✅ the aggregate guards its own invariant; no mutable accessor escapes
 class Order:
