@@ -2,7 +2,7 @@
 name: test-level
 description: Read-only assessment of one or more test-pyramid levels (unit, integration, component, contract, e2e, async) within an explicit scope for testing-strategy.
 tools: read, grep, find, ls, contact_supervisor
-thinking: high
+thinking: medium
 inheritSkills: false
 skills: testing-strategy
 output: findings.md

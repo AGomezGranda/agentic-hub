@@ -2,7 +2,7 @@
 name: arch-lens
 description: Read-only judgement of architecture-audit lenses (boundaries, responsibilities) within an explicit scope, given precomputed import-graph and co-change evidence.
 tools: read, grep, find, ls, contact_supervisor
-thinking: high
+thinking: medium
 inheritSkills: false
 skills: architecture-audit
 output: findings.md

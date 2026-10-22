@@ -2,7 +2,7 @@
 name: comment-compressor
 description: Read-only review of comments and docstrings in an explicit file set, returning exact deletion or compression proposals for remove-comment-slop.
 tools: read, grep, find, ls, contact_supervisor
-thinking: high
+thinking: medium
 inheritSkills: false
 skills: remove-comment-slop
 output: comment-proposals.md

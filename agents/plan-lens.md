@@ -2,7 +2,7 @@
 name: plan-lens
 description: Read-only review of an implementation plan through one or more related lenses (architecture, security, tests, etc.) within an explicit scope for review-plan.
 tools: read, grep, find, ls, contact_supervisor
-thinking: high
+thinking: medium
 inheritSkills: false
 skills: review-plan
 output: findings.md

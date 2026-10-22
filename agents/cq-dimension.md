@@ -2,7 +2,7 @@
 name: cq-dimension
 description: Read-only judgement of one or more code-quality-audit dimensions (SOLID, DRY, KISS, typing, error handling) within an explicit scope.
 tools: read, grep, find, ls, contact_supervisor
-thinking: high
+thinking: medium
 inheritSkills: false
 skills: code-quality-audit
 output: findings.md
