@@ -4,30 +4,64 @@ from unittest.mock import Mock
 
 import pytest
 
-from agentic_hub import agents, coach
+from agentic_hub import agents, behavior
 
-pytestmark = pytest.mark.usefixtures("isolated_coach_home")
+pytestmark = pytest.mark.usefixtures("isolated_behavior_home")
 
 
 @pytest.mark.parametrize(
     "statuses,expected",
     [
-        ([coach.CoachStatus("on", None), coach.CoachStatus("on", None)], "ON"),
-        ([coach.CoachStatus("off", None), coach.CoachStatus("off", None)], "OFF"),
-        ([coach.CoachStatus("on", None), coach.CoachStatus("off", None)], "MIXED"),
-        ([coach.CoachStatus("stale", None)], "MIXED"),
-        ([coach.CoachStatus("error", None), coach.CoachStatus("on", None)], "ERROR"),
-        ([coach.CoachStatus("stale", None), coach.CoachStatus("error", None)], "ERROR"),
+        (
+            [
+                behavior.BehaviorStatus("on", None, mode="coach"),
+                behavior.BehaviorStatus("on", None, mode="coach"),
+            ],
+            "COACH",
+        ),
+        (
+            [
+                behavior.BehaviorStatus("off", None),
+                behavior.BehaviorStatus("off", None),
+            ],
+            "OFF",
+        ),
+        (
+            [
+                behavior.BehaviorStatus("on", None, mode="coach"),
+                behavior.BehaviorStatus("off", None),
+            ],
+            "MIXED",
+        ),
+        ([behavior.BehaviorStatus("stale", None)], "MIXED"),
+        (
+            [
+                behavior.BehaviorStatus("error", None),
+                behavior.BehaviorStatus("on", None, mode="coach"),
+            ],
+            "ERROR",
+        ),
+        (
+            [
+                behavior.BehaviorStatus("stale", None),
+                behavior.BehaviorStatus("error", None),
+            ],
+            "ERROR",
+        ),
         ([], "MIXED"),
     ],
 )
-def test_combined_coach_state(statuses: list[coach.CoachStatus], expected: str) -> None:
-    assert coach.combined_state({str(i): s for i, s in enumerate(statuses)}) == expected
+def test_combined_coach_state(
+    statuses: list[behavior.BehaviorStatus], expected: str
+) -> None:
+    assert (
+        behavior.combined_state({str(i): s for i, s in enumerate(statuses)}) == expected
+    )
 
 
 def test_default_off_is_read_only(tmp_path: Path) -> None:
     before = list(tmp_path.rglob("*"))
-    for result in (coach.inspect(), coach.set_enabled(False)):
+    for result in (behavior.inspect(), behavior.set_mode(None)):
         assert set(result) == set(agents.AGENTS)
         assert {s.state for s in result.values()} == {"off"}
         assert all(s.path is not None for s in result.values())
@@ -107,7 +141,7 @@ def test_resolves_effective_global_instruction_file(
             patch.setenv(key, value)
         for name, data in files.items():
             put(tmp_path / name, data)
-        status = coach.inspect()[agent]
+        status = behavior.inspect()[agent]
     assert status.state == "off"
     expected_path = tmp_path / expected
     assert status.path is not None
@@ -126,7 +160,7 @@ def test_unsupported_opencode_layout_is_reported_without_guessing(
     name: str,
 ) -> None:
     monkeypatch.setenv(name, str(tmp_path / "custom"))
-    status = coach.inspect()["opencode"]
+    status = behavior.inspect()["opencode"]
     assert status.state == "error"
     assert "unsupported" in (status.detail or "").lower()
     assert not (tmp_path / ".config").exists()
@@ -136,7 +170,7 @@ def test_unknown_host_is_explicit(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setattr(agents, "AGENTS", {"custom": (tmp_path, "symlink")})
-    status = coach.inspect()["custom"]
+    status = behavior.inspect()["custom"]
     assert status.state == "error"
     assert "unsupported host" in (status.detail or "")
 
@@ -151,11 +185,11 @@ def test_toggle_round_trip_preserves_user_bytes(
     path = tmp_path / ".claude/CLAUDE.md"
     if original is not None:
         put(path, original)
-    assert {s.state for s in coach.set_enabled(True).values()} == {"on"}
+    assert {s.state for s in behavior.set_mode("coach").values()} == {"on"}
     installed = path.read_bytes()
-    assert coach.PROFILE_PATH.read_bytes() in installed
+    assert behavior.PROFILES["coach"].read_bytes() in installed
     path.write_bytes(installed + later)
-    assert {s.state for s in coach.set_enabled(False).values()} == {"off"}
+    assert {s.state for s in behavior.set_mode(None).values()} == {"off"}
     if original is None and not later:
         assert not path.exists()
     else:
@@ -165,29 +199,29 @@ def test_toggle_round_trip_preserves_user_bytes(
 def test_repeated_enable_is_idempotent_and_refreshes_stale_profile(
     tmp_path: Path,
 ) -> None:
-    coach.set_enabled(True)
+    behavior.set_mode("coach")
     path = tmp_path / ".claude/CLAUDE.md"
     before = path.stat()
     data = path.read_bytes()
-    assert {s.state for s in coach.set_enabled(True).values()} == {"on"}
+    assert {s.state for s in behavior.set_mode("coach").values()} == {"on"}
     assert path.stat() == before
     assert path.read_bytes() == data
-    coach.PROFILE_PATH.write_text("Updated coaching contract.\n")
-    assert {s.state for s in coach.inspect().values()} == {"stale"}
-    assert {s.state for s in coach.set_enabled(True).values()} == {"on"}
-    assert coach.PROFILE_PATH.read_bytes() in path.read_bytes()
+    behavior.PROFILES["coach"].write_text("Updated coaching contract.\n")
+    assert {s.state for s in behavior.inspect().values()} == {"stale"}
+    assert {s.state for s in behavior.set_mode("coach").values()} == {"on"}
+    assert behavior.PROFILES["coach"].read_bytes() in path.read_bytes()
     path.write_bytes(b"New preface\n" + path.read_bytes())
-    coach.set_enabled(False)
+    behavior.set_mode(None)
     assert path.read_bytes() == b"New preface\n"
 
 
 def test_disable_removes_shadowed_blocks_without_profile_source(tmp_path: Path) -> None:
-    coach.set_enabled(True)
+    behavior.set_mode("coach")
     base = tmp_path / ".codex/AGENTS.md"
     put(tmp_path / ".codex/AGENTS.override.md")
-    assert coach.inspect()["codex"].state == "stale"
-    coach.PROFILE_PATH.unlink()
-    assert {s.state for s in coach.set_enabled(False).values()} == {"off"}
+    assert behavior.inspect()["codex"].state == "stale"
+    behavior.PROFILES["coach"].unlink()
+    assert {s.state for s in behavior.set_mode(None).values()} == {"off"}
     assert not base.exists()
     assert (tmp_path / ".codex/AGENTS.override.md").read_bytes() == b"user instructions"
 
@@ -198,19 +232,19 @@ def test_shared_claude_opencode_target_is_updated_once(
 ) -> None:
     path = put(tmp_path / ".claude/CLAUDE.md")
     replace = Mock(wraps=os.replace)
-    monkeypatch.setattr(coach.os, "replace", replace)
-    assert {s.state for s in coach.set_enabled(True).values()} == {"on"}
+    monkeypatch.setattr(behavior.os, "replace", replace)
+    assert {s.state for s in behavior.set_mode("coach").values()} == {"on"}
     assert sum(call.args[1] == path for call in replace.call_args_list) == 1
     assert not (tmp_path / ".config").exists()
-    coach.PROFILE_PATH.write_text("New profile\n")
+    behavior.PROFILES["coach"].write_text("New profile\n")
 
     def fail_shared(source: Path, destination: Path) -> None:
         if destination == path:
             raise OSError("injected shared write failure")
         replace(source, destination)
 
-    monkeypatch.setattr(coach.os, "replace", fail_shared)
-    result = coach.set_enabled(True)
+    monkeypatch.setattr(behavior.os, "replace", fail_shared)
+    result = behavior.set_mode("coach")
     assert result["claude"].state == result["opencode"].state == "error"
     assert result["pi"].state == result["codex"].state == "on"
     assert "observed state: stale" in (result["claude"].detail or "")
@@ -223,16 +257,16 @@ def test_native_opencode_preserves_claude_coaching(
     claude = put(tmp_path / ".claude/CLAUDE.md", b"claude user\r\n")
     native = put(tmp_path / ".config/opencode/AGENTS.md", b"opencode user")
     for _ in range(2):
-        assert {s.state for s in coach.set_enabled(True).values()} == {"on"}
-        assert coach.PROFILE_PATH.read_bytes() in claude.read_bytes()
-        assert coach.PROFILE_PATH.read_bytes() in native.read_bytes()
+        assert {s.state for s in behavior.set_mode("coach").values()} == {"on"}
+        assert behavior.PROFILES["coach"].read_bytes() in claude.read_bytes()
+        assert behavior.PROFILES["coach"].read_bytes() in native.read_bytes()
     claude.write_bytes(
         claude.read_bytes().replace(b"Coach the current objective.", b"Edited body.")
     )
-    result = coach.inspect()
+    result = behavior.inspect()
     assert result["claude"].state == "stale"
     assert result["opencode"].state == "on"
-    assert {s.state for s in coach.set_enabled(False).values()} == {"off"}
+    assert {s.state for s in behavior.set_mode(None).values()} == {"off"}
     assert claude.read_bytes() == b"claude user\r\n"
     assert native.read_bytes() == b"opencode user"
     replace = os.replace
@@ -242,9 +276,9 @@ def test_native_opencode_preserves_claude_coaching(
             raise OSError("injected native write failure")
         replace(source, destination)
 
-    monkeypatch.setattr(coach.os, "replace", fail_native)
-    assert coach.set_enabled(True)["opencode"].state == "error"
-    result = coach.inspect()
+    monkeypatch.setattr(behavior.os, "replace", fail_native)
+    assert behavior.set_mode("coach")["opencode"].state == "error"
+    result = behavior.inspect()
     assert result["claude"].state == "on"
     assert result["opencode"].state == "off"
 
@@ -255,22 +289,25 @@ def test_symlink_target_and_case_aliases_preserve_identity(tmp_path: Path) -> No
     link = tmp_path / ".pi/agent/AGENTS.md"
     link.parent.mkdir(parents=True)
     link.symlink_to(base)
-    assert {s.state for s in coach.set_enabled(True).values()} == {"on"}
-    assert link.is_symlink()
-    assert coach.PROFILE_PATH.read_bytes() in base.read_bytes()
-    assert coach.PROFILE_PATH.read_bytes() in override.read_bytes()
-    assert {s.state for s in coach.set_enabled(False).values()} == {"off"}
+    for mode in ("coach", "skeptic", "interviewer"):
+        result = behavior.set_mode(mode)
+        assert {s.state for s in result.values()} == {"on"}
+        assert {s.mode for s in result.values()} == {mode}
+        assert link.is_symlink()
+        assert behavior.PROFILES[mode].read_bytes() in base.read_bytes()
+        assert behavior.PROFILES[mode].read_bytes() in override.read_bytes()
+    assert {s.state for s in behavior.set_mode(None).values()} == {"off"}
     assert link.is_symlink()
     assert base.read_bytes() == b"base"
     assert override.read_bytes() == b"override"
 
 
 def test_hub_created_symlink_target_is_kept_empty(tmp_path: Path) -> None:
-    coach.set_enabled(True)
+    behavior.set_mode("coach")
     base = tmp_path / ".codex/AGENTS.md"
     link = tmp_path / ".codex/AGENTS.override.md"
     link.symlink_to(base)
-    assert coach.set_enabled(False)["codex"].state == "off"
+    assert behavior.set_mode(None)["codex"].state == "off"
     assert link.is_symlink()
     assert base.read_bytes() == b""
 
@@ -291,7 +328,11 @@ def test_invalid_targets_are_left_untouched(tmp_path: Path, kind: str) -> None:
     else:
         os.mkfifo(path)
     before = path.lstat()
-    for result in (coach.inspect(), coach.set_enabled(True), coach.set_enabled(False)):
+    for result in (
+        behavior.inspect(),
+        behavior.set_mode("coach"),
+        behavior.set_mode(None),
+    ):
         assert result["codex"].state == "error"
     assert path.lstat() == before
     assert base.read_bytes() == b"user base"
@@ -311,7 +352,11 @@ def test_malformed_markers_and_invalid_utf8_are_not_overwritten(
     invalid: bytes,
 ) -> None:
     path = put(tmp_path / ".claude/CLAUDE.md", invalid)
-    for result in (coach.inspect(), coach.set_enabled(True), coach.set_enabled(False)):
+    for result in (
+        behavior.inspect(),
+        behavior.set_mode("coach"),
+        behavior.set_mode(None),
+    ):
         assert result["claude"].state == result["opencode"].state == "error"
         assert "private text" not in (result["claude"].detail or "")
     assert path.read_bytes() == invalid
@@ -319,7 +364,7 @@ def test_malformed_markers_and_invalid_utf8_are_not_overwritten(
 
 @pytest.mark.parametrize("edit", ["duplicate", "reversed", "missing", "framing"])
 def test_broken_owned_block_is_not_repaired(tmp_path: Path, edit: str) -> None:
-    coach.set_enabled(True)
+    behavior.set_mode("coach")
     path = tmp_path / ".claude/CLAUDE.md"
     data = path.read_bytes()
     if edit == "duplicate":
@@ -335,8 +380,8 @@ def test_broken_owned_block_is_not_repaired(tmp_path: Path, edit: str) -> None:
     else:
         data = data.lstrip(b"\n")
     path.write_bytes(data)
-    assert coach.set_enabled(True)["claude"].state == "error"
-    assert coach.set_enabled(False)["claude"].state == "error"
+    assert behavior.set_mode("coach")["claude"].state == "error"
+    assert behavior.set_mode(None)["claude"].state == "error"
     assert path.read_bytes() == data
 
 
@@ -369,10 +414,10 @@ def test_failed_or_conflicting_write_preserves_original(
             path.symlink_to(other)
 
     if failure == "replace":
-        monkeypatch.setattr(coach.os, "replace", fail_replace)
+        monkeypatch.setattr(behavior.os, "replace", fail_replace)
     else:
-        monkeypatch.setattr(coach.os, "fsync", concurrent_edit)
-    result = coach.set_enabled(True)
+        monkeypatch.setattr(behavior.os, "fsync", concurrent_edit)
+    result = behavior.set_mode("coach")
     assert result["claude"].state == result["opencode"].state == "error"
     assert result["pi"].state == result["codex"].state == "on"
     assert not list(tmp_path.rglob(".coach-*"))
@@ -400,10 +445,10 @@ def test_mode_bits_preserved_and_access_time_is_not_a_conflict(
         metadata = path.stat()
         os.utime(path, ns=(metadata.st_atime_ns + 1_000_000_000, metadata.st_mtime_ns))
 
-    monkeypatch.setattr(coach.os, "fsync", reader)
-    assert coach.set_enabled(True)["claude"].state == "on"
+    monkeypatch.setattr(behavior.os, "fsync", reader)
+    assert behavior.set_mode("coach")["claude"].state == "on"
     assert path.stat().st_mode & 0o777 == 0o640
-    assert coach.set_enabled(False)["claude"].state == "off"
+    assert behavior.set_mode(None)["claude"].state == "off"
     assert path.read_bytes() == b"original"
     assert path.stat().st_mode & 0o777 == 0o640
 
@@ -414,7 +459,7 @@ def test_partial_failure_keeps_independent_success_and_reports_actual_state(
     monkeypatch: pytest.MonkeyPatch,
     failure: str,
 ) -> None:
-    coach.set_enabled(True)
+    behavior.set_mode("coach")
     base = tmp_path / ".codex/AGENTS.md"
     old_block = base.read_bytes()
     put(tmp_path / ".codex/AGENTS.override.md", b"override")
@@ -425,7 +470,7 @@ def test_partial_failure_keeps_independent_success_and_reports_actual_state(
     else:
         put(bad, b"\xff")
         failed_host = "pi"
-    result = coach.set_enabled(True)
+    result = behavior.set_mode("coach")
     assert result[failed_host].state == "error"
     assert result["claude"].state == "on"
     assert result["codex"].state == "stale"
@@ -433,14 +478,14 @@ def test_partial_failure_keeps_independent_success_and_reports_actual_state(
     assert "cleanup deferred" in (result["codex"].detail or "")
     assert base.read_bytes() == old_block
     # Disable still clears independently validated candidate sets.
-    assert coach.set_enabled(False)["codex"].state == "off"
+    assert behavior.set_mode(None)["codex"].state == "off"
     assert not base.exists()
     put(base, old_block)
     if failure == "resolution":
         monkeypatch.delenv("OPENCODE_CONFIG_DIR")
     else:
         bad.unlink()
-    assert {s.state for s in coach.set_enabled(True).values()} == {"on"}
+    assert {s.state for s in behavior.set_mode("coach").values()} == {"on"}
     assert not base.exists()
 
 
@@ -458,7 +503,11 @@ def test_unreadable_shadowed_candidate_blocks_all_writes_for_its_host(
         return read_bytes(path)
 
     monkeypatch.setattr(Path, "read_bytes", unreadable)
-    for result in (coach.inspect(), coach.set_enabled(True), coach.set_enabled(False)):
+    for result in (
+        behavior.inspect(),
+        behavior.set_mode("coach"),
+        behavior.set_mode(None),
+    ):
         assert result["codex"].state == "error"
     assert override.read_bytes() == b"override"
 
@@ -467,12 +516,12 @@ def test_conflicting_delete_preserves_concurrent_edit(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    coach.set_enabled(True)
+    behavior.set_mode("coach")
     path = tmp_path / ".claude/CLAUDE.md"
-    original_read = coach._read
+    original_read = behavior._read
     calls = 0
 
-    def edit_before_recheck(candidate: Path) -> coach._File:
+    def edit_before_recheck(candidate: Path) -> behavior._File:
         nonlocal calls
         if candidate == path:
             calls += 1
@@ -481,8 +530,8 @@ def test_conflicting_delete_preserves_concurrent_edit(
         return original_read(candidate)
 
     # Claude's path is scanned once for Claude and once as OpenCode's fallback.
-    monkeypatch.setattr(coach, "_read", edit_before_recheck)
-    result = coach.set_enabled(False)
+    monkeypatch.setattr(behavior, "_read", edit_before_recheck)
+    result = behavior.set_mode(None)
     assert result["claude"].state == "error"
     assert path.read_bytes().endswith(b"concurrent addition")
 
@@ -503,26 +552,189 @@ def test_shared_write_failure_retains_candidate_validation_error(
             raise OSError("injected shared failure")
         replace(source, destination)
 
-    monkeypatch.setattr(coach.os, "replace", fail_shared)
-    result = coach.set_enabled(True)
+    monkeypatch.setattr(behavior.os, "replace", fail_shared)
+    result = behavior.set_mode("coach")
     assert result["pi"].state == "error"
     assert "not valid UTF-8" in (result["pi"].detail or "")
     assert "injected shared failure" in (result["pi"].detail or "")
 
 
-@pytest.mark.parametrize("invalid", [None, b"", b"\xff"])
+@pytest.mark.parametrize(
+    "invalid",
+    [
+        None,
+        b"",
+        b"\xff",
+        b"<!-- agentic-hub: coding-coach",
+        b"<!-- agentic-hub: behavior-mode",
+    ],
+)
 def test_unavailable_profile_prevents_enable_but_allows_disable(
     tmp_path: Path,
     invalid: bytes | None,
 ) -> None:
-    coach.set_enabled(True)
+    behavior.set_mode("coach")
     path = tmp_path / ".claude/CLAUDE.md"
     before = path.read_bytes()
     if invalid is None:
-        coach.PROFILE_PATH.unlink()
+        behavior.PROFILES["coach"].unlink()
     else:
-        coach.PROFILE_PATH.write_bytes(invalid)
-    assert {s.state for s in coach.inspect().values()} == {"error"}
-    assert {s.state for s in coach.set_enabled(True).values()} == {"error"}
+        behavior.PROFILES["coach"].write_bytes(invalid)
+    assert {s.state for s in behavior.inspect().values()} == {"error"}
+    assert {s.state for s in behavior.set_mode("coach").values()} == {"error"}
     assert path.read_bytes() == before
-    assert {s.state for s in coach.set_enabled(False).values()} == {"off"}
+    assert {s.state for s in behavior.set_mode(None).values()} == {"off"}
+
+
+def test_mode_aggregation_uses_identity_and_freshness() -> None:
+    statuses = {
+        "claude": behavior.BehaviorStatus("on", None, mode="coach"),
+        "pi": behavior.BehaviorStatus("on", None, mode="skeptic"),
+    }
+    assert behavior.combined_state(statuses) == "MIXED"
+    for mode in behavior.PROFILES:
+        statuses = {"host": behavior.BehaviorStatus("on", None, mode)}
+        assert behavior.combined_state(statuses) == behavior.mode_label(mode).upper()
+        statuses["host"].state = "stale"
+        assert behavior.combined_state(statuses) == "MIXED"
+        statuses["host"].state = "error"
+        assert behavior.combined_state(statuses) == "ERROR"
+
+
+@pytest.mark.parametrize(
+    "first,second",
+    [
+        (first, second)
+        for first in behavior.PROFILES
+        for second in behavior.PROFILES
+        if first != second
+    ],
+)
+@pytest.mark.parametrize("original", [None, b"", b"user\r\n", b"user"])
+def test_mode_switch_round_trip_preserves_user_bytes(
+    tmp_path: Path,
+    first: behavior.BehaviorMode,
+    second: behavior.BehaviorMode,
+    original: bytes | None,
+) -> None:
+    path = tmp_path / ".claude/CLAUDE.md"
+    if original is not None:
+        put(path, original)
+    for mode in (first, second, "coach"):
+        result = behavior.set_mode(mode)
+        assert {s.state for s in result.values()} == {"on"}
+        assert {s.mode for s in result.values()} == {mode}
+        data = path.read_bytes()
+        assert data.count(b"<!-- agentic-hub:") == 2
+        assert behavior.PROFILES[mode].read_bytes() in data
+        before = path.stat()
+        behavior.set_mode(mode)
+        assert path.stat() == before
+    assert b"coding-coach begin" in path.read_bytes()
+    assert {s.state for s in behavior.set_mode(None).values()} == {"off"}
+    if original is None:
+        assert not path.exists()
+    else:
+        assert path.read_bytes() == original
+
+
+@pytest.mark.parametrize("mode", list(behavior.PROFILES))
+def test_profile_refresh_and_missing_sources_are_mode_specific(
+    tmp_path: Path,
+    mode: behavior.BehaviorMode,
+) -> None:
+    behavior.set_mode(mode)
+    path = tmp_path / ".claude/CLAUDE.md"
+    behavior.PROFILES[mode].write_text("Updated role.\n")
+    assert {s.state for s in behavior.inspect().values()} == {"stale"}
+    assert {s.mode for s in behavior.inspect().values()} == {mode}
+    assert {s.state for s in behavior.set_mode(mode).values()} == {"on"}
+    before = path.read_bytes()
+    behavior.PROFILES[mode].unlink()
+    observed = behavior.inspect()
+    assert {s.state for s in observed.values()} == {"error"}
+    assert {s.mode for s in observed.values()} == {mode}
+    failed = behavior.set_mode(mode)
+    assert {s.mode for s in failed.values()} == {mode}
+    assert all("observed state: error" in (s.detail or "") for s in failed.values())
+    assert path.read_bytes() == before
+    other = next(candidate for candidate in behavior.PROFILES if candidate != mode)
+    assert {s.mode for s in behavior.set_mode(other).values()} == {other}
+    assert {s.state for s in behavior.set_mode(None).values()} == {"off"}
+
+
+def test_invalid_direct_mode_does_not_write(tmp_path: Path) -> None:
+    before = list(tmp_path.rglob("*"))
+    with pytest.raises(ValueError, match="unknown behavior mode"):
+        behavior.set_mode("unknown")  # type: ignore[arg-type]
+    assert list(tmp_path.rglob("*")) == before
+
+
+@pytest.mark.parametrize("edit", ["unknown", "duplicate", "both", "end", "framing"])
+def test_conflicting_primary_blocks_are_not_overwritten(
+    tmp_path: Path, edit: str
+) -> None:
+    behavior.set_mode("coach")
+    path = tmp_path / ".claude/CLAUDE.md"
+    legacy = path.read_bytes()
+    behavior.set_mode("skeptic")
+    named = path.read_bytes()
+    if edit == "unknown":
+        data = named.replace(b"mode=skeptic", b"mode=unknown")
+    elif edit == "duplicate":
+        data = named + named
+    elif edit == "both":
+        data = legacy + named
+    elif edit == "end":
+        data = named.replace(b"behavior-mode end", b"coding-coach end")
+    else:
+        data = named.lstrip(b"\n")
+    path.write_bytes(data + b"private instructions")
+    before = path.read_bytes()
+    for result in (
+        behavior.inspect(),
+        behavior.set_mode("interviewer"),
+        behavior.set_mode(None),
+    ):
+        assert result["claude"].state == result["opencode"].state == "error"
+        assert "private instructions" not in (result["claude"].detail or "")
+    assert path.read_bytes() == before
+
+
+def test_switch_failure_retains_observed_modes_and_allows_retry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    shared = put(tmp_path / ".claude/CLAUDE.md")
+    behavior.set_mode("rubber-duck")
+    replace = os.replace
+
+    def fail(source: Path, destination: Path) -> None:
+        if destination == shared:
+            raise OSError("injected switch failure")
+        replace(source, destination)
+
+    monkeypatch.setattr(behavior.os, "replace", fail)
+    result = behavior.set_mode("skeptic")
+    for host in ("claude", "opencode"):
+        assert result[host].state == "error"
+        assert result[host].mode == "rubber-duck"
+        assert "observed state: on, mode: rubber-duck" in (result[host].detail or "")
+    assert result["pi"].mode == result["codex"].mode == "skeptic"
+    monkeypatch.setattr(behavior.os, "replace", replace)
+    assert behavior.combined_state(behavior.set_mode("skeptic")) == "SKEPTIC"
+
+
+def test_set_mode_checks_observed_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        behavior,
+        "inspect",
+        lambda: {
+            host: behavior.BehaviorStatus("on", None, "interviewer")
+            for host in agents.AGENTS
+        },
+    )
+    result = behavior.set_mode("skeptic")
+    assert {s.state for s in result.values()} == {"error"}
+    assert {s.mode for s in result.values()} == {"interviewer"}
+    assert all("requested skeptic" in (s.detail or "") for s in result.values())

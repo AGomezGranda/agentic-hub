@@ -1,4 +1,4 @@
-"""Persistent coaching instructions, independent of skill installation."""
+"""Persistent primary behavior, independent of skill installation."""
 
 import os
 import re
@@ -10,8 +10,14 @@ from typing import Literal
 
 from . import agents
 
-PROFILE_PATH = Path(__file__).parent / "profiles/coding-coach.md"
-_MARKER = b"<!-- agentic-hub: coding-coach"
+BehaviorMode = Literal["coach", "rubber-duck", "skeptic", "interviewer"]
+PROFILES: dict[BehaviorMode, Path] = {
+    "coach": Path(__file__).parent / "profiles/coding-coach.md",
+    "rubber-duck": Path(__file__).parent / "profiles/rubber-duck.md",
+    "skeptic": Path(__file__).parent / "profiles/skeptic.md",
+    "interviewer": Path(__file__).parent / "profiles/interviewer.md",
+}
+_MARKERS = (b"<!-- agentic-hub: coding-coach", b"<!-- agentic-hub: behavior-mode")
 # The two leading and one trailing LF bytes belong to the block, not user text.
 _BLOCK = re.compile(
     rb"\n\n<!-- agentic-hub: coding-coach begin created=([01]) -->\n"
@@ -19,20 +25,61 @@ _BLOCK = re.compile(
     re.DOTALL,
 )
 
+_NAMED_BLOCK = re.compile(
+    rb"\n\n<!-- agentic-hub: behavior-mode begin mode=([a-z-]+) created=([01]) -->\n"
+    rb"(.*?)\n<!-- agentic-hub: behavior-mode end -->\n",
+    re.DOTALL,
+)
+
 
 @dataclass
-class CoachStatus:
+class _Block:
+    start: int
+    end: int
+    mode: BehaviorMode
+    created: bytes
+    body: bytes
+
+
+def _parse_block(data: bytes, path: Path) -> _Block | None:
+    legacy = _BLOCK.search(data)
+    named = _NAMED_BLOCK.search(data)
+    count = sum(data.count(marker) for marker in _MARKERS)
+    if count == 0:
+        return None
+    if count != 2 or (legacy is None) == (named is None):
+        raise ValueError(f"malformed primary behavior markers: {path}")
+    if legacy is not None:
+        return _Block(legacy.start(), legacy.end(), "coach", legacy[1], legacy[2])
+    assert named is not None
+    identifier = named[1].decode("ascii")
+    mode = next((mode for mode in PROFILES if mode == identifier), None)
+    if mode is None:
+        raise ValueError(f"unknown or invalid behavior mode: {path}")
+    return _Block(named.start(), named.end(), mode, named[2], named[3])
+
+
+@dataclass
+class BehaviorStatus:
     state: Literal["off", "on", "stale", "error"]
     path: Path | None
+    mode: BehaviorMode | None = None
     detail: str | None = None
 
 
-def combined_state(statuses: dict[str, CoachStatus]) -> str:
+def mode_label(mode: BehaviorMode) -> str:
+    return mode.replace("-", " ").title()
+
+
+def combined_state(statuses: dict[str, BehaviorStatus]) -> str:
     states = {status.state for status in statuses.values()}
     if "error" in states:
         return "ERROR"
-    if states == {"on"}:
-        return "ON"
+    modes = {status.mode for status in statuses.values()}
+    if states == {"on"} and len(modes) == 1:
+        mode = next(iter(modes))
+        if mode is not None:
+            return mode_label(mode).upper()
     if states == {"off"}:
         return "OFF"
     return "MIXED"
@@ -96,7 +143,7 @@ class _File:
     data: bytes
     metadata: os.stat_result | None
     aliases: set[Path] = field(default_factory=set)
-    block: re.Match[bytes] | None = None
+    block: _Block | None = None
 
     @property
     def key(self) -> tuple[int, int] | Path:
@@ -123,16 +170,16 @@ def _read(path: Path) -> _File:
         data.decode("utf-8")
     except UnicodeDecodeError:
         raise ValueError(f"not valid UTF-8: {path}") from None
-    block = _BLOCK.search(data)
-    if data.count(_MARKER) != (2 if block else 0):
-        raise ValueError(f"malformed coding-coach markers: {path}")
+    block = _parse_block(data, path)
     return _File(physical, data, metadata, {path}, block)
 
 
-def _scan() -> tuple[dict[str, list[_File]], dict[str, _File], dict[str, CoachStatus]]:
+def _scan() -> tuple[
+    dict[str, list[_File]], dict[str, _File], dict[str, BehaviorStatus]
+]:
     candidates: dict[str, list[_File]] = {}
     selected: dict[str, _File] = {}
-    errors: dict[str, CoachStatus] = {}
+    errors: dict[str, BehaviorStatus] = {}
     files: dict[tuple[int, int] | Path, _File] = {}
     for agent in agents.AGENTS:
         path = None
@@ -154,33 +201,39 @@ def _scan() -> tuple[dict[str, list[_File]], dict[str, _File], dict[str, CoachSt
                 chosen = options[0]
             selected[agent] = chosen
         except (OSError, ValueError, RuntimeError) as exc:
-            errors[agent] = CoachStatus("error", path, str(exc))
+            errors[agent] = BehaviorStatus("error", path, detail=str(exc))
     return candidates, selected, errors
 
 
-def _profile() -> bytes:
-    data = PROFILE_PATH.read_bytes()
+def _profile(mode: BehaviorMode) -> bytes:
+    path = PROFILES[mode]
+    data = path.read_bytes()
     try:
         data.decode("utf-8")
     except UnicodeDecodeError:
-        raise ValueError(f"not valid UTF-8: {PROFILE_PATH}") from None
-    if not data.strip() or _MARKER in data:
-        raise ValueError(f"invalid coaching profile: {PROFILE_PATH}")
+        raise ValueError(f"not valid UTF-8: {path}") from None
+    if not data.strip() or any(marker in data for marker in _MARKERS):
+        raise ValueError(f"invalid behavior profile: {path}")
     return data
 
 
-def inspect() -> dict[str, CoachStatus]:
+def inspect() -> dict[str, BehaviorStatus]:
     """Read actual installed state without creating files or directories."""
     candidates, selected, errors = _scan()
     active = {f.key for f in selected.values()}
     result = dict(errors)
     for agent, target in selected.items():
-        status = CoachStatus("off", target.path)
+        status = BehaviorStatus("off", target.path)
         if target.block is not None:
+            status.mode = target.block.mode
             try:
-                status.state = "on" if target.block[2] == _profile() else "stale"
+                status.state = (
+                    "on"
+                    if target.block.body == _profile(target.block.mode)
+                    else "stale"
+                )
                 if status.state == "stale":
-                    status.detail = "Effective file contains an older or edited profile; enable to refresh."
+                    status.detail = "Effective file contains an older or edited profile; reapply to refresh."
             except (OSError, ValueError) as exc:
                 status.state, status.detail = "error", str(exc)
         leftovers = {
@@ -195,9 +248,9 @@ def inspect() -> dict[str, CoachStatus]:
             )
             presence = "present" if target.block else "absent"
             status.detail = (
-                f"Coaching {presence} in effective file; {uncertainty} blocks: "
+                f"Behavior {presence} in effective file; {uncertainty} blocks: "
                 + ", ".join(str(p) for p in sorted(leftovers))
-                + ". Retry enable or disable to remove."
+                + ". Retry apply or turn off to remove."
             )
         result[agent] = status
     return {agent: result[agent] for agent in agents.AGENTS}
@@ -242,48 +295,64 @@ def _write(target: _File, data: bytes, delete: bool = False) -> None:
             temporary.unlink(missing_ok=True)
 
 
-def _updated(target: _File, profile: bytes | None) -> tuple[bytes, bool]:
+def _updated(
+    target: _File, mode: BehaviorMode | None, profile: bytes | None
+) -> tuple[bytes, bool]:
     block = target.block
-    if profile is None:
+    if mode is None:
         if block is None:
             return target.data, False
-        remaining = target.data[: block.start()] + target.data[block.end() :]
+        remaining = target.data[: block.start] + target.data[block.end :]
         linked = any(p.is_symlink() for p in target.aliases)
-        return remaining, block[1] == b"1" and not remaining and not linked
-    created = block[1] if block else (b"1" if target.metadata is None else b"0")
+        return remaining, block.created == b"1" and not remaining and not linked
+    assert profile is not None
+    created = block.created if block else (b"1" if target.metadata is None else b"0")
+    marker = b"coding-coach" if mode == "coach" else b"behavior-mode"
+    identity = b"" if mode == "coach" else b"mode=" + mode.encode() + b" "
     replacement = (
-        b"\n\n<!-- agentic-hub: coding-coach begin created="
+        b"\n\n<!-- agentic-hub: "
+        + marker
+        + b" begin "
+        + identity
+        + b"created="
         + created
         + b" -->\n"
         + profile
-        + b"\n<!-- agentic-hub: coding-coach end -->\n"
+        + b"\n<!-- agentic-hub: "
+        + marker
+        + b" end -->\n"
     )
     if block:
-        return target.data[: block.start()] + replacement + target.data[
-            block.end() :
+        return target.data[: block.start] + replacement + target.data[
+            block.end :
         ], False
     return target.data + replacement, False
 
 
-def set_enabled(enabled: bool) -> dict[str, CoachStatus]:
+def set_mode(mode: BehaviorMode | None) -> dict[str, BehaviorStatus]:
     """Update validated targets independently, then report state and operation errors."""
+    if mode is not None and mode not in PROFILES:
+        raise ValueError("unknown behavior mode")
+    try:
+        profile = _profile(mode) if mode is not None else None
+    except (OSError, ValueError) as exc:
+        return {
+            agent: BehaviorStatus(
+                "error",
+                actual.path,
+                actual.mode,
+                f"{exc}; {actual.detail or ''}; observed state: {actual.state}, "
+                f"mode: {actual.mode or 'off'}",
+            )
+            for agent, actual in inspect().items()
+        }
     candidates, selected, errors = _scan()
-    profile = None
-    if enabled:
-        try:
-            profile = _profile()
-        except (OSError, ValueError) as exc:
-            return {
-                agent: errors.get(agent)
-                or CoachStatus("error", selected[agent].path, str(exc))
-                for agent in agents.AGENTS
-            }
     active = {f.key for f in selected.values()}
     targets = {f.key: f for agent in selected for f in candidates[agent]}
     for key, target in targets.items():
-        if enabled and key not in active and errors:
+        if mode is not None and key not in active and errors:
             continue
-        data, delete = _updated(target, profile if enabled and key in active else None)
+        data, delete = _updated(target, mode if key in active else None, profile)
         try:
             _write(target, data, delete)
         except (OSError, ValueError, RuntimeError) as exc:
@@ -292,10 +361,21 @@ def set_enabled(enabled: bool) -> dict[str, CoachStatus]:
                     if agent in errors:
                         errors[agent].detail = f"{errors[agent].detail}; {exc}"
                     else:
-                        errors[agent] = CoachStatus("error", target.path, str(exc))
+                        errors[agent] = BehaviorStatus(
+                            "error", target.path, detail=str(exc)
+                        )
     result = inspect()
+    for agent, actual in result.items():
+        if actual.state == "on" and actual.mode != mode and agent not in errors:
+            errors[agent] = BehaviorStatus(
+                "error",
+                actual.path,
+                actual.mode,
+                f"requested {mode or 'off'} was not reached; retry or turn off",
+            )
     for agent, error in errors.items():
         actual = result[agent]
-        error.detail = f"{error.detail}; observed state: {actual.state}"
+        error.mode = actual.mode
+        error.detail = f"{error.detail}; observed state: {actual.state}, mode: {actual.mode or 'off'}"
         result[agent] = error
     return result

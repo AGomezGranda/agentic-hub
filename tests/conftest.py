@@ -2,11 +2,11 @@ from pathlib import Path
 
 import pytest
 
-from agentic_hub import coach
+from agentic_hub import behavior
 
 
 @pytest.fixture
-def isolated_coach_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def isolated_behavior_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
     for name in (
         "CLAUDE_CONFIG_DIR",
@@ -18,6 +18,11 @@ def isolated_coach_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
         "OPENCODE_DISABLE_CLAUDE_CODE_PROMPT",
     ):
         monkeypatch.delenv(name, raising=False)
-    profile = tmp_path / "profile.md"
-    profile.write_text("Coach the current objective.\n")
-    monkeypatch.setattr(coach, "PROFILE_PATH", profile)
+    profiles = {}
+    for mode in behavior.PROFILES:
+        profile = tmp_path / f"{mode}.md"
+        profile.write_text(
+            "Coach the current objective.\n" if mode == "coach" else f"{mode} role.\n"
+        )
+        profiles[mode] = profile
+    monkeypatch.setattr(behavior, "PROFILES", profiles)

@@ -4,12 +4,12 @@ from threading import Event
 from unittest.mock import Mock
 
 import pytest
-from textual.widgets import TabbedContent, Tabs
+from textual.widgets import Select, TabbedContent, Tabs
 from textual.widgets.markdown import MarkdownBlock
 
-from agentic_hub import agents, catalog, cli, coach, tui
+from agentic_hub import agents, behavior, catalog, cli, tui
 
-pytestmark = pytest.mark.usefixtures("isolated_coach_home")
+pytestmark = pytest.mark.usefixtures("isolated_behavior_home")
 
 
 def make_skill(src_dir: Path, name: str) -> None:
@@ -48,7 +48,7 @@ def setup_fixture(
     monkeypatch.setattr(agents, "AGENTS", fake_agents)
     if not real_hosts:
         monkeypatch.setattr(
-            coach,
+            behavior,
             "instruction_candidates",
             lambda host: [tmp_path / "instructions" / host / "AGENTS.md"],
         )
@@ -61,12 +61,12 @@ def test_skills_is_default_and_navigation_does_not_write(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     setup_fixture(tmp_path, monkeypatch)
-    inspect = Mock(wraps=coach.inspect)
+    inspect = Mock(wraps=behavior.inspect)
     mutate = Mock()
     install = Mock()
     remove = Mock()
-    monkeypatch.setattr(coach, "inspect", inspect)
-    monkeypatch.setattr(coach, "set_enabled", mutate)
+    monkeypatch.setattr(behavior, "inspect", inspect)
+    monkeypatch.setattr(behavior, "set_mode", mutate)
     monkeypatch.setattr(agents, "install_one", install)
     monkeypatch.setattr(agents, "remove_one", remove)
 
@@ -81,7 +81,7 @@ def test_skills_is_default_and_navigation_does_not_write(
             monkeypatch.setattr(app, "refresh_grid", refresh)
             await pilot.press("2")
             assert pages.active == "behavior-page"
-            assert app.focused is app.query_one("#coach-enable")
+            assert app.focused is app.query_one("#behavior-mode")
             await pilot.press("1")
             assert pages.active == "skills-page"
             assert app.focused is None
@@ -135,12 +135,12 @@ def test_shortcuts_and_footer_follow_active_page(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     setup_fixture(tmp_path, monkeypatch)
-    inspect = Mock(wraps=coach.inspect)
+    inspect = Mock(wraps=behavior.inspect)
     mutate = Mock()
     install = Mock()
     remove = Mock()
-    monkeypatch.setattr(coach, "inspect", inspect)
-    monkeypatch.setattr(coach, "set_enabled", mutate)
+    monkeypatch.setattr(behavior, "inspect", inspect)
+    monkeypatch.setattr(behavior, "set_mode", mutate)
     monkeypatch.setattr(agents, "install_one", install)
     monkeypatch.setattr(agents, "remove_one", remove)
 
@@ -155,7 +155,7 @@ def test_shortcuts_and_footer_follow_active_page(
             mutate.assert_not_called()
             await pilot.press("2")
             assert {"c", "C"} <= app.active_bindings.keys()
-            assert {"i", "r", "I", "R", "space", "/", "p", "s", "S"}.isdisjoint(
+            assert {"i", "r", "I", "R", "/", "p", "s", "S"}.isdisjoint(
                 app.active_bindings
             )
             assert {"1", "2", "ctrl+r", "ctrl+p", "q"} <= app.active_bindings.keys()
@@ -188,7 +188,7 @@ def test_filter_keeps_navigation_keys_as_text(
 ) -> None:
     setup_fixture(tmp_path, monkeypatch)
     mutate = Mock()
-    monkeypatch.setattr(coach, "set_enabled", mutate)
+    monkeypatch.setattr(behavior, "set_mode", mutate)
 
     async def scenario() -> None:
         app = tui.AgenticHubApp()
@@ -201,7 +201,7 @@ def test_filter_keeps_navigation_keys_as_text(
     asyncio.run(scenario())
 
 
-def test_coach_controls_default_off_without_skills(
+def test_behavior_controls_default_off_without_skills(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     setup_fixture(tmp_path, monkeypatch, with_skill=False, real_hosts=True)
@@ -209,30 +209,32 @@ def test_coach_controls_default_off_without_skills(
     async def scenario() -> None:
         app = tui.AgenticHubApp()
         async with app.run_test() as pilot:
-            assert "COACH: OFF" in str(app.query_one("#coach-indicator").render())
+            assert "MODE: OFF" in str(app.query_one("#behavior-indicator").render())
             await pilot.press("2")
-            rendered = str(app.query_one("#coach-status", tui.Static).render())
-            assert "Coding coach: OFF" in rendered
+            rendered = str(app.query_one("#behavior-status", tui.Static).render())
+            assert "Installed: OFF" in rendered
             for host in agents.AGENTS:
-                assert f"{host}: off" in rendered
+                assert f"{host}: off / off" in rendered
             assert "Scope: all hosts" in rendered
-            assert "Guidance, hints, and review" in rendered
-            assert "Restart the harness and start a new chat" in str(
-                app.query_one("#coach-restart").render()
+            assert "Normal collaboration" in str(
+                app.query_one("#behavior-preview").render()
+            )
+            assert "Restart harness; start a new chat." in str(
+                app.query_one("#behavior-restart").render()
             )
             for id_, label in (
-                ("coach-enable", "Enable all"),
-                ("coach-disable", "Disable all"),
+                ("behavior-apply", "Apply all"),
+                ("behavior-off", "Turn off all"),
             ):
                 button = app.query_one(f"#{id_}", tui.Button)
                 assert str(button.label) == label
                 assert button.can_focus and not button.disabled
-            assert all(status.state == "off" for status in coach.inspect().values())
+            assert all(status.state == "off" for status in behavior.inspect().values())
 
     asyncio.run(scenario())
 
 
-def test_coach_keyboard_persists_with_native_opencode_after_remount(
+def test_behavior_keyboard_persists_with_native_opencode_after_remount(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     setup_fixture(tmp_path, monkeypatch, with_skill=False, real_hosts=True)
@@ -244,26 +246,29 @@ def test_coach_keyboard_persists_with_native_opencode_after_remount(
     async def scenario() -> None:
         app = tui.AgenticHubApp()
         async with app.run_test() as pilot:
-            await pilot.press("2", "c")
+            await pilot.press("2")
+            app.query_one("#behavior-mode", Select).value = "coach"
+            await pilot.pause()
+            await pilot.press("c")
             await app.workers.wait_for_complete()
-            assert "Coding coach: ON" in str(app.query_one("#coach-status").render())
-            assert all(status.state == "on" for status in coach.inspect().values())
+            assert "Installed: COACH" in str(app.query_one("#behavior-status").render())
+            assert all(status.state == "on" for status in behavior.inspect().values())
             for path in paths:
                 assert b"coding-coach begin" in path.read_bytes()
 
         app = tui.AgenticHubApp()
         async with app.run_test() as pilot:
-            assert "Coding coach: ON" in str(app.query_one("#coach-status").render())
-            await pilot.press("2", "c")
+            assert "Installed: COACH" in str(app.query_one("#behavior-status").render())
+            await pilot.press("2", "C")
             await app.workers.wait_for_complete()
-            assert "Coding coach: OFF" in str(app.query_one("#coach-status").render())
+            assert "Installed: OFF" in str(app.query_one("#behavior-status").render())
             for path in paths:
                 assert path.read_bytes() == b"Personal instructions\r\n"
 
     asyncio.run(scenario())
 
 
-def test_coach_buttons_and_keyboard_focus_work_with_empty_filter(
+def test_behavior_buttons_and_keyboard_focus_work_with_empty_filter(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     setup_fixture(tmp_path, monkeypatch, real_hosts=True)
@@ -274,23 +279,25 @@ def test_coach_buttons_and_keyboard_focus_work_with_empty_filter(
             await pilot.press("/", "c", "C")
             assert app.query_one("#filter", tui.Input).value == "cC"
             assert app._visible == []
-            assert all(s.state == "off" for s in coach.inspect().values())
+            assert all(s.state == "off" for s in behavior.inspect().values())
             await pilot.click(
                 app.query_one("#pages", TabbedContent).get_tab("behavior-page")
             )
-            await pilot.click("#coach-enable")
+            app.query_one("#behavior-mode", Select).value = "coach"
+            await pilot.pause()
+            await pilot.click("#behavior-apply")
             await app.workers.wait_for_complete()
-            assert all(s.state == "on" for s in coach.inspect().values())
-            await pilot.click("#coach-disable")
+            assert all(s.state == "on" for s in behavior.inspect().values())
+            await pilot.click("#behavior-off")
             await app.workers.wait_for_complete()
-            assert all(s.state == "off" for s in coach.inspect().values())
-            app.query_one("#coach-enable").focus()
+            assert all(s.state == "off" for s in behavior.inspect().values())
+            app.query_one("#behavior-apply").focus()
             await pilot.press("enter")
             await app.workers.wait_for_complete()
-            assert all(s.state == "on" for s in coach.inspect().values())
+            assert all(s.state == "on" for s in behavior.inspect().values())
             await pilot.press("tab", "enter")
             await app.workers.wait_for_complete()
-            assert all(s.state == "off" for s in coach.inspect().values())
+            assert all(s.state == "off" for s in behavior.inspect().values())
             await pilot.press("1")
             assert app.query_one("#filter", tui.Input).value == "cC"
             assert app._visible == []
@@ -301,7 +308,7 @@ def test_coach_buttons_and_keyboard_focus_work_with_empty_filter(
 
 
 @pytest.mark.parametrize("drift", ["missing", "stale"])
-def test_coach_indicator_tracks_results_and_refresh(
+def test_behavior_indicator_tracks_results_and_refresh(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, drift: str
 ) -> None:
     setup_fixture(tmp_path, monkeypatch, real_hosts=True)
@@ -310,48 +317,51 @@ def test_coach_indicator_tracks_results_and_refresh(
         app = tui.AgenticHubApp()
         async with app.run_test() as pilot:
             cli.main(["coach", "on"])
-            assert "Coding coach: OFF" in str(app.query_one("#coach-status").render())
-            assert "COACH: OFF" in str(app.query_one("#coach-indicator").render())
+            assert "Installed: OFF" in str(app.query_one("#behavior-status").render())
+            assert "MODE: OFF" in str(app.query_one("#behavior-indicator").render())
             await pilot.press("ctrl+r")
-            assert "Coding coach: ON" in str(app.query_one("#coach-status").render())
-            assert "COACH: ON" in str(app.query_one("#coach-indicator").render())
+            assert "Installed: COACH" in str(app.query_one("#behavior-status").render())
+            assert "MODE: COACH" in str(app.query_one("#behavior-indicator").render())
             codex = tmp_path / ".codex/AGENTS.md"
             if drift == "missing":
                 codex.unlink()
             else:
                 codex.write_text(
                     codex.read_text().replace(
-                        coach.PROFILE_PATH.read_text(), "Old profile"
+                        behavior.PROFILES["coach"].read_text(), "Old profile"
                     )
                 )
             await pilot.press("ctrl+r")
-            assert "Coding coach: MIXED" in str(app.query_one("#coach-status").render())
-            assert "COACH: MIXED" in str(app.query_one("#coach-indicator").render())
-            await pilot.press("2", "c")
+            assert "Installed: MIXED" in str(app.query_one("#behavior-status").render())
+            assert "MODE: MIXED" in str(app.query_one("#behavior-indicator").render())
+            await pilot.press("2")
+            app.query_one("#behavior-mode", Select).value = "coach"
+            await pilot.pause()
+            await pilot.press("c")
             await app.workers.wait_for_complete()
-            assert all(s.state == "on" for s in coach.inspect().values())
-            assert "COACH: ON" in str(app.query_one("#coach-indicator").render())
+            assert all(s.state == "on" for s in behavior.inspect().values())
+            assert "MODE: COACH" in str(app.query_one("#behavior-indicator").render())
             codex.unlink()
             await pilot.press("ctrl+r", "C")
             await app.workers.wait_for_complete()
-            assert all(s.state == "off" for s in coach.inspect().values())
-            assert "COACH: OFF" in str(app.query_one("#coach-indicator").render())
+            assert all(s.state == "off" for s in behavior.inspect().values())
+            assert "MODE: OFF" in str(app.query_one("#behavior-indicator").render())
 
     asyncio.run(scenario())
 
 
-def test_coach_partial_failure_shows_details_and_preserves_operation_error(
+def test_behavior_partial_failure_shows_details_and_preserves_operation_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     setup_fixture(tmp_path, monkeypatch, real_hosts=True)
-    original_write = coach._write
+    original_write = behavior._write
 
     def fail_codex(target, *args):
         if target.path.parent.name == ".codex":
             raise OSError("blocked [target]")
         return original_write(target, *args)
 
-    monkeypatch.setattr(coach, "_write", fail_codex)
+    monkeypatch.setattr(behavior, "_write", fail_codex)
 
     async def scenario() -> None:
         app = tui.AgenticHubApp()
@@ -360,61 +370,67 @@ def test_coach_partial_failure_shows_details_and_preserves_operation_error(
             monkeypatch.setattr(
                 app, "notify", lambda *a, **kw: notifications.append((a, kw))
             )
-            await pilot.press("2", "c")
+            await pilot.press("2")
+            app.query_one("#behavior-mode", Select).value = "coach"
+            await pilot.pause()
+            await pilot.press("c")
             await app.workers.wait_for_complete()
-            rendered = str(app.query_one("#coach-status").render())
-            assert "Coding coach: ERROR" in rendered
-            assert "COACH: ERROR" in str(app.query_one("#coach-indicator").render())
-            assert "claude: on" in rendered and "codex: error" in rendered
+            rendered = str(app.query_one("#behavior-status").render())
+            assert "Installed: ERROR" in rendered
+            assert "MODE: ERROR" in str(app.query_one("#behavior-indicator").render())
+            assert "claude: coach / on" in rendered and "codex: off / error" in rendered
             assert "blocked [target]" in rendered and "observed state: off" in rendered
             assert notifications[-1][1]["severity"] == "error"
             assert "codex" in notifications[-1][0][0]
             await pilot.press("C")
             await app.workers.wait_for_complete()
-            assert coach.inspect()["claude"].state == "off"
+            assert behavior.inspect()["claude"].state == "off"
             await pilot.press("1", "space", "i", "r")
             assert agents.status("claude", "demo") == "missing"
 
     asyncio.run(scenario())
 
 
-@pytest.mark.parametrize("operation", ["inspect", "set_enabled"])
-def test_coach_exception_keeps_app_usable_and_allows_retry(
+@pytest.mark.parametrize("operation", ["inspect", "set_mode"])
+def test_behavior_exception_keeps_app_usable_and_allows_retry(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, operation: str
 ) -> None:
     setup_fixture(tmp_path, monkeypatch, real_hosts=True)
-    original = getattr(coach, operation)
+    original = getattr(behavior, operation)
 
     def fail(*args):
         raise RuntimeError("unexpected controller failure")
 
-    monkeypatch.setattr(coach, operation, fail)
+    monkeypatch.setattr(behavior, operation, fail)
 
     async def scenario() -> None:
         app = tui.AgenticHubApp()
         async with app.run_test() as pilot:
-            await pilot.press("2", "c")
+            await pilot.press("2")
+            app.query_one("#behavior-mode", Select).value = "coach"
+            await pilot.pause()
+            await pilot.press("c")
             await app.workers.wait_for_complete()
-            rendered = str(app.query_one("#coach-status").render())
-            assert "Coding coach: ERROR" in rendered
+            rendered = str(app.query_one("#behavior-status").render())
+            assert "Installed: ERROR" in rendered
             assert "unexpected controller failure" in rendered
-            assert not app.query_one("#coach-enable", tui.Button).disabled
-            assert not app.query_one("#coach-disable", tui.Button).disabled
-            monkeypatch.setattr(coach, operation, original)
+            assert not app.query_one("#behavior-apply", tui.Button).disabled
+            assert not app.query_one("#behavior-off", tui.Button).disabled
+            monkeypatch.setattr(behavior, operation, original)
             await pilot.press("C")
             await app.workers.wait_for_complete()
-            assert "Coding coach: OFF" in str(app.query_one("#coach-status").render())
+            assert "Installed: OFF" in str(app.query_one("#behavior-status").render())
             await pilot.press("1", "i")
             assert agents.status("claude", "demo") == "linked"
 
     asyncio.run(scenario())
 
 
-def test_coach_warns_when_requested_state_is_not_reached(
+def test_behavior_warns_when_requested_state_is_not_reached(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     setup_fixture(tmp_path, monkeypatch, real_hosts=True)
-    monkeypatch.setattr(coach, "set_enabled", lambda enabled: coach.inspect())
+    monkeypatch.setattr(behavior, "set_mode", lambda enabled: behavior.inspect())
 
     async def scenario() -> None:
         app = tui.AgenticHubApp()
@@ -423,22 +439,25 @@ def test_coach_warns_when_requested_state_is_not_reached(
             monkeypatch.setattr(
                 app, "notify", lambda *a, **kw: notifications.append((a, kw))
             )
-            await pilot.press("2", "c")
+            await pilot.press("2")
+            app.query_one("#behavior-mode", Select).value = "coach"
+            await pilot.pause()
+            await pilot.press("c")
             await app.workers.wait_for_complete()
-            assert "Coding coach: OFF" in str(app.query_one("#coach-status").render())
+            assert "Installed: OFF" in str(app.query_one("#behavior-status").render())
             assert notifications[-1][1]["severity"] == "warning"
-            assert "requested on" in notifications[-1][0][0]
+            assert "requested coach" in notifications[-1][0][0]
 
     asyncio.run(scenario())
 
 
 @pytest.mark.parametrize("filter_focused", [True, False])
-def test_coach_busy_blocks_overlapping_mutations_and_keeps_filter_responsive(
+def test_behavior_busy_blocks_overlapping_mutations_and_keeps_filter_responsive(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, filter_focused: bool
 ) -> None:
     setup_fixture(tmp_path, monkeypatch, real_hosts=True)
     released = Event()
-    original = coach.set_enabled
+    original = behavior.set_mode
     calls = []
 
     def delayed(enabled):
@@ -446,50 +465,53 @@ def test_coach_busy_blocks_overlapping_mutations_and_keeps_filter_responsive(
         assert released.wait(timeout=5)
         return original(enabled)
 
-    monkeypatch.setattr(coach, "set_enabled", delayed)
+    monkeypatch.setattr(behavior, "set_mode", delayed)
 
     async def scenario() -> None:
         app = tui.AgenticHubApp()
         async with app.run_test() as pilot:
             try:
                 await pilot.press("2")
-                await pilot.click("#coach-enable")
-                assert app.query_one("#coach-enable", tui.Button).disabled
-                assert app.query_one("#coach-disable", tui.Button).disabled
+                app.query_one("#behavior-mode", Select).value = "coach"
+                await pilot.pause()
+                await pilot.click("#behavior-apply")
+                assert app.query_one("#behavior-mode", Select).disabled
+                assert app.query_one("#behavior-apply", tui.Button).disabled
+                assert app.query_one("#behavior-off", tui.Button).disabled
                 assert not app.active_bindings["c"].enabled
                 assert not app.active_bindings["C"].enabled
                 await pilot.press("c", "C", "1", "2")
-                assert app.focused is app.query_one("#coach-summary")
+                assert app.focused is app.query_one("#behavior-summary")
                 await pilot.press("1")
                 if filter_focused:
                     await pilot.press("/", "c")
                     assert app.query_one("#filter", tui.Input).value == "c"
                 else:
                     assert app.focused is None
-                inspect = Mock(wraps=coach.inspect)
-                monkeypatch.setattr(coach, "inspect", inspect)
+                inspect = Mock(wraps=behavior.inspect)
+                monkeypatch.setattr(behavior, "inspect", inspect)
                 await pilot.press("ctrl+r")
                 inspect.assert_not_called()
             finally:
                 released.set()
             await app.workers.wait_for_complete()
-            assert calls == [True]
+            assert calls == ["coach"]
             await pilot.pause()
-            assert not app.query_one("#coach-enable", tui.Button).disabled
+            assert not app.query_one("#behavior-apply", tui.Button).disabled
             assert app.query_one("#pages", TabbedContent).active == "skills-page"
-            assert "COACH: ON" in str(app.query_one("#coach-indicator").render())
+            assert "MODE: COACH" in str(app.query_one("#behavior-indicator").render())
             assert app.focused is (app.query_one("#filter") if filter_focused else None)
 
     asyncio.run(scenario())
 
 
-def test_skill_navigation_selection_and_install_do_not_read_or_change_coach(
+def test_skill_navigation_selection_and_install_do_not_read_or_change_behavior(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     setup_fixture(tmp_path, monkeypatch)
-    coach.set_enabled(True)
-    inspect = Mock(wraps=coach.inspect)
-    monkeypatch.setattr(coach, "inspect", inspect)
+    behavior.set_mode("coach")
+    inspect = Mock(wraps=behavior.inspect)
+    monkeypatch.setattr(behavior, "inspect", inspect)
 
     async def scenario() -> None:
         app = tui.AgenticHubApp()
@@ -507,11 +529,11 @@ def test_behavior_controls_remain_reachable_in_short_terminal(
 ) -> None:
     setup_fixture(tmp_path, monkeypatch, real_hosts=True)
     monkeypatch.setattr(
-        coach,
+        behavior,
         "inspect",
         lambda: {
-            host: coach.CoachStatus(
-                "error", None, f"Cannot read {'nested/' * 20}AGENTS.md"
+            host: behavior.BehaviorStatus(
+                "error", None, detail=f"Cannot read {'nested/' * 20}AGENTS.md"
             )
             for host in agents.AGENTS
         },
@@ -522,24 +544,31 @@ def test_behavior_controls_remain_reachable_in_short_terminal(
         async with app.run_test(size=(40, 16)) as pilot:
             await pilot.press("2")
             pane = app.query_one("#behavior-page")
-            for id_ in ("coach-enable", "coach-disable", "coach-restart"):
+            for id_ in (
+                "behavior-mode",
+                "behavior-apply",
+                "behavior-off",
+                "behavior-restart",
+            ):
                 widget = app.query_one(f"#{id_}")
                 assert widget.region.height > 0
                 assert pane.region.contains_region(widget.region)
-            indicator = app.query_one("#coach-indicator")
+            indicator = app.query_one("#behavior-indicator")
             assert indicator.size.height == 1
-            assert "COACH: ERROR" in str(indicator.render())
-            summary = app.query_one("#coach-summary", tui.VerticalScroll)
+            assert "MODE: ERROR" in str(indicator.render())
+            summary = app.query_one("#behavior-summary", tui.VerticalScroll)
             assert summary.max_scroll_y > 0
+            app.query_one("#behavior-mode", Select).value = "coach"
+            await pilot.pause()
             summary.focus()
             await pilot.press("end")
             assert summary.scroll_y > 0
             await pilot.press("tab")
-            assert app.focused is app.query_one("#coach-enable")
+            assert app.focused is app.query_one("#behavior-apply")
             await pilot.press("tab")
-            assert app.focused is app.query_one("#coach-disable")
+            assert app.focused is app.query_one("#behavior-off")
             await pilot.press("shift+tab")
-            assert app.focused is app.query_one("#coach-enable")
+            assert app.focused is app.query_one("#behavior-apply")
             await pilot.press("1")
             assert app.query_one("#grid").size.height >= 5
             assert card(app, "demo").region.height > 0
@@ -604,7 +633,7 @@ def test_status_glyphs_cover_every_status() -> None:
         assert glyph and style
 
 
-def test_invalid_skill_utf8_does_not_block_other_skills_or_coaching(
+def test_invalid_skill_utf8_does_not_block_other_skills_or_behavioring(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     setup_fixture(tmp_path, monkeypatch, multi_agent=True)
@@ -624,9 +653,12 @@ def test_invalid_skill_utf8_does_not_block_other_skills_or_coaching(
             assert all(
                 agents.status(host, "healthy") == "linked" for host in agents.AGENTS
             )
-            await pilot.press("2", "c")
+            await pilot.press("2")
+            app.query_one("#behavior-mode", Select).value = "coach"
+            await pilot.pause()
+            await pilot.press("c")
             await app.workers.wait_for_complete()
-            assert all(status.state == "on" for status in coach.inspect().values())
+            assert all(status.state == "on" for status in behavior.inspect().values())
             source.write_text("---\ndescription: repaired\n---\nBody.\n")
             await pilot.press("1", "ctrl+r")
             assert "repaired" in str(card(app, "demo").render())
@@ -1088,5 +1120,234 @@ def test_stats_strip_reflects_counts(
             await pilot.press("i")
             assert "LINKED 1" in str(stats.render())
             assert "MISSING 0" in str(stats.render())
+
+    asyncio.run(scenario())
+
+
+def test_behavior_reports_non_coach_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    setup_fixture(tmp_path, monkeypatch, real_hosts=True)
+    behavior.set_mode("skeptic")
+
+    async def scenario() -> None:
+        app = tui.AgenticHubApp()
+        async with app.run_test():
+            assert "MODE: SKEPTIC" in str(app.query_one("#behavior-indicator").render())
+            rendered = str(app.query_one("#behavior-status").render())
+            assert "Installed: SKEPTIC" in rendered
+            assert "claude: skeptic / on" in rendered
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    "choice", ["off", "coach", "rubber-duck", "skeptic", "interviewer"]
+)
+def test_behavior_selection_previews_without_applying(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    choice: str,
+) -> None:
+    setup_fixture(tmp_path, monkeypatch)
+    behavior.set_mode("skeptic")
+    inspect = Mock(wraps=behavior.inspect)
+    mutate = Mock(wraps=behavior.set_mode)
+    monkeypatch.setattr(behavior, "inspect", inspect)
+    monkeypatch.setattr(behavior, "set_mode", mutate)
+
+    async def scenario() -> None:
+        app = tui.AgenticHubApp()
+        async with app.run_test() as pilot:
+            await pilot.press("2")
+            selector = app.query_one("#behavior-mode", Select)
+            assert selector.value == "skeptic"
+            inspect.reset_mock()
+            selector.value = choice
+            await pilot.pause()
+            assert tui.MODE_PREVIEWS[choice] in str(
+                app.query_one("#behavior-preview").render()
+            )
+            assert "MODE: SKEPTIC" in str(app.query_one("#behavior-indicator").render())
+            inspect.assert_not_called()
+            mutate.assert_not_called()
+            await pilot.click("#behavior-apply")
+            await app.workers.wait_for_complete()
+            mutate.assert_called_once_with(None if choice == "off" else choice)
+            assert selector.value == choice
+            assert not selector.disabled
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    "initial",
+    ["off", "coach", "rubber-duck", "skeptic", "interviewer", "mixed", "error"],
+)
+def test_behavior_initial_selection_and_refresh_preserve_pending_choice(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    initial: str,
+) -> None:
+    setup_fixture(tmp_path, monkeypatch)
+    modes = {mode: mode for mode in behavior.PROFILES}
+    mode = next((mode for mode in modes if mode == initial), None)
+    if mode:
+        behavior.set_mode(mode)
+    if initial in {"mixed", "error"}:
+        monkeypatch.setattr(
+            behavior,
+            "inspect",
+            lambda: {
+                "a": behavior.BehaviorStatus("on", None, "coach"),
+                "b": behavior.BehaviorStatus(
+                    "error" if initial == "error" else "off", None
+                ),
+            },
+        )
+
+    async def scenario() -> None:
+        app = tui.AgenticHubApp()
+        async with app.run_test() as pilot:
+            selector = app.query_one("#behavior-mode", Select)
+            assert selector.value == (
+                Select.NULL if initial in {"mixed", "error"} else initial
+            )
+            assert app.query_one("#behavior-apply", tui.Button).disabled == (
+                initial in {"mixed", "error"}
+            )
+            assert not app.query_one("#behavior-off", tui.Button).disabled
+            await pilot.press("2")
+            assert app.focused is selector
+            selector.value = "rubber-duck"
+            await pilot.pause()
+            monkeypatch.setattr(
+                behavior,
+                "inspect",
+                lambda: {
+                    "fake": behavior.BehaviorStatus("on", None, "interviewer"),
+                },
+            )
+            await pilot.press("ctrl+r")
+            assert selector.value == "rubber-duck"
+            assert "MODE: INTERVIEWER" in str(
+                app.query_one("#behavior-indicator").render()
+            )
+            await pilot.press("C")
+            await app.workers.wait_for_complete()
+            assert selector.value == "rubber-duck"
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("mode", ["rubber-duck", "skeptic", "interviewer"])
+def test_behavior_apply_persists_after_remount(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mode: str,
+) -> None:
+    setup_fixture(tmp_path, monkeypatch, real_hosts=True)
+
+    async def scenario() -> None:
+        app = tui.AgenticHubApp()
+        async with app.run_test() as pilot:
+            await pilot.press("2")
+            app.query_one("#behavior-mode", Select).value = mode
+            await pilot.pause()
+            await pilot.press("c")
+            await app.workers.wait_for_complete()
+            assert {s.mode for s in behavior.inspect().values()} == {mode}
+            # Applying again refreshes and never toggles off.
+            await pilot.press("c")
+            await app.workers.wait_for_complete()
+            assert {s.mode for s in behavior.inspect().values()} == {mode}
+        app = tui.AgenticHubApp()
+        async with app.run_test() as pilot:
+            assert app.query_one("#behavior-mode", Select).value == mode
+            assert f"MODE: {mode.replace('-', ' ').upper()}" in str(
+                app.query_one("#behavior-indicator").render()
+            )
+            await pilot.press("2", "C")
+            await app.workers.wait_for_complete()
+            assert behavior.combined_state(behavior.inspect()) == "OFF"
+            assert app.query_one("#behavior-mode", Select).value == mode
+
+    asyncio.run(scenario())
+
+
+def test_behavior_selector_menu_keys_never_mutate_or_switch_pages(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    setup_fixture(tmp_path, monkeypatch)
+    mutate = Mock(wraps=behavior.set_mode)
+    monkeypatch.setattr(behavior, "set_mode", mutate)
+
+    async def scenario() -> None:
+        app = tui.AgenticHubApp()
+        async with app.run_test(size=(40, 16)) as pilot:
+            await pilot.press("2", "enter")
+            selector = app.query_one("#behavior-mode", Select)
+            assert selector.expanded
+            await pilot.press(
+                "1", "2", "c", "C", "i", "r", "s", "q", "down", "up", "right"
+            )
+            assert selector.expanded
+            assert app.query_one("#pages", TabbedContent).active == "behavior-page"
+            assert (app._cursor_row, app._cursor_col) == (0, 0)
+            mutate.assert_not_called()
+            await pilot.press("escape")
+            assert not selector.expanded
+            # Native menu navigation can reach every choice, including its empty entry.
+            for offset, expected in enumerate(
+                [Select.NULL, "off", "coach", "rubber-duck", "skeptic", "interviewer"]
+            ):
+                await pilot.press("enter", "home", *(["down"] * offset), "enter")
+                assert selector.value == expected
+                assert not selector.expanded
+            mutate.assert_not_called()
+            assert "MODE: OFF" in str(app.query_one("#behavior-indicator").render())
+            selector.clear()
+            await pilot.pause()
+            assert app.query_one("#behavior-apply", tui.Button).disabled
+            await pilot.press("c")
+            mutate.assert_not_called()
+            assert not app.query_one("#behavior-off", tui.Button).disabled
+
+    asyncio.run(scenario())
+
+
+def test_behavior_wrong_observed_mode_warns_and_retains_selection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    setup_fixture(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        behavior,
+        "set_mode",
+        lambda mode: {
+            "fake": behavior.BehaviorStatus("on", None, "interviewer"),
+        },
+    )
+
+    async def scenario() -> None:
+        app = tui.AgenticHubApp()
+        async with app.run_test() as pilot:
+            notifications = Mock()
+            monkeypatch.setattr(app, "notify", notifications)
+            await pilot.press("2")
+            selector = app.query_one("#behavior-mode", Select)
+            selector.value = "skeptic"
+            await pilot.pause()
+            await pilot.press("c")
+            await app.workers.wait_for_complete()
+            assert "MODE: INTERVIEWER" in str(
+                app.query_one("#behavior-indicator").render()
+            )
+            assert selector.value == "skeptic"
+            assert "requested skeptic" in str(
+                app.query_one("#behavior-status").render()
+            )
+            assert notifications.call_args.kwargs["severity"] == "warning"
 
     asyncio.run(scenario())

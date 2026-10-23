@@ -15,12 +15,13 @@ from textual.widgets import (
     Header,
     Input,
     Markdown,
+    Select,
     Static,
     TabbedContent,
     TabPane,
 )
 
-from . import agents, catalog, coach
+from . import agents, behavior, catalog
 
 STATUS_GLYPHS: dict[agents.Status, tuple[str, str]] = {
     "linked": ("✓", "bold green"),
@@ -28,6 +29,14 @@ STATUS_GLYPHS: dict[agents.Status, tuple[str, str]] = {
     "missing": ("·", "dim"),
     "conflict": ("✗", "bold red"),
     "error": ("!", "bold red"),
+}
+
+MODE_PREVIEWS = {
+    "off": "Normal collaboration. Off does not execute earlier suggestions.",
+    "coach": "Guidance, hints, and review. You implement and run checks.",
+    "rubber-duck": "Reflect and clarify your thinking, one question at a time. Advice and repository support need your request.",
+    "skeptic": "Challenge consequential assumptions with evidence and relevant code. Changing experiments need an explicit request.",
+    "interviewer": "One independent challenge, stable criteria, and requested labeled hints. Submitted code and checks only when requested; no early reference solution.",
 }
 
 _THEME_FILE = Path.home() / ".config" / "agentic-hub" / "theme.txt"
@@ -71,32 +80,35 @@ class AgenticHubApp(App):
     AUTO_FOCUS = None
 
     CSS = """
-    #coach-indicator { height: 1; padding: 0 1; text-style: bold; }
-    #coach-indicator.on { color: $success; }
-    #coach-indicator.off { color: $text-muted; }
-    #coach-indicator.mixed { color: $warning; }
-    #coach-indicator.error { color: $error; }
+    #behavior-indicator { height: 1; padding: 0 1; text-style: bold; }
+    #behavior-indicator.on { color: $success; }
+    #behavior-indicator.off { color: $text-muted; }
+    #behavior-indicator.mixed { color: $warning; }
+    #behavior-indicator.error { color: $error; }
     #pages, #pages > ContentSwitcher, #pages TabPane { height: 1fr; }
     #pages Tabs { background: $surface; }
     #pages Tab.-active { color: $primary; text-style: bold; }
     #pages Tabs:focus Tab.-active { color: $accent; background: $accent 10%; }
     #pages Tabs .underline--bar { color: $primary; }
     #pages Tabs:focus .underline--bar { color: $accent; }
-    #coach-card {
+    #behavior-card {
         height: 1fr; border: heavy $panel; margin: 0 1; padding: 0 1;
         border-title-color: $foreground; border-title-style: bold;
     }
-    #coach-summary { height: 1fr; min-height: 1; }
-    #coach-summary:focus { background: $accent 10%; }
-    #coach-status { height: auto; }
-    #coach-buttons { height: 3; }
-    #coach-buttons Button { width: 1fr; min-width: 0; border: heavy $panel; }
-    #coach-enable { margin-right: 1; }
-    #coach-buttons Button:focus { border: heavy $accent; }
-    #coach-buttons Button:disabled {
+    #behavior-summary { height: 1fr; min-height: 1; }
+    #behavior-summary:focus { background: $accent 10%; }
+    #behavior-label, #behavior-preview, #behavior-status { height: auto; }
+    #behavior-mode { height: 1; }
+    #behavior-mode SelectOverlay { max-height: 7; border: heavy $panel; }
+    #behavior-mode SelectOverlay:focus { border: heavy $accent; }
+    #behavior-buttons { height: 3; }
+    #behavior-buttons Button { width: 1fr; min-width: 0; border: heavy $panel; }
+    #behavior-apply { margin-right: 1; }
+    #behavior-buttons Button:focus { border: heavy $accent; }
+    #behavior-buttons Button:disabled {
         color: $text-muted; text-opacity: 1; text-style: none;
     }
-    #coach-restart { height: auto; color: $text-muted; }
+    #behavior-restart { height: auto; color: $text-muted; }
     #filter { display: none; }
     #body { height: 1fr; }
     #detail { width: 50%; border: heavy $panel; padding: 1; display: none; }
@@ -117,8 +129,8 @@ class AgenticHubApp(App):
         ("/", "open_filter", "Filter"),
         Binding("escape", "close_filter", "Close filter", show=False),
         ("ctrl+r", "refresh", "Refresh"),
-        ("c", "toggle_coach", "Toggle coach"),
-        ("C", "disable_coach", "Disable coach"),
+        ("c", "apply_behavior", "Apply mode"),
+        ("C", "disable_behavior", "Turn off"),
         ("p", "toggle_preview", "Preview"),
         ("s", "cycle_sort", "Sort"),
         ("S", "flip_sort", "Reverse sort"),
@@ -139,11 +151,11 @@ class AgenticHubApp(App):
         self._sort_index = 0
         self._sort_reverse = False
         self._preview_visible = False
-        self._coach_busy = False
+        self._behavior_busy = False
 
     def compose(self) -> ComposeResult:
         yield Header()
-        yield Static(id="coach-indicator")
+        yield Static(id="behavior-indicator")
         with TabbedContent(id="pages", initial="skills-page"):
             with TabPane("Skills", id="skills-page"):
                 yield Input(placeholder="filter skills\u2026", id="filter")
@@ -153,16 +165,30 @@ class AgenticHubApp(App):
                     yield VerticalScroll(id="grid", can_focus=False)
                     yield Markdown(id="detail")
             with TabPane("Behavior", id="behavior-page"):
-                with Vertical(id="coach-card") as card:
-                    card.border_title = "Coding coach"
-                    with VerticalScroll(id="coach-summary"):
-                        yield Static(id="coach-status")
-                    with Horizontal(id="coach-buttons"):
-                        yield Button("Enable all", id="coach-enable")
-                        yield Button("Disable all", id="coach-disable")
+                with Vertical(id="behavior-card") as card:
+                    card.border_title = "Behavior"
+                    yield Static("Selected mode:", id="behavior-label")
+                    yield Select[str](
+                        [
+                            ("Off", "off"),
+                            *[
+                                (behavior.mode_label(mode), mode)
+                                for mode in behavior.PROFILES
+                            ],
+                        ],
+                        prompt="Choose a mode",
+                        id="behavior-mode",
+                        compact=True,
+                    )
+                    with VerticalScroll(id="behavior-summary"):
+                        yield Static(id="behavior-preview")
+                        yield Static(id="behavior-status")
+                    with Horizontal(id="behavior-buttons"):
+                        yield Button("Apply all", id="behavior-apply")
+                        yield Button("Turn off all", id="behavior-off")
                     yield Static(
-                        "Restart the harness and start a new chat to apply changes.",
-                        id="coach-restart",
+                        "Restart harness; start a new chat.",
+                        id="behavior-restart",
                     )
         yield Footer()
 
@@ -171,9 +197,9 @@ class AgenticHubApp(App):
             input_ = self.query_one("#filter", Input)
             self.set_focus(input_ if input_.display else None)
         else:
-            button = self.query_one("#coach-enable", Button)
+            selector = self.query_one("#behavior-mode", Select)
             self.set_focus(
-                self.query_one("#coach-summary") if button.disabled else button
+                self.query_one("#behavior-summary") if self._behavior_busy else selector
             )
 
     def action_show_skills(self) -> None:
@@ -194,6 +220,9 @@ class AgenticHubApp(App):
             self._focus_page()
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
+        selectors = self.query("#behavior-mode")
+        if selectors and selectors.first(Select).expanded and action != "refresh":
+            return False
         if action in {
             "install",
             "remove",
@@ -211,44 +240,59 @@ class AgenticHubApp(App):
             "cursor_right",
         }:
             return self.query_one("#pages", TabbedContent).active == "skills-page"
-        if action in {"toggle_coach", "disable_coach"}:
+        if action in {"apply_behavior", "disable_behavior"}:
             if self.query_one("#pages", TabbedContent).active != "behavior-page":
                 return False
-            return None if self._coach_busy else True
+            if self._behavior_busy or (
+                action == "apply_behavior"
+                and self.query_one("#behavior-mode", Select).value is Select.NULL
+            ):
+                return None
+            return True
         return super().check_action(action, parameters)
 
     async def on_mount(self) -> None:
         self.register_theme(TACTICAL_THEME)
         self.theme = _load_theme()
         self.theme_changed_signal.subscribe(self, lambda theme: _save_theme(theme.name))
-        self.refresh_coach()
+        statuses = self.refresh_behavior()
+        combined = behavior.combined_state(statuses)
+        selector = self.query_one("#behavior-mode", Select)
+        if combined == "OFF":
+            selector.value = "off"
+        elif combined not in {"MIXED", "ERROR"}:
+            selector.value = next(iter(statuses.values())).mode or Select.NULL
+        self._update_behavior_selection()
         await self.refresh_grid()
 
-    def refresh_coach(
-        self, statuses: dict[str, coach.CoachStatus] | None = None
-    ) -> dict[str, coach.CoachStatus]:
+    def refresh_behavior(
+        self, statuses: dict[str, behavior.BehaviorStatus] | None = None
+    ) -> dict[str, behavior.BehaviorStatus]:
         if statuses is None:
             try:
-                statuses = coach.inspect()
+                statuses = behavior.inspect()
             except Exception as exc:
                 statuses = {
-                    host: coach.CoachStatus("error", None, str(exc))
+                    host: behavior.BehaviorStatus("error", None, detail=str(exc))
                     for host in agents.AGENTS
                 }
         states = {status.state for status in statuses.values()}
-        combined = coach.combined_state(statuses)
-        indicator = self.query_one("#coach-indicator", Static)
-        indicator.update(f"COACH: {combined}")
-        indicator.set_classes(combined.lower())
-        summary = Text(
-            "Guidance, hints, and review while you write the implementation.\n"
-            f"Scope: all hosts\n\nCoding coach: {combined}\n"
+        combined = behavior.combined_state(statuses)
+        indicator = self.query_one("#behavior-indicator", Static)
+        indicator.update(f"MODE: {combined}")
+        indicator.set_classes(
+            combined.lower() if combined in {"OFF", "MIXED", "ERROR"} else "on"
         )
-        summary.append("  ".join(f"{host}: {s.state}" for host, s in statuses.items()))
+        summary = Text(f"Scope: all hosts\nInstalled: {combined}\n")
+        summary.append(
+            "\n".join(
+                f"{host}: {s.mode or 'off'} / {s.state}" for host, s in statuses.items()
+            )
+        )
         for host, status in statuses.items():
             if status.detail:
                 summary.append(f"\n{host}: {status.detail}")
-        self.query_one("#coach-status", Static).update(summary)
+        self.query_one("#behavior-status", Static).update(summary)
         if states & {"error", "stale"} or any(s.detail for s in statuses.values()):
             details = "\n".join(
                 f"{host}: {s.detail or s.state}"
@@ -259,54 +303,86 @@ class AgenticHubApp(App):
         return statuses
 
     @work
-    async def _set_coach(self, enabled: bool) -> None:
-        if self._coach_busy:
+    async def _set_behavior(self, mode: behavior.BehaviorMode | None) -> None:
+        if self._behavior_busy:
             return
-        self._coach_busy = True
+        self._behavior_busy = True
         self.refresh_bindings()
-        buttons = self.query("#coach-buttons Button")
+        controls = [
+            self.query_one("#behavior-mode", Select),
+            *self.query("#behavior-buttons Button"),
+        ]
         focused = self.focused
-        buttons.set(disabled=True)
+        self._update_behavior_selection()
         try:
             try:
-                statuses = await asyncio.to_thread(coach.set_enabled, enabled)
+                statuses = await asyncio.to_thread(behavior.set_mode, mode)
             except Exception as exc:
                 statuses = {
-                    host: coach.CoachStatus(
-                        "error", s.path, f"{exc}; observed state: {s.state}"
+                    host: behavior.BehaviorStatus(
+                        "error",
+                        s.path,
+                        s.mode,
+                        f"{exc}; observed state: {s.state}, mode: {s.mode or 'off'}",
                     )
-                    for host, s in self.refresh_coach().items()
+                    for host, s in self.refresh_behavior().items()
                 }
-            requested = "on" if enabled else "off"
+            requested = "on" if mode else "off"
             for status in statuses.values():
-                if status.state != requested and not status.detail:
-                    status.detail = f"requested {requested}, observed {status.state}; retry or disable."
-            self.refresh_coach(statuses)
+                if (
+                    status.state != requested or status.mode != mode
+                ) and not status.detail:
+                    status.detail = f"requested {mode or 'off'}, observed {status.state} / {status.mode or 'off'}; retry or turn off."
+            self.refresh_behavior(statuses)
         finally:
-            self._coach_busy = False
-            buttons.set(disabled=False)
-            self.refresh_bindings()
+            self._behavior_busy = False
+            self._update_behavior_selection()
             if (
                 self.query_one("#pages", TabbedContent).active == "behavior-page"
                 and self.focused is None
                 and focused is not None
-                and focused in buttons
+                and focused in controls
+                and not focused.disabled
             ):
                 self.set_focus(focused)
 
-    def action_toggle_coach(self) -> None:
-        if not self._coach_busy:
-            statuses = self.refresh_coach()
-            self._set_coach(not all(s.state == "on" for s in statuses.values()))
+    def _update_behavior_selection(self) -> None:
+        selector = self.query_one("#behavior-mode", Select)
+        value = selector.value
+        preview = MODE_PREVIEWS.get(value) if isinstance(value, str) else None
+        self.query_one("#behavior-preview", Static).update(
+            preview or "Choose a mode to preview it; Apply installs it for all hosts."
+        )
+        selector.disabled = self._behavior_busy
+        self.query_one("#behavior-apply", Button).disabled = (
+            self._behavior_busy or value is Select.NULL
+        )
+        self.query_one("#behavior-off", Button).disabled = self._behavior_busy
+        self.refresh_bindings()
 
-    def action_disable_coach(self) -> None:
-        self._set_coach(False)
+    def on_select_changed(self, event: Select.Changed) -> None:
+        if event.select.id == "behavior-mode":
+            self._update_behavior_selection()
+
+    def action_apply_behavior(self) -> None:
+        value = self.query_one("#behavior-mode", Select).value
+        if self._behavior_busy or not isinstance(value, str):
+            return
+        if value == "off":
+            self._set_behavior(None)
+        else:
+            mode = next((mode for mode in behavior.PROFILES if mode == value), None)
+            if mode is not None:
+                self._set_behavior(mode)
+
+    def action_disable_behavior(self) -> None:
+        self._set_behavior(None)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "coach-enable":
-            self._set_coach(True)
-        elif event.button.id == "coach-disable":
-            self.action_disable_coach()
+        if event.button.id == "behavior-apply":
+            self.action_apply_behavior()
+        elif event.button.id == "behavior-off":
+            self.action_disable_behavior()
 
     def _sort_fields(self) -> tuple[str, ...]:
         return ("name", *agents.AGENTS)
@@ -504,10 +580,10 @@ class AgenticHubApp(App):
         await self.refresh_grid()
 
     async def action_refresh(self) -> None:
-        if not self._coach_busy:
-            self.refresh_coach()
+        if not self._behavior_busy:
+            self.refresh_behavior()
         await self.refresh_grid()
-        self.notify("refreshed skills and coach status")
+        self.notify("refreshed skills and behavior status")
 
     async def action_cycle_sort(self) -> None:
         self._sort_index = (self._sort_index + 1) % len(self._sort_fields())

@@ -5,8 +5,9 @@ import argparse
 import logging
 import sys
 from pathlib import Path
+from typing import Literal
 
-from . import agents, catalog, coach
+from . import agents, behavior, catalog
 
 # Progress/diagnostics go to stderr via logging; stdout stays clean for data
 # (list and coach status output) so it can be piped.
@@ -107,30 +108,57 @@ def cmd_sync(args: argparse.Namespace) -> None:
         sys.exit(1)
 
 
-def cmd_coach(args: argparse.Namespace) -> None:
-    statuses = (
-        coach.inspect()
-        if args.action == "status"
-        else coach.set_enabled(args.action == "on")
-    )
-    combined = coach.combined_state(statuses)
-    print(f"Coding coach: {combined}")
-    failed = combined == "ERROR"
+def _report_behavior(
+    statuses: dict[str, behavior.BehaviorStatus],
+    requested: behavior.BehaviorMode | Literal["off", "status"],
+) -> None:
+    combined = behavior.combined_state(statuses)
+    print(f"Behavior: {combined}")
+    failed = combined == "ERROR" or (not statuses and requested != "status")
     for host, status in statuses.items():
-        print(f"  {host:10s} {status.state:5s} {status.path or '(unresolved)'}")
+        print(
+            f"  {host:10s} {status.state:5s} {status.mode or 'off':12s} {status.path or '(unresolved)'}"
+        )
         if status.detail:
             diagnostic = log.error if status.state == "error" else log.warning
             diagnostic("%s: %s", host, status.detail)
-        if args.action != "status" and status.state not in (args.action, "error"):
-            log.error("%s: requested %s, observed %s", host, args.action, status.state)
+        reached = (
+            status.state == "off"
+            if requested == "off"
+            else status.state == "on" and status.mode == requested
+        )
+        if requested != "status" and not reached:
+            log.error(
+                "%s: requested %s, observed %s / %s",
+                host,
+                requested,
+                status.state,
+                status.mode or "off",
+            )
             failed = True
-    if args.action != "status":
+    if requested != "status":
         print(
             "Restart the harness and start a new chat to apply changes.",
             file=sys.stderr,
         )
     if failed:
         sys.exit(1)
+
+
+def cmd_coach(args: argparse.Namespace) -> None:
+    if args.action == "status":
+        _report_behavior(behavior.inspect(), "status")
+    else:
+        mode = "coach" if args.action == "on" else None
+        _report_behavior(behavior.set_mode(mode), mode or "off")
+
+
+def cmd_mode(args: argparse.Namespace) -> None:
+    if args.action == "status":
+        _report_behavior(behavior.inspect(), "status")
+    else:
+        mode = args.mode if args.action == "set" else None
+        _report_behavior(behavior.set_mode(mode), mode or "off")
 
 
 def cmd_tui(args: argparse.Namespace) -> None:
@@ -167,6 +195,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_coach = sub.add_parser("coach", help="persistent coding coach for all hosts")
     p_coach.add_argument("action", choices=("on", "off", "status"))
     p_coach.set_defaults(func=cmd_coach)
+    p_mode = sub.add_parser("mode", help="persistent primary behavior for all hosts")
+    mode_actions = p_mode.add_subparsers(dest="action", required=True)
+    mode_set = mode_actions.add_parser("set")
+    mode_set.add_argument("mode", choices=behavior.PROFILES)
+    mode_actions.add_parser("status")
+    mode_actions.add_parser("off")
+    p_mode.set_defaults(func=cmd_mode)
     sub.add_parser("tui").set_defaults(func=cmd_tui)
     return p
 

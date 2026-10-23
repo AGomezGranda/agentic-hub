@@ -54,8 +54,8 @@ agentic-hub            # launch the TUI:
                         #   I/R    install/remove for every agent
                         #   space  toggle multi-select (i/r/I/R then act on the selection)
                         #   /      filter skills, escape to clear
-                        #   c/C    Behavior: toggle coach for all hosts / explicitly disable it
-                        #   ctrl+r refresh skills and coach status from disk
+                        #   c/C    Behavior: apply selected mode / turn off all hosts
+                        #   ctrl+r refresh skills and behavior status from disk
                         #   ctrl+p command palette (includes theme switcher, saved as default)
                         #   s/S    cycle sort field / flip sort direction
                         #   q      quit
@@ -63,9 +63,15 @@ agentic-hub list       # print all skills with per-agent status
 agentic-hub install [names...] [--agent claude,pi,...]   # interactive picker if no names given
 agentic-hub remove <names...> [--agent claude,pi,...]
 agentic-hub sync       # install every skill to every agent
-agentic-hub coach on   # enable or refresh coaching for all four hosts
+agentic-hub mode set coach
+agentic-hub mode set rubber-duck
+agentic-hub mode set skeptic
+agentic-hub mode set interviewer
+agentic-hub mode status
+agentic-hub mode off
+agentic-hub coach on   # alias: replace the current primary mode with Coach
 agentic-hub coach status
-agentic-hub coach off
+agentic-hub coach off  # alias: turn off any primary mode
 ```
 
 Install and sync finish all targets, then exit 1 if any requested installation
@@ -74,47 +80,69 @@ in list output and the TUI without blocking other skills. Generated skills are
 `stale` when their installed content differs from the source; reinstall restores
 the generated instructions, replacing edits to those owned files.
 
-## Coding coach
+## Behavior modes
 
-Coaching starts off. `coach on` adds a marked instruction section for Claude
-Code, Pi, OpenCode, and Codex in the current user's local environment. It
-persists across chats until `coach off` removes it. **Restart the harness and
-start a new chat after either change.** Existing conversations can retain
-their previous instructions.
+The choices are **Off, Coach, Rubber Duck, Skeptic, Interviewer**. Applying a
+mode replaces the previous primary behavior across Claude Code, Pi, OpenCode,
+and Codex in the hub's current local environment. The installed default persists
+across chats. **Restart the harness and start a new chat after each change.**
+Existing conversations can retain their previous instructions.
 
-The coach reads relevant code, explains concepts, gives one next step, and
-reviews your attempt. You write the implementation and run checks. These are
-behavioral instructions, not enforced tool permissions; higher-priority rules,
-context limits, or excluded instruction files can affect model behavior.
+| Mode | Working relationship and tools |
+|---|---|
+| Coach | Reads relevant code, explains concepts, proposes one next step, and reviews your attempt. You implement and run checks. |
+| Rubber Duck | Reflects briefly and asks one focused question. Asks before giving advice; repository inspection or experiments need a request for support. |
+| Skeptic | Builds the strongest credible case against a plan, document, or proposal. Ranks objections and explains what would resolve them; accepts sound decisions. Inspects relevant code; changing experiments need an explicit request. |
+| Interviewer | Gives one constrained challenge with stable criteria. Answers clarifications, offers labeled requested hints, and assesses independent versus hinted work. May inspect submitted code and run appropriate requested checks. |
 
-The shared source is
-[`src/agentic_hub/profiles/coding-coach.md`](src/agentic_hub/profiles/coding-coach.md),
-packaged with the application. After editing it, run `agentic-hub coach on`
-again to refresh installed sections. Coaching is independent of skills:
-install, remove, and sync never toggle or refresh it. There is no per-project,
-per-host, or machine-sync switch.
+Profiles guide behavior; they do not enforce tool permissions or override
+higher-priority instructions. The new roles do not implicitly edit code or
+commit. Ordinary agreement keeps the role active. Explicit bounded exceptions
+resume the role afterward; an explicit chat-local exit or role switch needs no
+further confirmation and does not change future chats. Off never executes
+previously discussed work. Coach retains its existing implementation and
+execution restrictions.
+
+The controller is `src/agentic_hub/behavior.py`; the four self-contained sources
+are packaged under `src/agentic_hub/profiles/`. Reapply `mode set <mode>` after
+editing a source to refresh installed sections. Existing Coach sections remain
+current without migration. `coach on` replaces another mode with Coach;
+`coach status` inspects whichever mode is installed; `coach off` turns all
+primary behavior off. Command syntax remains compatible; the stdout header
+is now `Behavior: <combined state>`.
+
+Behavior is independent of skills: install, remove, and sync never inspect,
+toggle, or refresh it. There is no per-project, per-host, or machine-sync switch.
 
 The TUI opens on **Skills**. Press `1` for Skills or `2` for **Behavior**, or
-click the tabs. Focus the tab bar with Tab/Shift+Tab to navigate with left/right.
-Page switching retains your filter, selection, cursor, sort, preview, and scroll
-position. Skill actions belong to Skills; coach actions belong to Behavior.
+click the tabs. Tab/Shift+Tab can focus the tab bar for left/right navigation.
+Page switching retains the filter, selection, cursor, sort, preview, and scroll
+position. Skill actions belong to Skills; behavior actions belong to Behavior.
 The filter accepts `1`, `2`, `c`, and `C` as ordinary text.
 
-Behavior shows coach status with **Enable all** and **Disable all** buttons.
-On Behavior, press `c` to disable when every host is on, or enable and refresh
-otherwise; `C` always disables, including mixed/error states. Use Tab and Enter
-to reach and activate the buttons, or click them. Controls also work with no
-skills or no filter matches. Description and per-host diagnostics scroll inside
-the card; actions and the restart reminder stay visible in short terminals.
-Buttons and coach shortcuts are disabled during a write. You can switch pages
-while it completes; failures show per-host details and leave successful changes
-in place.
+On Behavior, **Selected mode** previews Off, Coach, Rubber Duck, Skeptic, or
+Interviewer. Selection never changes files. **Installed** and the shared
+`MODE:` indicator always show observed instructions. Choose a target, then click
+**Apply all** or press `c` to apply or refresh it; `c` never toggles an active
+mode off. **Turn off all** or `C` clears any primary mode. Choosing Off and
+applying has the same effect. Turning off retains your pending choice.
 
-A shared `COACH: ON/OFF/MIXED/ERROR` strip remains visible on both pages. It
-reports the last observed installed instructions, not whether a running agent
-loaded them. Page switching preserves the skill view without reading disk.
-Press `ctrl+r` on either page to refresh skills and coaching, including changes
-made through the CLI or another TUI instance; there is no background polling.
+The selector initializes once from uniform current instructions or Off. Mixed
+or erroneous installations start with an empty selection and disabled Apply;
+choose a target to recover, or use Turn off all. Refresh with `ctrl+r` to see
+CLI changes without losing your pending selection. No background polling occurs.
+
+Behavior page entry focuses the selector. Enter opens its native menu and
+confirms a choice; arrows/search navigate, and Escape closes it. Menu keys do
+not trigger app shortcuts. Tab/Shift+Tab reach the selector, scrollable summary,
+and buttons; Enter on Apply writes. Long previews/diagnostics scroll, while
+controls and restart guidance remain reachable at 40×16.
+
+During a write, selector, buttons, and behavior actions are disabled. Skills and
+page navigation remain usable; refresh skips behavior inspection until the
+write finishes. Completion retains your pending choice and does not navigate
+away from Skills or steal focus. It reports actual per-host modes, including
+partial errors; repair and reapply, or explicitly turn off all.
 
 Both frontends use these instruction paths and selection rules:
 
@@ -139,37 +167,39 @@ different roots or flags that disable instruction loading may behave
 differently. Unreadable or unsuitable candidates are errors, rather than
 reasons to create a higher-priority replacement.
 
-`coach status` prints the combined state and each host's state and selected
+`mode status` (also `coach status`) prints `Behavior: <combined state>` and each host's mode, state, and selected
 path to stdout. Actionable details and errors go to stderr; personal
 instruction contents are never printed.
 
 | State | Meaning |
 |---|---|
-| `off` | No effective coaching section or unclaimed shadowed section. |
-| `on` | The effective section matches the current profile, with no unclaimed shadowed section. |
-| `stale` | The effective section was edited/is outdated, or an unclaimed section remains in a shadowed candidate; details explain whether coaching is still present. |
+| `off` | No effective primary behavior section or unclaimed shadowed section. |
+| `on` | The effective section matches its current mode profile, with no unclaimed shadowed section. |
+| `stale` | The effective section was edited/is outdated, or an unclaimed section remains in a shadowed candidate; details explain whether a mode is still present. |
 | `error` | Resolution, reading, validation, or a requested update failed. |
 
-The combined label is `OFF` when all hosts are off, `ON` when all are on,
+The combined label is `OFF` when all hosts are off, the mode name when all are on with the same current profile,
 `ERROR` when any host has an error, and `MIXED` otherwise. These describe
 installed instructions, not proof that a running model loaded or obeyed them.
 Status exits 0 for ordinary mixed/stale states and 1 for inspection errors.
-On/off exit 0 only when every host reaches the requested state, otherwise 1;
+Set/off exit 0 only when every host reaches the requested mode and current state, or off, otherwise 1;
 missing or invalid actions exit 2.
 
 The hub preserves text outside its owned markers and keeps existing fallback
 selection. A shadowed section still required by another host is retained and
-does not count as stale. Enable removes unclaimed shadowed sections only when
-all candidate sets validate; errors defer that cleanup. Disable removes owned
+does not count as stale. Apply removes unclaimed shadowed sections only when
+all candidate sets validate; errors defer that cleanup. Off removes owned
 sections from all known candidates in each fully validated host set, and
 works even if the profile source is missing.
 
 After a partial failure, successful updates remain in place. Fix the reported
-target and retry `coach on`, or run `coach off` using the same environment to
-remove coaching. Malformed markers require manual inspection; the hub will
-not guess how to repair them. Run `coach off` and verify all four states before
+target and retry `mode set <mode>`, or run `mode off` using the same environment to
+remove primary behavior. Malformed markers require manual inspection; the hub will
+not guess how to repair them. Run `mode off` and verify all four states before
 uninstalling or reverting the feature: removing the application alone leaves
-installed instructions in place.
+installed instructions in place. Before downgrading to a coach-only release,
+select Coach or Off with the updated hub and verify the result; older versions
+do not recognize new-mode blocks.
 
 ## Skill workflow and validation
 
