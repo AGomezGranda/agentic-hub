@@ -27,6 +27,28 @@ def setup_agents(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return src
 
 
+@pytest.mark.parametrize(
+    "command", [["sync"], ["install", "demo"], ["remove", "demo"], ["mode", "status"]]
+)
+def test_skill_and_mode_commands_never_call_pi_handler(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, command: list[str]
+) -> None:
+    from agentic_hub.pi_handler import service  # noqa: PLC0415
+
+    source = tmp_path / "skills"
+    source.mkdir()
+    make_skill(source, "demo")
+    monkeypatch.setattr(catalog, "SKILLS_DIR", source)
+    monkeypatch.setattr(agents, "AGENTS", {"pi": (tmp_path / "pi-skills", "symlink")})
+
+    def forbidden(*args: object, **kwargs: object) -> None:
+        pytest.fail("unrelated command called the Pi handler")
+
+    for name in ("inspect_setup", "apply_setup", "doctor"):
+        monkeypatch.setattr(service, name, forbidden)
+    cli.main(command)
+
+
 def test_bare_invocation_dispatches_to_tui(monkeypatch: pytest.MonkeyPatch) -> None:
     called = []
     monkeypatch.setattr(tui, "run", lambda: called.append(True))

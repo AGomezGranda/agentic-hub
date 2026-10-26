@@ -168,6 +168,40 @@ def cmd_tui(args: argparse.Namespace) -> None:
     tui.run()
 
 
+def cmd_pi(args: argparse.Namespace) -> None:
+    from .pi_handler import service  # noqa: PLC0415
+
+    if args.action == "doctor":
+        checks = service.doctor(args.manifest)
+        for check in checks:
+            print(f"{'ok' if check.ok else 'error'}: {check.name}")
+            print(f"{check.name}: {check.detail}", file=sys.stderr)
+        if not all(check.ok for check in checks):
+            sys.exit(1)
+        return
+    if args.action == "apply" and not args.dry_run:
+        result = service.apply_setup(args.manifest)
+        for change in result.changes:
+            print(f"  completed {change.action} {change.kind} {change.identity}")
+        for diagnostic in result.diagnostics:
+            print(diagnostic, file=sys.stderr)
+        if not result.ok:
+            print("Pi apply: error")
+            sys.exit(1)
+    plan = service.inspect_setup(args.manifest)
+    print(f"Pi declarations: {plan.status} (not runtime extension loading)")
+    if plan.paths is not None:
+        print(
+            f"Manifest: {plan.paths.manifest}\nSettings: {plan.paths.settings}\nOwnership: {plan.paths.state}"
+        )
+    for change in plan.changes:
+        print(f"  {change.action} {change.kind} {change.identity}")
+    for diagnostic in plan.conflicts + plan.errors:
+        print(diagnostic, file=sys.stderr)
+    if plan.status in {"error", "conflict"}:
+        sys.exit(1)
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="agentic-hub")
     p.add_argument(
@@ -203,6 +237,22 @@ def build_parser() -> argparse.ArgumentParser:
     mode_actions.add_parser("off")
     p_mode.set_defaults(func=cmd_mode)
     sub.add_parser("tui").set_defaults(func=cmd_tui)
+    p_pi = sub.add_parser("pi", help="explicit personal Pi declaration ownership")
+    pi_actions = p_pi.add_subparsers(dest="action", required=True)
+    for name in ("status", "doctor", "apply"):
+        action = pi_actions.add_parser(name)
+        action.add_argument(
+            "--manifest",
+            type=Path,
+            help="manifest path (default: editable checkout pi/manifest.json)",
+        )
+        if name == "apply":
+            action.add_argument(
+                "--dry-run",
+                action="store_true",
+                help="preview without writes or Pi invocation",
+            )
+    p_pi.set_defaults(func=cmd_pi)
     return p
 
 

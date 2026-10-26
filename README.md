@@ -22,6 +22,16 @@ someone checks on a machine where it runs.
 
 ## Pi host setup
 
+The CLI-first [Pi handler](docs/pi-handler.md) manages an explicitly owned,
+portable subset of personal package declarations and settings. Its tracked
+`pi/manifest.json` is **empty by default**: no extensions or preferences are
+selected, and installing/upgrading agentic-hub changes no personal Pi settings.
+Use `pi status`, `pi doctor`, and `pi apply --dry-run` before explicit `pi apply`.
+Skill sync and behavior modes do not call this handler.
+
+The following subagent example remains **manual**. The handler does not
+configure, migrate, or manage these definitions or overrides:
+
 `~/.pi/agent/settings.json` (outside this repo), alongside existing keys:
 
 ```json
@@ -44,6 +54,12 @@ grep-shaped child off Sonnet onto Haiku.
 ```
 uv tool install --editable .
 ```
+
+Keep the editable checkout in place: the Pi handler resolves the default
+manifest from it, independently of your working directory. Pi and its runtime
+prerequisites must be installed separately. See the [second-machine bootstrap
+and release checklist](docs/pi-handler.md#second-machine-bootstrap); authenticate
+locally, never through credentials committed here.
 
 ## Usage
 
@@ -72,7 +88,20 @@ agentic-hub mode off
 agentic-hub coach on   # alias: replace the current primary mode with Coach
 agentic-hub coach status
 agentic-hub coach off  # alias: turn off any primary mode
+agentic-hub pi status [--manifest PATH]
+agentic-hub pi doctor [--manifest PATH]
+agentic-hub pi apply [--manifest PATH] --dry-run
+agentic-hub pi apply [--manifest PATH]  # explicit ownership reconciliation
 ```
+
+Pi status/dry-run are read-only and never launch Pi. Doctor may run only
+`pi --version`; upstream startup can perform installation maintenance outside a
+temporary HOME/agent root, so it is not an absolute zero-write guarantee.
+Package mutations initially require Pi 1.4.0 and POSIX process-group control;
+setting-only apply does not invoke Pi. Read the [Pi lifecycle and recovery
+guide](docs/pi-handler.md) before curating packages, relocating the checkout, or
+repairing an interrupted apply. The handler rejects settings/state symlink and
+hard-link targets, preserves unmanaged values, and has no force-overwrite mode.
 
 Install and sync finish all targets, then exit 1 if any requested installation
 fails, including unknown skill names. Skill inspection errors appear as `error`

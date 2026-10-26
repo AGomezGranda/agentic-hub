@@ -1,0 +1,149 @@
+Pi Extension Recommendations
+
+For professional software engineering
+
+24 October 2026  |  Local Pi version checked 1.4.0
+
+Start with Context7, Web Access, and Plannotator. They address recurring engineering work: checking current APIs, investigating problems, and reviewing a proposed change before implementation. Trial Pi Lens on one repository, then add execution and visibility tools when a real workflow calls for them.
+
+These eight extensions are selected for practical use in a professional engineering workflow, with particular relevance to Python development and an existing habit of planning, testing, and code review. The benefits described are expected advantages to evaluate in daily use, rather than measured productivity gains.
+
+Recommended adoption order
+
+When to add | Extension | Primary purpose
+Start | Context7 | Current library documentation
+Start | Web Access | External research and sources
+Start | Plannotator | Plan and change review
+Pilot in one repo | Pi Lens | Diagnostics during editing
+Terminal need | Interactive Shell | Interactive and long-running CLIs
+Delegation need | Subagents | Focused scouting and review
+Provider fit | Usage | Quotas and reset visibility
+Personal preference | Powerline Footer | Context and session awareness
+
+Build on your existing setup
+
+Pi discovers skills in ~/.agents/skills/, where your existing planning, architecture, code-quality, and testing skills are located. Check their portability and loading before installing overlapping workflow bundles. Keep your existing RTK approach initially; add automatic command rewriting only if it solves a recurring problem.
+
+Pi 1.4.0 already includes MCP support. A separate MCP adapter is optional and can replace the built-in /mcp implementation. Start with the built-in client unless an adapter provides a specific missing capability.
+
+Pi skills documentation (https://pi.dev/docs/latest/skills) | Pi MCP documentation (https://pi.dev/docs/latest/mcp)
+
+Research and code feedback
+
+Context7
+
+pi install npm:@upstash/context7-pi
+
+Current library documentation helps an agent check whether an API exists and whether an example applies to the version in your project. This is valuable when upgrading dependencies, integrating an unfamiliar SDK, or moving between frameworks. The official Upstash extension exposes documentation tools and a /c7-docs shortcut.
+
+Example use: Before changing a Pydantic integration, ask Pi to retrieve the documentation for the version used by the repository and explain the relevant migration behavior.
+
+Adoption advice: Start here if library work is frequent. Anonymous access has rate limits; an API key increases quotas. Use either the extension or the Context7 MCP integration to avoid duplicate tools. Check retrieved examples against the installed version.
+
+Source: Maintainer documentation (https://context7.com/docs/resources/all-clients)
+
+Web Access
+
+pi install npm:pi-web-access
+
+Library documentation rarely explains every failure. Web Access adds search and retrieval for pages, GitHub content, and PDFs, allowing Pi to investigate release notes, upstream issues, and external technical material. It complements Context7 when the answer spans several sources.
+
+Example use: Investigate a dependency regression by comparing the release notes, an upstream issue, and the workaround documented by the maintainer, then cite the evidence before proposing a fix.
+
+Adoption advice: The maintainer documents zero-key search through Exa and several configurable providers. Select routing appropriate for work material, avoid sending confidential details in public search queries, and verify source quality. Search and model costs depend on the chosen providers.
+
+Source: Maintainer documentation (https://github.com/nicobailon/pi-web-access)
+
+Pi Lens
+
+pi install npm:pi-lens
+
+Pi Lens gives the agent language-server navigation and diagnostics, lint feedback, and type-checking while it edits. In Python projects, support for Ruff, Pyright, and mypy can shorten the interval between introducing a problem and seeing actionable feedback. Navigation can also help the agent follow symbols and related code.
+
+Example use: During a function-signature refactor, use diagnostics to identify affected callers as edits happen, then run the repository tests to check behavior.
+
+Adoption advice: Pilot it on one repository. Pi Lens can format or autofix files and automatically install supporting tools. Align its behavior with your existing formatter, type checker, and environment before enabling it widely. Keep CI and behavioral tests as independent checks.
+
+Source: Maintainer documentation (https://github.com/apmantza/pi-lens) | Dependency policy (https://github.com/apmantza/pi-lens/blob/master/docs/dependencies.md)
+
+Review and execution
+
+Plannotator
+
+pi install npm:@plannotator/pi-extension
+
+Plannotator provides a browser interface for reviewing and annotating plans, code changes, and PRs, with feedback returned to the agent. It suits your existing planning workflow because it makes comments on specific parts of a proposal easier to capture and resolve before implementation.
+
+Example use: Review a refactoring plan, annotate the proposed module boundary and missing validation step, then return those comments to Pi before approving the revised approach.
+
+Adoption advice: Use it for changes with meaningful design decisions; a small edit may not need formal plan review. The documented minimum Pi version is 0.79.1. Planning mode restricts file edits but leaves Bash unrestricted, so it is a workflow aid rather than a security sandbox.
+
+Source: Maintainer documentation (https://pi.dev/packages/@plannotator/pi-extension)
+
+Interactive Shell
+
+pi install npm:pi-interactive-shell
+
+Some development tasks need a persistent process or typed interaction. Interactive Shell exposes REPLs, database shells, development servers, and log watchers in a visible terminal overlay. Pi can operate the process while you observe it and take over when needed.
+
+Example use: Keep a local development server running while investigating a failing endpoint, inspect its logs, and take control of the same terminal session if manual diagnosis is faster.
+
+Adoption advice: Add it when ordinary shell calls become awkward. macOS is documented as tested. Configure quiet-job supervision carefully: an automatic stop after silence does not establish success. Check actual exit status or readiness evidence, and use a separate worktree for delegated edits.
+
+Source: Maintainer documentation (https://github.com/nicobailon/pi-interactive-shell)
+
+Subagents
+
+pi install npm:pi-subagents
+
+Focused child agents can investigate an unfamiliar area or review a change with a separate context. Built-in roles include scout, worker, reviewer, and oracle. A fresh reviewer can provide another perspective on correctness, test gaps, and assumptions after implementation.
+
+Example use: Ask a scout to locate the authentication flow before planning a change, or request a reviewer to inspect the final diff for a specific failure mode.
+
+Adoption advice: Begin with one bounded reviewer or scout. Additional agents consume model usage and introduce coordination costs. The reviewer can make small fixes, so explicitly request read-only review when desired. Isolate concurrent editing work. Current documentation requires Pi 1.2.0 or newer.
+
+Source: Maintainer documentation (https://github.com/nicobailon/pi-subagents/blob/main/README.md)
+
+Visibility and adoption
+
+Usage
+
+pi install npm:@narumitw/pi-usage
+
+The /usage command exposes supported provider quotas, reset times, and API balances. This can help you choose when to start a long task or whether another configured provider is more appropriate, instead of discovering an exhausted allowance partway through a job.
+
+Example use: Check remaining allowance before requesting a large refactor with an independent review, and plan the work around the reported reset time.
+
+Adoption advice: Check support for the exact provider and authentication method you use. Subscription allowances, API balances, and spending are different measures. The extension does not offer universal billing visibility; use the provider dashboard for authoritative billing information.
+
+Source: Maintainer documentation (https://pi.dev/packages/@narumitw/pi-usage)
+
+Powerline Footer
+
+pi install npm:pi-powerline-footer
+
+A persistent status line makes the current branch, model, context consumption, tokens, and reported cost easier to monitor. This is useful across long sessions or multiple repositories, and prompt stashing lets you set aside a draft while asking a quick question.
+
+Example use: Notice that context is filling during an investigation and decide whether to summarize or start a focused session before the next substantial task.
+
+Adoption advice: Treat this as an ergonomic preference. Start with /powerline compact and use /vibe off if generated loading messages are distracting. Reported session costs and context indicators are useful signals, but provider billing remains the authority.
+
+Source: Maintainer documentation (https://github.com/nicobailon/pi-powerline-footer)
+
+A practical trial process
+
+Try one extension at a time on a representative repository. For documentation tools, check whether the answer cites the right API version. For Pi Lens, inspect the diff for unwanted formatting and compare diagnostics with your normal checks. For subagents, judge whether the additional review finds actionable issues worth the extra time and usage.
+
+Use a single-invocation trial before saving an extension in your configuration:
+
+pi -e npm:@upstash/context7-pi
+
+If pi is unavailable on your PATH, your installed launcher is ~/.pi/agent/bin/pi. The installation commands in this document save packages persistently. After a successful trial, pin a known working version with npm:package@version and update deliberately. A temporary trial still executes extension code.
+
+Pi package installation and version pinning (https://pi.dev/docs/latest/packages)
+
+Extensions execute with the permissions of the Pi process. Review their source and data destinations before using them with sensitive repositories. These recommendations do not replace your normal code review, tests, or CI checks.
+
+Pi extension execution model (https://pi.dev/docs/latest/extensions)
+
+Validation scope: Package listings, maintainer documentation, and manifests were checked. Extensions were not installed, runtime-tested together, or fully security-audited.

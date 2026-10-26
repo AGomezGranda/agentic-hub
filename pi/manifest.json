@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "packages": ["npm:pi-powerline-footer@0.21.0", "npm:@upstash/context7-pi@0.1.3","npm:pi-subagents@0.82.1"],
+  "settings": {
+    "powerline": {
+      "preset": "compact",
+      "placement": "below",
+      "padding": 1,
+      "secondaryOverflow": "drop",
+      "workingIndicatorPlacement": "editor-border",
+      "separator": "powerline-thin",
+      "layout": {
+        "left": ["model", "thinking", "shell_mode", "path", "git", "queue"],
+        "right": ["context_pct", "cost"],
+        "secondary": []
+      },
+      "model": { "display": "name", "showThinkingLevel": false },
+      "path": { "mode": "basename" },
+      "git": { "showBranch": true, "showStaged": true, "showUnstaged": true, "showUntracked": true, "hostIcon": true },
+      "context": { "format": "percent" },
+      "cost": { "subscriptionDisplay": "reported-cost", "currency": "USD" }
+    }
+  },
+  "required_env": []
+}
