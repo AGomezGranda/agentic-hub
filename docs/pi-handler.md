@@ -18,6 +18,7 @@ manager, or runtime extension-readiness check.
 agentic-hub pi status [--manifest PATH]
 agentic-hub pi doctor [--manifest PATH]
 agentic-hub pi apply [--manifest PATH] [--dry-run]
+agentic-hub pi bump [--manifest PATH] [--dry-run]
 ```
 
 Every subcommand accepts `--manifest`. The default is `pi/manifest.json` relative
@@ -91,8 +92,15 @@ All four fields are required; unknown fields and other versions are rejected:
   are supported. Unversioned sources, tags, ranges, duplicate package names,
   filtered object entries, git sources, and local paths are not managed in v1.
   Review third-party source before selecting a package: installation can execute
-  third-party code and have effects outside settings. No automatic version
-  discovery, downloads, caching, or npm invocation is implemented by the hub.
+  third-party code and have effects outside settings. `status`, `doctor` and
+  `apply` do no version discovery, downloads, caching, or npm invocation. Only
+  `pi bump` runs `npm view <name> version` (the registry's `latest` tag, using
+  your own npm configuration) and rewrites the exact pins in the manifest text,
+  preserving formatting; it never installs. It is all-or-nothing: any lookup
+  failure leaves the manifest untouched. Review the diff, then run `pi apply`.
+  The latest version may require a newer Pi than 1.4.0, and a prerelease pin
+  ahead of `latest` would be bumped *down*. Adopted packages still reject
+  version changes at apply time (see Packages).
 - `settings`: a JSON object flattened into nonempty nested-object leaf paths.
   Arrays, scalars, and null are indivisible managed leaves. Arrays are replaced,
   not union-merged. Empty nested managed containers, duplicate JSON keys,

@@ -168,9 +168,26 @@ def cmd_tui(args: argparse.Namespace) -> None:
     tui.run()
 
 
+def _pi_bump(args: argparse.Namespace) -> None:
+    from .pi_handler import bump  # noqa: PLC0415
+
+    try:
+        bumps = bump.bump_manifest(args.manifest, dry_run=args.dry_run)
+    except ValueError as error:
+        print(f"Pi bump: error\n{error}", file=sys.stderr)
+        sys.exit(1)
+    verb = "would bump" if args.dry_run else "bumped"
+    for item in bumps:
+        print(f"  {verb} {item.name} {item.old} -> {item.new}")
+    if not bumps:
+        print("Pi bump: all packages already at latest")
+
+
 def cmd_pi(args: argparse.Namespace) -> None:
     from .pi_handler import service  # noqa: PLC0415
 
+    if args.action == "bump":
+        return _pi_bump(args)
     if args.action == "doctor":
         checks = service.doctor(args.manifest)
         for check in checks:
@@ -239,7 +256,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("tui").set_defaults(func=cmd_tui)
     p_pi = sub.add_parser("pi", help="explicit personal Pi declaration ownership")
     pi_actions = p_pi.add_subparsers(dest="action", required=True)
-    for name in ("status", "doctor", "apply"):
+    for name in ("status", "doctor", "apply", "bump"):
         action = pi_actions.add_parser(name)
         action.add_argument(
             "--manifest",
@@ -251,6 +268,12 @@ def build_parser() -> argparse.ArgumentParser:
                 "--dry-run",
                 action="store_true",
                 help="preview without writes or Pi invocation",
+            )
+        if name == "bump":
+            action.add_argument(
+                "--dry-run",
+                action="store_true",
+                help="preview new pins without writing the manifest",
             )
     p_pi.set_defaults(func=cmd_pi)
     return p

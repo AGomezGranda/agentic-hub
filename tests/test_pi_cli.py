@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from agentic_hub import cli
-from agentic_hub.pi_handler import runtime, service
+from agentic_hub.pi_handler import bump, runtime, service
 
 pytestmark = pytest.mark.usefixtures("isolated_pi_home")
 
@@ -40,7 +40,7 @@ def test_pi_help_documents_subcommands_and_manifest_override(
         cli.main(["pi", "--help"])
     assert exc.value.code == 0
     output = capsys.readouterr().out
-    for command in ("status", "doctor", "apply"):
+    for command in ("status", "doctor", "apply", "bump"):
         assert command in output
         with pytest.raises(SystemExit) as exc:
             cli.main(["pi", command, "--help"])
@@ -195,3 +195,49 @@ def test_malformed_settings_and_state_are_errors(
     assert service.inspect_setup(manifest).status == "error"
     assert not all(c.ok for c in service.doctor(manifest))
     assert "broken-private-value" not in repr(service.doctor(manifest))
+
+
+def bump_manifest_file(tmp_path: Path) -> Path:
+    path = manifest_file(tmp_path)
+    document = json.loads(path.read_text())
+    document["packages"] = ["npm:demo@1.0.0"]
+    path.write_text(json.dumps(document))
+    return path
+
+
+def test_bump_dry_run_previews_and_real_run_rewrites(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest = bump_manifest_file(tmp_path)
+    monkeypatch.setattr(bump, "latest_version", lambda name: "1.1.0")
+    before = manifest.read_bytes()
+    cli.main(["pi", "bump", "--dry-run", "--manifest", str(manifest)])
+    assert "would bump demo 1.0.0 -> 1.1.0" in capsys.readouterr().out
+    assert manifest.read_bytes() == before
+    cli.main(["pi", "bump", "--manifest", str(manifest)])
+    assert "bumped demo 1.0.0 -> 1.1.0" in capsys.readouterr().out
+    assert service.inspect_setup(manifest).changes[0].identity == "demo"
+    assert "npm:demo@1.1.0" in manifest.read_text()
+    cli.main(["pi", "bump", "--manifest", str(manifest)])
+    assert "already at latest" in capsys.readouterr().out
+
+
+def test_bump_failure_exits_1_and_touches_nothing(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest = bump_manifest_file(tmp_path)
+
+    def fail(name: str) -> str:
+        raise ValueError("cannot resolve latest version of demo")
+
+    monkeypatch.setattr(bump, "latest_version", fail)
+    before = snapshot(tmp_path)
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["pi", "bump", "--manifest", str(manifest)])
+    assert exc.value.code == 1
+    assert "Pi bump: error" in capsys.readouterr().err
+    assert snapshot(tmp_path) == before

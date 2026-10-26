@@ -80,7 +80,7 @@ Read the summary alone: can the reader explain the main point, why it matters,
 the tradeoff, and the next decision or success condition? Restore missing
 meaning, then cut duplication. This checks fidelity, not source correctness.
 
-Save beside the source as `<stem>.mucho.md`, unless the user specifies a path
+Save beside the source as `<stem>.summary.md`, unless the user specifies a path
 or format. Do not overwrite the source or an unrelated existing file. Update
 an existing companion only when the request is to refresh it; otherwise use
 a distinct name. Include a source link, its available date/version, and the

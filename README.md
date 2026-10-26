@@ -92,6 +92,7 @@ agentic-hub pi status [--manifest PATH]
 agentic-hub pi doctor [--manifest PATH]
 agentic-hub pi apply [--manifest PATH] --dry-run
 agentic-hub pi apply [--manifest PATH]  # explicit ownership reconciliation
+agentic-hub pi bump [--manifest PATH] [--dry-run]  # rewrite manifest pins to latest npm versions
 ```
 
 Pi status/dry-run are read-only and never launch Pi. Doctor may run only
