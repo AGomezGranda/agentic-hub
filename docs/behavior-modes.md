@@ -13,8 +13,7 @@ start with no target selected; Apply is disabled until one is chosen. `c` applie
 or refreshes; `C` turns off. Enter confirms a menu choice; Tab reaches Apply;
 Enter on Apply writes. While a write is pending, controls are disabled but
 Skills and page navigation remain usable. Long descriptions and diagnostics
-scroll in short terminals. Skills navigation does not inspect behavior. See [README](../README.md) for instruction roots, status diagnostics, and
-recovery, and [acceptance record](behavior-modes-acceptance.md) for tested and
+scroll in short terminals. Skills navigation does not inspect behavior. See [instruction files, status, and recovery](#instruction-files-status-and-recovery) below, and [acceptance record](behavior-modes-acceptance.md) for tested and
 unavailable runtime behavior. Filesystem/UI verification does not establish
 model compliance.
 
@@ -193,3 +192,74 @@ The same problem can benefit from different modes at different moments:
 3. **Interviewer:** “Give me a similar design problem to solve myself.” The AI checks whether the user can apply the ideas independently.
 
 The clearest distinction is what the AI protects: Rubber Duck protects the user's space to think; Skeptic protects the quality of the decision; Interviewer protects the independence of the attempt.
+
+## Instruction files, status, and recovery
+
+### Instruction files
+
+| Host | Effective instruction file |
+|---|---|
+| Claude Code | `CLAUDE.md` under `CLAUDE_CONFIG_DIR`, default `~/.claude`. |
+| Codex | First nonempty `AGENTS.override.md` or `AGENTS.md` under `CODEX_HOME`, default `~/.codex`; otherwise create/use `AGENTS.md`. |
+| Pi | First existing readable regular file in order: `AGENTS.override.md`, `AGENTS.md`, `AGENTS.MD`, `CLAUDE.md`, `CLAUDE.MD` under `PI_CODING_AGENT_DIR`, default `~/.pi/agent`; otherwise create `AGENTS.md`. Empty files count. |
+| OpenCode | Existing `~/.config/opencode/AGENTS.md`, otherwise existing `~/.claude/CLAUDE.md` when Claude compatibility is enabled; otherwise create the native `AGENTS.md`. |
+
+Empty root variables use defaults; nonempty relative roots resolve against the
+hub's working directory and expand `~`. OpenCode's Claude fallback is disabled
+by `OPENCODE_DISABLE_CLAUDE_CODE` or `OPENCODE_DISABLE_CLAUDE_CODE_PROMPT` set
+to `1` or `true`. A nonempty `OPENCODE_CONFIG_DIR`, a relocated `XDG_CONFIG_HOME`,
+or a needed Claude fallback with relocated `CLAUDE_CONFIG_DIR` produces an
+unsupported-layout error for OpenCode; other hosts can still succeed. The hub
+supports only OpenCode's default config layout and does not edit its JSON/JSONC
+settings.
+
+Only the environment visible to the hub is covered. A harness launched with
+different roots or flags that disable instruction loading may behave differently.
+Unreadable or unsuitable candidates are errors, not reasons to create a
+higher-priority replacement.
+
+### Status
+
+`mode status` (also `coach status`) prints `Behavior: <combined state>` and each
+host's mode, state, and selected path to stdout. Actionable details and errors go
+to stderr. Instruction contents are never printed.
+
+| State | Meaning |
+|---|---|
+| `off` | No effective primary behavior section or unclaimed shadowed section. |
+| `on` | The effective section matches its current mode profile, with no unclaimed shadowed section. |
+| `stale` | The effective section was edited or is outdated, or an unclaimed section remains in a shadowed candidate; details explain whether a mode is still present. |
+| `error` | Resolution, reading, validation, or a requested update failed. |
+
+The combined label is `OFF` when all hosts are off, the mode name when all are on
+with the same current profile, `ERROR` when any host has an error, and `MIXED`
+otherwise. These describe installed instructions, not proof that a running model
+loaded or obeyed them.
+
+Exit codes: status exits 0 for ordinary mixed or stale states and 1 for inspection
+errors. Set and off exit 0 only when every host reaches the requested mode and
+state (or off), otherwise 1. Missing or invalid actions exit 2.
+
+### Shadowed sections and cleanup
+
+The hub preserves text outside its owned markers and keeps existing fallback
+selection. A shadowed section still required by another host is retained and does
+not count as stale. Apply removes unclaimed shadowed sections only when all
+candidate sets validate; errors defer that cleanup. Off removes owned sections from
+all known candidates in each fully validated host set, and works even if the
+profile source is missing.
+
+Reapply `mode set <mode>` after editing a profile source in `src/agentic_hub/profiles/`
+to refresh installed sections.
+
+### Recovery
+
+After a partial failure, successful updates remain in place. Fix the reported
+target and retry `mode set <mode>`, or run `mode off` using the same environment.
+Malformed markers require manual inspection; the hub will not guess how to repair
+them. A completed write reports actual per-host modes, including partial errors.
+
+Before uninstalling or reverting, run `mode off` and verify that all four hosts
+report off: removing the application alone leaves installed instructions in place.
+Before downgrading to a coach-only release, select Coach or Off with the updated
+hub and verify the result; older versions do not recognize new-mode blocks.

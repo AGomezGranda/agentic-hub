@@ -1,7 +1,8 @@
 **Pi** — one `subagent` call with a `workflowScript` dispatching every
 child in a single `await runs.all([...])`, not a loop of sequential
-`runs.run` calls. Omit `async` entirely — default blocking. A single
-top-level call that this turn needs to synthesize from must block until
+`runs.run` calls. Pass `async: false` explicitly: workflow calls default to
+background, so an omitted `async` returns a receipt, not the findings. A
+single top-level call that this turn needs to synthesize from must block until
 `runs.all([...])` resolves; `async: true` would return a background-run
 receipt before the children finish, and nothing else in this flow tells
 the model to `bg_wait`/poll afterward. Children run concurrently up to

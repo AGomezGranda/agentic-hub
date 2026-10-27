@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "workflowRunId": "00000000-0000-4000-8000-000000000001",
+  "state": "running",
+  "entries": {
+    "scout-r1": {
+      "key": "scout-r1",
+      "agent": "scout",
+      "resolvedContext": "fresh",
+      "outputReference": "{{SESSIONS_ROOT}}/subagent-artifacts/outputs/00000000-0000-4000-8000-000000000001/swarm/r1-scout.md",
+      "latestRunId": "00000000-0000-4000-8000-000000000002",
+      "resumability": {
+        "state": "resumable"
+      }
+    },
+    "correctness-r1": {
+      "key": "correctness-r1",
+      "agent": "reviewer",
+      "resolvedContext": "fresh",
+      "outputReference": "{{SESSIONS_ROOT}}/subagent-artifacts/outputs/00000000-0000-4000-8000-000000000001/swarm/r1-correctness.md",
+      "latestRunId": "00000000-0000-4000-8000-000000000003",
+      "resumability": {
+        "state": "resumable"
+      }
+    },
+    "architecture-r1": {
+      "key": "architecture-r1",
+      "agent": "reviewer",
+      "resolvedContext": "fresh",
+      "latestRunId": "00000000-0000-4000-8000-000000000004",
+      "resumability": {
+        "state": "resumable"
+      }
+    }
+  }
+}

@@ -1,0 +1,130 @@
+{
+  "runId": "00000000-0000-4000-8000-000000000001",
+  "toolCallId": "toolu_fixture_root",
+  "mode": "workflow",
+  "state": "running",
+  "startedAt": 1793099279673,
+  "lastUpdate": 1793100356181,
+  "pid": 4242,
+  "steps": [
+    {
+      "agent": "scout",
+      "sessionName": "scout: [fixture]",
+      "label": "Map swarm scope",
+      "workflowKey": "scout-r1",
+      "parentWorkflowRunId": "00000000-0000-4000-8000-000000000001",
+      "status": "complete",
+      "startedAt": 1793099279705,
+      "runId": "00000000-0000-4000-8000-000000000002",
+      "durationMs": 283527,
+      "tokens": {
+        "input": 74,
+        "output": 51065,
+        "total": 51139
+      },
+      "turnCount": 36,
+      "async": true
+    },
+    {
+      "agent": "reviewer",
+      "sessionName": "reviewer: [fixture]",
+      "label": "Review correctness",
+      "workflowKey": "correctness-r1",
+      "parentWorkflowRunId": "00000000-0000-4000-8000-000000000001",
+      "status": "complete",
+      "startedAt": 1793099563238,
+      "runId": "00000000-0000-4000-8000-000000000003",
+      "durationMs": 243726,
+      "tokens": {
+        "input": 36,
+        "output": 46944,
+        "total": 46980
+      },
+      "turnCount": 17,
+      "async": true
+    },
+    {
+      "agent": "reviewer",
+      "sessionName": "reviewer: [fixture]",
+      "label": "Review architecture",
+      "workflowKey": "architecture-r1",
+      "parentWorkflowRunId": "00000000-0000-4000-8000-000000000001",
+      "status": "running",
+      "startedAt": 1793099563282,
+      "runId": "00000000-0000-4000-8000-000000000004",
+      "durationMs": 387273,
+      "tokens": {
+        "input": 58,
+        "output": 82115,
+        "total": 82173
+      },
+      "turnCount": 28,
+      "async": true
+    },
+    {
+      "agent": "reviewer",
+      "sessionName": "reviewer: [fixture]",
+      "label": "Verify and rank findings",
+      "workflowKey": "verify-r1",
+      "parentWorkflowRunId": "00000000-0000-4000-8000-000000000001",
+      "status": "running",
+      "startedAt": 1793099950561,
+      "runId": "00000000-0000-4000-8000-000000000005",
+      "durationMs": 405606,
+      "tokens": {
+        "input": 52,
+        "output": 79618,
+        "total": 79670
+      },
+      "turnCount": 25,
+      "async": true
+    }
+  ],
+  "workflowChildren": {
+    "version": 1,
+    "workflowRunId": "00000000-0000-4000-8000-000000000001",
+    "inventoryComplete": true,
+    "workflowState": "running",
+    "children": [
+      {
+        "childId": "scout-r1",
+        "state": "complete",
+        "runId": "00000000-0000-4000-8000-000000000002",
+        "agent": "scout",
+        "sessionName": "scout: [fixture]"
+      },
+      {
+        "childId": "correctness-r1",
+        "state": "complete",
+        "runId": "00000000-0000-4000-8000-000000000003",
+        "agent": "reviewer",
+        "sessionName": "reviewer: [fixture]"
+      },
+      {
+        "childId": "architecture-r1",
+        "state": "running",
+        "runId": "00000000-0000-4000-8000-000000000004",
+        "agent": "reviewer",
+        "sessionName": "reviewer: [fixture]"
+      },
+      {
+        "childId": "verify-r1",
+        "state": "running",
+        "runId": "00000000-0000-4000-8000-000000000005",
+        "agent": "reviewer",
+        "sessionName": "reviewer: [fixture]"
+      }
+    ]
+  },
+  "totalTokens": {
+    "input": 0,
+    "output": 0,
+    "total": 259962
+  },
+  "totalCost": {
+    "inputTokens": 0,
+    "outputTokens": 0,
+    "costUsd": 0.410053745
+  },
+  "turnCount": 106
+}

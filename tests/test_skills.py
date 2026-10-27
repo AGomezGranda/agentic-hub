@@ -101,6 +101,14 @@ def test_codex_branch_dispatches_independent_subagents() -> None:
     assert "collect all results" in text
 
 
+def test_pi_branch_blocks_explicitly() -> None:
+    """Workflow calls default to background, so an omitted `async` returns a
+    receipt instead of the findings the parent must synthesize from."""
+    text = _host_branch_text("pi")
+    assert "async: false" in text
+    assert "default blocking" not in text
+
+
 def test_claude_branch_forbids_nesting() -> None:
     text = _host_branch_text("claude")
     assert re.search(r"cannot spawn\s+further children", text)

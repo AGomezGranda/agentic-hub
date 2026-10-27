@@ -1,0 +1,16 @@
+{
+  "name": "swarm-viewer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "swarm-viewer": "bin/swarm-viewer.js"
+  },
+  "scripts": {
+    "start": "node bin/swarm-viewer.js",
+    "test": "node --test"
+  }
+}

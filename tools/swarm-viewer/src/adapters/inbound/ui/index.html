@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Swarm viewer</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <h1>Swarm viewer</h1>
+      <p id="totals" class="totals"></p>
+      <p id="link-status" class="link-status"></p>
+    </header>
+    <aside class="swarms" aria-label="Swarms">
+      <h2>Swarms</h2>
+      <ul id="swarm-list" class="swarm-list"></ul>
+    </aside>
+    <main>
+      <div id="banner" class="banner" hidden></div>
+      <div id="stages" class="stages"></div>
+    </main>
+    <section id="drawer" class="drawer" aria-label="Node details" hidden>
+      <button id="drawer-close" class="drawer-close" type="button">Close</button>
+      <div id="drawer-body" class="drawer-body"></div>
+    </section>
+    <section class="timeline" aria-label="Activity">
+      <div class="timeline-head">
+        <h2>Activity</h2>
+        <label>Node <select id="timeline-filter"></select></label>
+        <p class="note">Read-only. Tokens and cost are estimates reported by pi. Prompts and thinking from the event log are not shown. Tool arguments need --show-args; node tool output needs --show-output. Reports are shown as written and can quote tool output.</p>
+      </div>
+      <ul id="timeline" class="timeline-list"></ul>
+    </section>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

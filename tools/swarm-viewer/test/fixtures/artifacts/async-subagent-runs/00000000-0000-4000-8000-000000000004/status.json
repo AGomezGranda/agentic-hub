@@ -1,0 +1,93 @@
+{
+  "lifecycleArtifactVersion": 3,
+  "runId": "00000000-0000-4000-8000-000000000004",
+  "toolCallId": "toolu_fixture_architecture-r1",
+  "mode": "single",
+  "state": "running",
+  "startedAt": 1793099564203,
+  "lastActivityAt": 1793099950000,
+  "lastUpdate": 1793099950495,
+  "pid": 2147483647,
+  "cwd": "/fixture/repo",
+  "currentStep": 0,
+  "chainStepCount": 1,
+  "parentWorkflowRunId": "00000000-0000-4000-8000-000000000001",
+  "workflowKey": "architecture-r1",
+  "steps": [
+    {
+      "agent": "reviewer",
+      "sessionName": "reviewer: [fixture]",
+      "description": "[prompt redacted]",
+      "context": "fresh",
+      "status": "running",
+      "model": "anthropic/claude-haiku-5-5",
+      "requestedModel": "anthropic/claude-haiku-5-5",
+      "resolvedModel": {
+        "provider": "anthropic",
+        "model": "claude-haiku-5-5"
+      },
+      "thinking": "xhigh",
+      "startedAt": 1793099564210,
+      "turnCount": 28,
+      "toolCount": 51,
+      "tokens": {
+        "input": 58,
+        "output": 82115,
+        "total": 82173,
+        "window": 146543,
+        "windowPeak": 146543
+      },
+      "totalCost": {
+        "inputTokens": 58,
+        "outputTokens": 82115,
+        "costUsd": 0.310211815
+      },
+      "recentTools": [
+        {
+          "tool": "grep",
+          "args": "CANARY-TOOLARG grep",
+          "endMs": 1793099819131
+        },
+        {
+          "tool": "ls",
+          "args": "CANARY-TOOLARG ls",
+          "endMs": 1793099820593
+        },
+        {
+          "tool": "grep",
+          "args": "CANARY-TOOLARG grep",
+          "endMs": 1793099821965
+        },
+        {
+          "tool": "grep",
+          "args": "CANARY-TOOLARG grep",
+          "endMs": 1793099823604
+        },
+        {
+          "tool": "read",
+          "args": "CANARY-TOOLARG read",
+          "endMs": 1793099825104
+        }
+      ],
+      "recentOutput": [
+        "CANARY-TOOLOUT first line",
+        "CANARY-TOOLOUT second line",
+        "CANARY-TOOLOUT third line"
+      ]
+    }
+  ],
+  "totalTokens": {
+    "input": 58,
+    "output": 82115,
+    "total": 82173,
+    "window": 146543,
+    "windowPeak": 146543
+  },
+  "totalCost": {
+    "inputTokens": 58,
+    "outputTokens": 82115,
+    "costUsd": 0.310211815
+  },
+  "turnCount": 28,
+  "toolCount": 51
+}
