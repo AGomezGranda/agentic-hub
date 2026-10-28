@@ -121,6 +121,19 @@ describe('listSwarms', () => {
   });
 });
 
+describe('listSwarms state counts', () => {
+  test('rows count member states from the reads listSwarms already does, once per run id', async () => {
+    const { svc, calls } = service({
+      root: { status: rootOf('root', { members }) },
+      c1: { status: childOf('c1', { key: 'scout-r1' }) },
+      c2: { status: childOf('c2', { key: 'review-r1', state: 'running', pid: 999 }) },
+    });
+    const [row] = await svc.listSwarms();
+    assert.deepEqual(row.stateCounts, { completed: 1, stale: 1 });
+    assert.deepEqual([...calls.status].sort(), ['c1', 'c2', 'root']);
+  });
+});
+
 describe('getSwarm', () => {
   test('reads members from workflowChildren only and never scans other run dirs', async () => {
     const { svc, calls } = service({

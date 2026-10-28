@@ -24,7 +24,7 @@ describe('swarm viewer UI, static checks', () => {
 
   test('app.js imports the activity cap, applies it per batch, and resets it on reconnect', async () => {
     const js = await read('app.js');
-    assert.match(js, /import \{ keepNewestPerNode \} from '\.\/activity\.js';/);
+    assert.match(js, /import \{ keepNewestPerNode[^}]*\} from '\.\/activity\.js';/);
     assert.match(js, /state\.activity = keepNewestPerNode\(state\.activity\.concat\(JSON\.parse\(event\.data\)\), MAX_ACTIVITY\);/);
     assert.match(js, /addEventListener\('open', \(\) => \{\s*state\.activity = \[\];/);
   });
@@ -114,5 +114,12 @@ describe('swarm viewer UI, static checks', () => {
     assert.notEqual(end, -1, 'end of toggle listener');
     const listener = js.slice(start, end);
     for (const token of ['textContent', 'innerText', 'replaceChildren', 'firstChild', 'label']) assert.equal(listener.includes(token), false, `toggle listener uses ${token}`);
+  });
+
+  test('running cards build a native progress bar and the drawer copies through the clipboard API', async () => {
+    const js = await read('app.js');
+    assert.match(js, /h\('progress'/);
+    assert.match(js, /navigator\.clipboard\?\.writeText/);
+    assert.equal(js.includes("setAttribute('style'"), false);
   });
 });

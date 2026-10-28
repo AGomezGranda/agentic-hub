@@ -1,10 +1,13 @@
 // Swarm viewer UI. Talks only to the JSON and SSE API. Renders with DOM APIs; data never becomes markup.
-import { keepNewestPerNode } from './activity.js';
+import { keepNewestPerNode, fmtDuration, offsetLabel, progressOf } from './activity.js';
 
 const LIST_REFRESH_MS = 5000;
 const TIMELINE_ROWS = 300;
 const MAX_ACTIVITY = TIMELINE_ROWS; // per node; the timeline window is global, so no shown row is lost
 const DRAWER_ROWS = 50;
+const COPY_FEEDBACK_MS = 1500;
+const COUNT_ORDER = ['running', 'stale', 'failed', 'paused', 'stopped', 'completed', 'unknown'];
+const FINISHED = new Set(['completed', 'failed', 'stopped']);
 const STATE_NOTES = {
   stale: 'The process is gone but the run never reached a final state.',
   unknown: 'The status file for this node could not be read.',
@@ -19,6 +22,8 @@ const state = {
   reports: new Map(),
   filterKeys: null,
   source: null,
+  copyStatus: null,
+  copyTimer: null,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -42,11 +47,7 @@ function rerender(container, build) {
 }
 
 const fmtTime = (ms) => (typeof ms === 'number' ? new Date(ms).toLocaleTimeString() : '—');
-const fmtDuration = (ms) => {
-  if (typeof ms !== 'number') return '—';
-  const s = Math.round(ms / 1000);
-  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
-};
+const fmtAgo = (ms) => (typeof ms === 'number' ? `${fmtDuration(Math.max(0, Date.now() - ms))} ago` : null);
 // "main", "detached at <head>", or null when neither is known (for example, a branch lookup timed out).
 const branchText = (repo) => {
   if (!repo) return null;
@@ -62,7 +63,8 @@ const outputText = (output) => (Array.isArray(output) ? output.map(String).join(
 const modelText = (node) => (node.modelMismatch ? `${node.requestedModel} → ${node.model}` : (node.model ?? '—'));
 
 function summaryText(item) {
-  const at = typeof item.ts === 'number' ? `${fmtTime(item.ts)} ` : '';
+  const offset = offsetLabel(item.ts, state.view?.startedAt);
+  const at = offset ? `${offset} ` : '';
   switch (item.type) {
     case 'tool_execution_start':
       return `${at}tool start ${item.tool ?? ''}${item.args === undefined ? '' : ` ${argsText(item.args)}`}`;
@@ -106,7 +108,7 @@ async function refreshList() {
 function select(id) {
   if (id === state.swarmId) return;
   state.source?.close();
-  Object.assign(state, { swarmId: id, view: null, selectedKey: null, activity: [], reports: new Map(), filterKeys: null });
+  Object.assign(state, { swarmId: id, view: null, selectedKey: null, activity: [], reports: new Map(), filterKeys: null, copyStatus: null });
   history.replaceState(null, '', `#${id}`);
   const source = new EventSource(`/api/swarms/${encodeURIComponent(id)}/events`);
   state.source = source;
@@ -179,13 +181,19 @@ function renderList() {
     const item = h('button', 'swarm-item',
       h('span', null, h('strong', null, name), branch === null ? null : ` · ${branch}`),
       h('span', 'meta', `${swarm.id.slice(0, 8)} · ${fmtTime(swarm.startedAt)}`),
-      h('span', null, badge(swarm.state), typeof swarm.round === 'number' ? ` round ${swarm.round}` : null, ` ${swarm.memberCount} nodes`));
+      h('span', null, badge(swarm.state), typeof swarm.round === 'number' ? ` round ${swarm.round}` : null, ` ${swarm.memberCount} nodes`),
+      countsLine(swarm.stateCounts));
     item.type = 'button';
     item.dataset.focusKey = swarm.id;
     item.setAttribute('aria-pressed', String(swarm.id === state.swarmId));
     item.addEventListener('click', () => select(swarm.id));
     return h('li', null, item);
   }));
+}
+
+function countsLine(counts) {
+  const parts = COUNT_ORDER.filter((name) => counts?.[name] > 0).map((name) => `${counts[name]} ${name}`);
+  return parts.length ? h('span', 'meta', parts.join(' · ')) : null;
 }
 
 function renderTotals() {
@@ -224,16 +232,30 @@ function card(node) {
     h('span', 'row', h('strong', null, node.label ?? node.key), badge(node.state)),
     h('span', 'meta', [node.agent, modelText(node)].filter(Boolean).join(' · ')),
     h('span', 'meta', `${fmtDuration(node.durationMs)} · est. ${fmtUsd(node.costUsd)} · ${fmtNum(node.toolCount)} tools`),
-    node.modelMismatch ? h('span', 'warn', 'model differs from the request') : null);
+    node.modelMismatch ? h('span', 'warn', 'model differs from the request') : null,
+    ...(node.state === 'running' ? runningLines(node) : []));
   button.dataset.state = node.state;
   button.type = 'button';
   button.dataset.focusKey = node.key;
   button.addEventListener('click', () => {
     state.selectedKey = node.key;
+    state.copyStatus = null;
     renderStages();
     renderDrawer();
   });
   return button;
+}
+
+function runningLines(node) {
+  const fraction = progressOf(node, Date.now());
+  let bar = null;
+  if (fraction !== null) {
+    bar = h('progress');
+    bar.max = 1;
+    bar.value = fraction;
+  }
+  const ago = fmtAgo(node.lastActivityAt);
+  return [bar, ago === null ? null : h('span', 'meta', `active ${ago}`)];
 }
 
 // Rebuilding the select would drop focus, so it is rebuilt only when the node set changes.
@@ -274,13 +296,22 @@ function drawerContent(node) {
     ['Est. cost', fmtUsd(node.costUsd)],
     ['Tools', fmtNum(node.toolCount)],
     ['Turns', fmtNum(node.turnCount)],
+    ['Deadline', node.deadlineAt === null ? null : fmtTime(node.deadlineAt)],
+    ['Last activity', fmtAgo(node.lastActivityAt)],
+    ['Exit code', node.exitCode === null ? null : String(node.exitCode)],
+    // Running nodes carry "pending", which says nothing.
+    ['Terminal state', FINISHED.has(node.state) ? node.terminalState : null],
   ];
+  const optional = new Set(['Deadline', 'Last activity', 'Exit code', 'Terminal state']);
+  const shown = rows.filter(([term, value]) => !optional.has(term) || value !== null);
+  const path = state.view?.repo?.path ?? state.view?.cwd ?? null;
   const items = state.activity.filter((item) => item.nodeKey === node.key).slice(-DRAWER_ROWS).reverse();
   return [
     h('h2', null, node.label ?? node.key),
     h('p', null, badge(node.state), ` ${node.key}`),
     STATE_NOTES[node.state] ? h('p', 'warn', STATE_NOTES[node.state]) : null,
-    h('dl', null, ...rows.flatMap(([term, value]) => [h('dt', null, term), h('dd', null, value ?? '—')])),
+    h('p', 'actions', copyButton('copy-run', 'Copy run id', node.runId), path === null ? null : copyButton('copy-path', 'Copy path', path)),
+    h('dl', null, ...shown.flatMap(([term, value]) => [h('dt', null, term), h('dd', null, value ?? '—')])),
     h('h3', null, 'Recent tools'),
     node.recentTools.length
       ? h('ul', null, ...node.recentTools.map((tool) => h('li', null, h('code', null, tool.tool ?? '—'), ` ${fmtTime(tool.endMs)}`, tool.args === undefined ? null : ` ${argsText(tool.args)}`)))
@@ -291,6 +322,31 @@ function drawerContent(node) {
     h('h3', null, 'Activity'),
     items.length ? h('ul', 'activity', ...items.map((item) => h('li', null, summaryText(item)))) : h('p', 'meta', 'None yet.'),
   ];
+}
+
+// Feedback lives in state, so a drawer rebuild keeps it until the timer clears it.
+function copyButton(key, label, text) {
+  if (!navigator.clipboard) return null;
+  const feedback = state.copyStatus?.key === key ? state.copyStatus.text : null;
+  const button = h('button', null, feedback ?? label);
+  button.type = 'button';
+  button.dataset.focusKey = key;
+  button.addEventListener('click', async () => {
+    let result = 'Copied';
+    try {
+      await navigator.clipboard?.writeText(text);
+    } catch {
+      result = 'Copy failed';
+    }
+    state.copyStatus = { key, text: result };
+    clearTimeout(state.copyTimer);
+    state.copyTimer = setTimeout(() => {
+      state.copyStatus = null;
+      renderDrawer();
+    }, COPY_FEEDBACK_MS);
+    renderDrawer();
+  });
+  return button;
 }
 
 function reportBlock(node) {

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import {
   buildSwarm,
+  countStates,
   inferStages,
   normalizeState,
   nodeState,
@@ -153,6 +154,14 @@ describe('summarizeEvent', () => {
       model: 'anthropic/claude-haiku-5-5',
       usage: { input: 4, output: 334, cacheRead: 0, cacheWrite: 9664, costUsd: 0.5 },
     });
+  });
+
+  test('tool and turn events carry ts from observedAt, and none without it', () => {
+    for (const type of ['tool_execution_start', 'tool_execution_end', 'turn_end']) {
+      assert.equal(summarizeEvent({ type, observedAt: 42 }).ts, 42, type);
+      assert.equal('ts' in summarizeEvent({ type }), false, type);
+      assert.equal('ts' in summarizeEvent({ type, observedAt: '42' }), false, type);
+    }
   });
 
   test('subagent lifecycle events keep their timing and step identity', () => {
@@ -361,6 +370,33 @@ describe('buildSwarm on inline data', () => {
     assert.deepEqual(probed, [77]);
   });
 
+  test('live fields come from the child status; terminalState is the top-level copy only', () => {
+    const [node] = build(root([member]), child({
+      deadlineAt: 900,
+      lastActivityAt: 40,
+      processTerminal: { state: 'observed', runId: 'CANARY-PT' },
+      steps: [{ agent: 'scout', exitCode: 0, processTerminal: { state: 'not-started' } }],
+    })).nodes;
+    assert.equal(node.deadlineAt, 900);
+    assert.equal(node.lastActivityAt, 40);
+    assert.equal(node.exitCode, 0);
+    assert.equal(node.terminalState, 'observed');
+    assert.equal(JSON.stringify(node).includes('CANARY-PT'), false);
+  });
+
+  test('live fields are null when absent, non-numeric, or the terminal state is over 32 characters', () => {
+    const [bare] = build(root([member]), child({ steps: [{ processTerminal: { state: 'not-started' } }] })).nodes;
+    assert.deepEqual([bare.deadlineAt, bare.lastActivityAt, bare.exitCode, bare.terminalState], [null, null, null, null]);
+    const [long] = build(root([member]), child({ deadlineAt: '9', processTerminal: { state: 'x'.repeat(33) } })).nodes;
+    assert.equal(long.deadlineAt, null);
+    assert.equal(long.terminalState, null);
+  });
+
+  test('a failed child shows as failed with its exit code and terminal state', () => {
+    const [node] = build(root([member]), child({ state: 'failed', processTerminal: { state: 'failed' }, steps: [{ exitCode: 1 }] })).nodes;
+    assert.deepEqual([node.state, node.exitCode, node.terminalState], ['failed', 1, 'failed']);
+  });
+
   test('a member with no status is listed as unknown; partial reflects inventoryComplete', () => {
     const view = build(root([member], { workflowChildren: { inventoryComplete: false, children: [member] } }), null);
     assert.equal(view.partial, true);
@@ -492,5 +528,25 @@ describe('buildSwarm on inline data', () => {
     assert.equal(view.nodes[0].state, 'running');
     assert.equal(view.nodes[0].endedAt, null);
     assert.equal(view.nodes[0].durationMs, NOW - 10);
+  });
+});
+
+describe('countStates', () => {
+  const members = [{ childId: 'a', runId: 'c1' }, { childId: 'b', runId: 'c2' }, { childId: 'c', runId: 'c3' }];
+  const root = { workflowChildren: { children: members } };
+  const v3 = (extra) => ({ lifecycleArtifactVersion: 3, ...extra });
+
+  test('counts completed, stale and missing children; only running children are probed', () => {
+    const probed = [];
+    const counts = countStates(root, new Map([['c1', v3({ state: 'complete', pid: 1 })], ['c2', v3({ state: 'running', pid: 2 })]]), (pid) => {
+      probed.push(pid);
+      return false;
+    });
+    assert.deepEqual(counts, { completed: 1, stale: 1, unknown: 1 });
+    assert.deepEqual(probed, [2]);
+  });
+
+  test('an unsupported artifact version gives no counts', () => {
+    assert.deepEqual(countStates(root, new Map([['c1', v3({ lifecycleArtifactVersion: 4 })]]), () => true), {});
   });
 });

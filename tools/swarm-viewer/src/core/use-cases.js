@@ -1,4 +1,4 @@
-import { buildSwarm, cwdOf, membersOf, normalizeState, numberOrNull, reportReference, summarizeEvent, workflowArgs } from './model.js';
+import { buildSwarm, countStates, cwdOf, membersOf, normalizeState, numberOrNull, reportReference, summarizeEvent, workflowArgs } from './model.js';
 
 const EVENTS_FILE = 'events.jsonl';
 const RECEIPT_FILE = 'workflow-receipt.json';
@@ -35,6 +35,8 @@ export function createSwarmService({ store, probe, repoProbe, clock, listLimit =
     async listSwarms() {
       const ids = await store.listRunIds();
       const runs = await Promise.all(ids.map(async (id) => ({ id, status: await store.readStatus(id) })));
+      // Children resolve from the same reads; no extra file is read for the counts.
+      const byId = new Map(runs.map(({ id, status }) => [id, status]));
       const kept = runs
         .filter(({ status }) => isWorkflowRoot(status))
         .sort((a, b) => (numberOrNull(b.status.startedAt) ?? 0) - (numberOrNull(a.status.startedAt) ?? 0))
@@ -48,6 +50,7 @@ export function createSwarmService({ store, probe, repoProbe, clock, listLimit =
         cwd: cwdOf(status),
         repo: await repoOf(status),
         round: workflowArgs(status).round,
+        stateCounts: countStates(status, byId, (pid) => probe.isAlive(pid)),
       })));
     },
 
