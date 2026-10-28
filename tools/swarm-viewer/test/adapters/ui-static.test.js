@@ -89,7 +89,8 @@ describe('swarm viewer UI, static checks', () => {
     assert.match(js, /if \(!state\.swarmId\) \{/);
     const error = body('error');
     const closed = error.slice(error.indexOf('EventSource.CLOSED'));
-    assert.match(closed, /^EventSource\.CLOSED\) \{\s*source\.close\(\);\s*state\.swarmId = null;/);
+    assert.match(closed, /^EventSource\.CLOSED\) \{\s*source\.close\(\);\s*state\.swarmId = null;\s*state\.view = null;\s*state\.activity = \[\];\s*setLink\([^)]*\);\s*render\(\);\s*\} else/);
+    assert.match(gone, /state\.activity = \[\];/);
     assert.equal(error.slice(0, error.indexOf('EventSource.CLOSED')).includes('swarmId'), false);
     assert.equal(closed.slice(closed.indexOf('} else')).includes('swarmId'), false);
   });

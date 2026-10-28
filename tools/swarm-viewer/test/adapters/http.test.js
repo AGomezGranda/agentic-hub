@@ -507,14 +507,14 @@ describe('events stream backpressure', () => {
     const service = countingService();
     const res = fakeResponse();
     try {
-      await handlerFor(service, { stallMs: 200 })(req, res);
+      await handlerFor(service, { stallMs: 600 })(req, res);
       res.writableLength = 2 * MIB;
-      await sleep(120);
+      await sleep(400);
       res.writableLength = 0;
       const before = service.follows;
       await waitFor(() => service.follows > before);
       res.writableLength = 2 * MIB;
-      await sleep(120);
+      await sleep(400);
       assert.equal(res.ended, false);
     } finally {
       res.emit('close');

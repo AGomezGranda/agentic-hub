@@ -123,6 +123,7 @@ function select(id) {
     source.close();
     state.swarmId = null;
     state.view = null;
+    state.activity = [];
     setLink('swarm no longer available; retrying');
     render();
   });
@@ -133,6 +134,7 @@ function select(id) {
       source.close();
       state.swarmId = null;
       state.view = null;
+      state.activity = [];
       setLink('swarm unavailable; retrying');
       render();
     } else setLink('reconnecting…');
