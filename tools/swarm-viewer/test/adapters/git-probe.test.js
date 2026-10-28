@@ -44,6 +44,14 @@ describe('git probe on real repositories', () => {
     assert.deepEqual(await probe().describe(dir), { name: 'feat', path: dir, branch: 'feature/x', head: null });
   });
 
+  test('a branch that shares its name with a tag is still reported by branch name', async () => {
+    const dir = join(root, 'tagged');
+    await init(dir);
+    await commit(dir);
+    await git(dir, 'tag', 'main');
+    assert.equal((await probe().describe(dir)).branch, 'main');
+  });
+
   test('a detached HEAD has no branch and a short head hash', async () => {
     const dir = join(root, 'detached');
     await init(dir);
@@ -77,13 +85,16 @@ describe('git probe on real repositories', () => {
     await git(mine, 'checkout', '-q', '-b', 'feature/x');
     await init(other);
     await commit(other);
-    const saved = process.env.GIT_DIR;
+    const saved = { GIT_DIR: process.env.GIT_DIR, GIT_WORK_TREE: process.env.GIT_WORK_TREE };
     process.env.GIT_DIR = join(other, '.git');
+    process.env.GIT_WORK_TREE = other;
     try {
-      assert.equal((await probe().describe(mine)).branch, 'feature/x');
+      assert.deepEqual(await probe().describe(mine), { name: 'env-mine', path: mine, branch: 'feature/x', head: null });
     } finally {
-      if (saved === undefined) delete process.env.GIT_DIR;
-      else process.env.GIT_DIR = saved;
+      for (const [key, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
     }
   });
 
@@ -99,7 +110,7 @@ describe('git probe on real repositories', () => {
 
 describe('git probe with a fake run', () => {
   const TOP = '/work/proj';
-  const MAIN = { 'rev-parse --show-toplevel': `${TOP}\n`, 'symbolic-ref --quiet --short HEAD': 'main\n' };
+  const MAIN = { 'rev-parse --show-toplevel': `${TOP}\n`, 'symbolic-ref --quiet HEAD': 'refs/heads/main\n' };
 
   function fake(answers) {
     const calls = [];
@@ -116,14 +127,14 @@ describe('git probe with a fake run', () => {
   test('runs exactly the three read-only queries, in order, in the given cwd', async () => {
     const { run, calls } = fake({
       'rev-parse --show-toplevel': `${TOP}\n`,
-      'symbolic-ref --quiet --short HEAD': new Error('detached'),
+      'symbolic-ref --quiet HEAD': new Error('detached'),
       'rev-parse --short HEAD': 'abc1234\n',
     });
     const cwd = `${TOP}/src`;
     assert.deepEqual(await createGitProbe({ run, now: () => 0 }).describe(cwd), { name: 'proj', path: TOP, branch: null, head: 'abc1234' });
     assert.deepEqual(calls.map((c) => c.args), [
       ['rev-parse', '--show-toplevel'],
-      ['symbolic-ref', '--quiet', '--short', 'HEAD'],
+      ['symbolic-ref', '--quiet', 'HEAD'],
       ['rev-parse', '--short', 'HEAD'],
     ]);
     assert.ok(calls.every((c) => c.cwd === cwd));
@@ -141,6 +152,13 @@ describe('git probe with a fake run', () => {
     assert.equal(await p.describe('proj'), null);
     assert.equal(await p.describe(undefined), null);
     assert.equal(calls.length, 0);
+  });
+
+  test('a run that never settles is cut off by the budget and gives null', async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const pending = createGitProbe({ run: () => new Promise(() => {}), now: () => 0 }).describe(TOP);
+    t.mock.timers.tick(2000);
+    assert.equal(await pending, null);
   });
 
   test('a second call inside the TTL runs nothing; after the TTL it runs again', async () => {
@@ -200,13 +218,13 @@ describe('git probe with a fake run', () => {
     const calls = [];
     const run = async (args, cwd, timeoutMs) => {
       calls.push(timeoutMs);
-      t += 1500;
+      t += 1000.5;
       if (args[1] === '--show-toplevel') return `${TOP}\n`;
       if (args[0] === 'symbolic-ref') throw new Error('detached');
       return 'abc1234\n';
     };
     const repo = await createGitProbe({ run, now: () => t }).describe(TOP);
-    assert.deepEqual(calls, [2000, 500]);
+    assert.deepEqual(calls, [2000, 999]);
     assert.deepEqual(repo, { name: 'proj', path: TOP, branch: null, head: null });
   });
 });

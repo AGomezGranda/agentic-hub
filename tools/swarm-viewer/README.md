@@ -30,7 +30,7 @@ Without `--show-args`, tool arguments and launch scope never leave the server. W
   macOS (a `/var/folders/...` path) and `/tmp` on Linux. If `PI_SUBAGENTS_TEMP_ROOT` is set, the
   viewer uses `$PI_SUBAGENTS_TEMP_ROOT/async-subagent-runs/` instead.
 - Repo: each swarm's `cwd` comes from its root status. Three read-only git queries run there:
-  `rev-parse --show-toplevel`, `symbolic-ref --short HEAD`, and `rev-parse --short HEAD` when detached.
+  `rev-parse --show-toplevel`, `symbolic-ref --quiet HEAD`, and `rev-parse --short HEAD` when detached.
   The branch is read now, not at launch, so an old swarm can show a branch it did not start on. A `cwd`
   inside another repo shows that repo. Results are cached for 10 s.
 - Launch args: `round` is shown. `scope` (text the launcher wrote) is shown only with `--show-args`. No other launch argument is read.

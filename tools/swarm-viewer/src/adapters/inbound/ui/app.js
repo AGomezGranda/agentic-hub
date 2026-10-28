@@ -47,8 +47,12 @@ const fmtDuration = (ms) => {
   const s = Math.round(ms / 1000);
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
 };
-// "main", "detached at <head>" or "detached". Null when there is no repo to read a branch from.
-const branchText = (repo) => (repo ? (repo.branch ?? (repo.head ? `detached at ${repo.head}` : 'detached')) : null);
+// "main", "detached at <head>", or null when neither is known (for example, a branch lookup timed out).
+const branchText = (repo) => {
+  if (!repo) return null;
+  if (repo.branch) return repo.branch;
+  return repo.head ? `detached at ${repo.head}` : null;
+};
 const cwdName = (cwd) => cwd.split('/').filter(Boolean).pop() ?? cwd;
 const fmtUsd = (usd) => (typeof usd === 'number' ? `$${usd.toFixed(4)}` : '—');
 const fmtNum = (n) => (typeof n === 'number' ? n.toLocaleString() : '—');
@@ -155,7 +159,7 @@ function renderRepo() {
     return;
   }
   el.title = repo?.path ?? cwd;
-  const parts = [h('strong', null, repo?.name ?? cwdName(cwd))];
+  const parts = [h('strong', null, repo?.name || cwdName(cwd))];
   const branch = branchText(repo);
   if (branch !== null) parts.push(` · ${branch}`, h('span', 'meta', ' branch now'));
   el.replaceChildren(...parts);
@@ -163,7 +167,7 @@ function renderRepo() {
 
 function renderScope() {
   const el = $('scope');
-  const scope = state.view?.scope ?? null;
+  const scope = state.view?.scope || null;
   el.hidden = scope === null;
   el.textContent = scope === null ? '' : `Scope: ${scope}`;
 }
@@ -171,7 +175,7 @@ function renderScope() {
 function renderList() {
   rerender($('swarm-list'), () => state.swarms.map((swarm) => {
     const branch = branchText(swarm.repo);
-    const name = swarm.repo?.name ?? (swarm.cwd === null ? '—' : cwdName(swarm.cwd));
+    const name = swarm.repo?.name || (swarm.cwd === null ? '—' : cwdName(swarm.cwd));
     const item = h('button', 'swarm-item',
       h('span', null, h('strong', null, name), branch === null ? null : ` · ${branch}`),
       h('span', 'meta', `${swarm.id.slice(0, 8)} · ${fmtTime(swarm.startedAt)}`),

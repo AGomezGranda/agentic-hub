@@ -42,16 +42,17 @@ async function get(path) {
 }
 
 // Reads the SSE stream until an activity frame arrives or 2 s pass, then closes it.
-function readStream(path) {
+// Only streams from the default app join `seen`, so the canary sweep never sees other apps' text.
+function readStream(path, origin = base) {
   return new Promise((resolve, reject) => {
     let text = '';
     const finish = () => {
       clearTimeout(timer);
       req.destroy();
-      seen.push(text);
+      if (origin === base) seen.push(text);
       resolve(text);
     };
-    const req = http.get(base + path, (res) => {
+    const req = http.get(origin + path, (res) => {
       res.setEncoding('utf8');
       res.on('data', (chunk) => {
         text += chunk;
@@ -156,6 +157,25 @@ describe('swarm viewer end to end, on the copied fixture', () => {
       await new Promise((resolve) => (wired ? wired.server.close(resolve) : resolve()));
       await copy.cleanup();
       await rm(repoDir, { recursive: true, force: true });
+    }
+  });
+
+  test('with showArgs the swarm view carries the launch scope, and the other args key never appears', async () => {
+    const copy = await materializeFixtures();
+    let loud;
+    try {
+      loud = createApp({ artifactsRoot: copy.artifactsRoot, piSessionsRoot: copy.sessionsRoot, showArgs: true });
+      await new Promise((resolve) => loud.server.listen(0, '127.0.0.1', resolve));
+      const body = await (await fetch(`http://127.0.0.1:${loud.server.address().port}/api/swarms/${ROOT}`)).text();
+      assert.equal(JSON.parse(body).scope, 'CANARY-SCOPE fixture scope');
+      assert.equal(body.includes('CANARY-ARGKEY'), false);
+      const stream = await readStream(`/api/swarms/${ROOT}/events`, `http://127.0.0.1:${loud.server.address().port}`);
+      assert.match(stream, /"scope":"CANARY-SCOPE fixture scope"/);
+      assert.equal(stream.includes('CANARY-ARGKEY'), false);
+    } finally {
+      loud?.server.closeAllConnections();
+      await new Promise((resolve) => (loud ? loud.server.close(resolve) : resolve()));
+      await copy.cleanup();
     }
   });
 });
