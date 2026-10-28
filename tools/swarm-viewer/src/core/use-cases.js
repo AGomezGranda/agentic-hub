@@ -1,4 +1,4 @@
-import { buildSwarm, membersOf, normalizeState, numberOrNull, reportReference, summarizeEvent } from './model.js';
+import { buildSwarm, countStates, cwdOf, membersOf, normalizeState, numberOrNull, reportReference, summarizeEvent, workflowArgs } from './model.js';
 
 const EVENTS_FILE = 'events.jsonl';
 const RECEIPT_FILE = 'workflow-receipt.json';
@@ -23,10 +23,10 @@ const isWorkflowRoot = (status) => status?.mode === 'workflow' && !status.parent
 
 /**
  * @param {{store: import('./ports.js').ArtifactStore, probe: import('./ports.js').ProcessProbe,
- *   clock: import('./ports.js').Clock, listLimit?: number, reportMaxBytes?: number,
- *   showArgs?: boolean, showOutput?: boolean}} deps
+ *   repoProbe: import('./ports.js').RepoProbe, clock: import('./ports.js').Clock, listLimit?: number,
+ *   reportMaxBytes?: number, showArgs?: boolean, showOutput?: boolean}} deps
  */
-export function createSwarmService({ store, probe, clock, listLimit = 20, reportMaxBytes = 512 * 1024, showArgs = false, showOutput = false }) {
+export function createSwarmService({ store, probe, repoProbe, clock, listLimit = 20, reportMaxBytes = 512 * 1024, showArgs = false, showOutput = false }) {
   // Members come only from the root's inventory. Other run dirs are never scanned.
   async function load(id) {
     const root = await store.readStatus(id);
@@ -38,36 +38,48 @@ export function createSwarmService({ store, probe, clock, listLimit = 20, report
     return { root, members, children, receipt };
   }
 
-  const viewOf = ({ root, children, receipt }) =>
-    buildSwarm({ root, children, receipt, nowMs: clock.now(), pidAlive: (pid) => probe.isAlive(pid), showArgs, showOutput });
+  const viewOf = ({ root, children, receipt }, repo = null) =>
+    buildSwarm({ root, children, receipt, nowMs: clock.now(), pidAlive: (pid) => probe.isAlive(pid), showArgs, showOutput, repo });
+
+  // Only getSwarm, followSwarm and listSwarms look the repo up. The stream ticks followSwarm; the probe caches.
+  async function repoOf(root) {
+    const cwd = cwdOf(root);
+    return cwd === null ? null : repoProbe.describe(cwd);
+  }
 
   return {
     async listSwarms() {
       const ids = await store.listRunIds();
       const runs = await mapLimit(ids, READ_CONCURRENCY, async (id) => ({ id, status: await store.readStatus(id) }));
-      return runs
+      // Children resolve from the same reads; no extra file is read for the counts.
+      const byId = new Map(runs.map(({ id, status }) => [id, status]));
+      const kept = runs
         .filter(({ status }) => isWorkflowRoot(status))
         .sort((a, b) => (numberOrNull(b.status.startedAt) ?? 0) - (numberOrNull(a.status.startedAt) ?? 0))
-        .slice(0, listLimit)
-        .map(({ id, status }) => ({
-          id,
-          state: normalizeState(status.state),
-          startedAt: numberOrNull(status.startedAt),
-          endedAt: numberOrNull(status.endedAt),
-          memberCount: membersOf(status).length,
-        }));
+        .slice(0, listLimit);
+      return Promise.all(kept.map(async ({ id, status }) => ({
+        id,
+        state: normalizeState(status.state),
+        startedAt: numberOrNull(status.startedAt),
+        endedAt: numberOrNull(status.endedAt),
+        memberCount: membersOf(status).length,
+        cwd: cwdOf(status),
+        repo: await repoOf(status),
+        round: workflowArgs(status).round,
+        stateCounts: countStates(status, byId, (pid) => probe.isAlive(pid)),
+      })));
     },
 
     async getSwarm(id) {
       const loaded = await load(id);
-      return loaded ? viewOf(loaded) : null;
+      return loaded ? viewOf(loaded, await repoOf(loaded.root)) : null;
     },
 
     // cursors: { [runId]: { [file]: offset } }. A missing cursor asks for the backlog.
     async followSwarm(id, cursors = {}) {
       const loaded = await load(id);
       if (!loaded) return { view: null, activity: [], cursors: {} };
-      const view = viewOf(loaded);
+      const view = viewOf(loaded, await repoOf(loaded.root));
       if (view.unsupportedVersion) return { view, activity: [], cursors: {} };
       const activity = [];
       const next = {};

@@ -3,11 +3,13 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import {
   buildSwarm,
+  countStates,
   inferStages,
   normalizeState,
   nodeState,
   reportReference,
   summarizeEvent,
+  workflowArgs,
 } from '../../src/core/model.js';
 
 const RUNS = new URL('../fixtures/artifacts/async-subagent-runs/', import.meta.url);
@@ -15,7 +17,7 @@ const ROOT = '00000000-0000-4000-8000-000000000001';
 const SCOUT = '00000000-0000-4000-8000-000000000002';
 const CORRECTNESS = '00000000-0000-4000-8000-000000000003';
 const ARCHITECTURE = '00000000-0000-4000-8000-000000000004';
-const CANARIES = ['CANARY-SYSTEM', 'CANARY-THINKING', 'CANARY-TOOLARG', 'CANARY-TOOLOUT', 'CANARY-RESULT', 'CANARY-UPDATE'];
+const CANARIES = ['CANARY-SYSTEM', 'CANARY-THINKING', 'CANARY-TOOLARG', 'CANARY-TOOLOUT', 'CANARY-RESULT', 'CANARY-UPDATE', 'CANARY-SCOPE', 'CANARY-ARGKEY'];
 const NOW = 1793100000000;
 
 const readJson = async (runId, file) => JSON.parse(await readFile(new URL(`${runId}/${file}`, RUNS), 'utf8'));
@@ -154,6 +156,14 @@ describe('summarizeEvent', () => {
     });
   });
 
+  test('tool and turn events carry ts from observedAt, and none without it', () => {
+    for (const type of ['tool_execution_start', 'tool_execution_end', 'turn_end']) {
+      assert.equal(summarizeEvent({ type, observedAt: 42 }).ts, 42, type);
+      assert.equal('ts' in summarizeEvent({ type }), false, type);
+      assert.equal('ts' in summarizeEvent({ type, observedAt: '42' }), false, type);
+    }
+  });
+
   test('subagent lifecycle events keep their timing and step identity', () => {
     const summary = summarizeEvent({ type: 'subagent.step.started', ts: 5, runId: 'x', stepIndex: 0, agent: 'scout' });
     assert.deepEqual(summary, { type: 'subagent.step.started', ts: 5, stepIndex: 0, agent: 'scout' });
@@ -170,6 +180,28 @@ describe('summarizeEvent', () => {
   });
 });
 
+describe('workflowArgs', () => {
+  const withArgs = (args) => ({ workflow: { args } });
+
+  test('round is kept only when it is an integer', () => {
+    assert.deepEqual(workflowArgs(withArgs({ round: 3 })), { round: 3, scope: null });
+    assert.equal(workflowArgs(withArgs({ round: '3' })).round, null);
+    assert.equal(workflowArgs(withArgs({ round: 2.5 })).round, null);
+  });
+
+  test('scope is kept only with showArgs, and only as a string', () => {
+    assert.equal(workflowArgs(withArgs({ scope: 'x' })).scope, null);
+    assert.equal(workflowArgs(withArgs({ scope: 'x' }), { showArgs: true }).scope, 'x');
+    assert.equal(workflowArgs(withArgs({ scope: 7 }), { showArgs: true }).scope, null);
+  });
+
+  test('no args, or args that are not an object, give nulls; other keys are never read', () => {
+    assert.deepEqual(workflowArgs({}), { round: null, scope: null });
+    assert.deepEqual(workflowArgs({ workflow: { args: 'nope' } }, { showArgs: true }), { round: null, scope: null });
+    assert.deepEqual(workflowArgs(withArgs({ prompt: 'CANARY-ARGKEY' }), { showArgs: true }), { round: null, scope: null });
+  });
+});
+
 describe('buildSwarm on the copied fixture', () => {
   test('the field paths the model reads exist in the fixture (A2)', async () => {
     const root = await readJson(ROOT, 'status.json');
@@ -182,6 +214,10 @@ describe('buildSwarm on the copied fixture', () => {
     assert.equal(child.lifecycleArtifactVersion, 3);
     assert.equal(child.parentWorkflowRunId, ROOT);
     assert.equal(typeof child.pid, 'number');
+    assert.equal(typeof child.deadlineAt, 'number');
+    assert.equal(typeof child.lastActivityAt, 'number');
+    assert.equal(typeof child.processTerminal.state, 'string');
+    assert.equal(typeof step.exitCode, 'number');
     assert.equal(typeof child.totalCost.costUsd, 'number');
     assert.equal(typeof step.resolvedModel.provider, 'string');
     assert.equal(typeof step.requestedModel, 'string');
@@ -244,6 +280,19 @@ describe('buildSwarm on the copied fixture', () => {
     const loudScout = loud.nodes.find((n) => n.key === 'scout-r1');
     assert.equal(loudScout.recentTools.every((t) => typeof t.args === 'string'), true);
     assert.equal(loudScout.recentOutput.length, 3);
+  });
+
+  test('the fixture launch args: round is shown, scope only with showArgs, the other key never', async () => {
+    const quiet = await fixtureSwarm();
+    assert.equal(quiet.round, 1);
+    assert.equal(quiet.scope, null);
+    assert.equal(quiet.cwd, '/fixture/repo');
+    const text = JSON.stringify(quiet);
+    assert.equal(text.includes('CANARY-SCOPE'), false);
+    assert.equal(text.includes('CANARY-ARGKEY'), false);
+    const loud = await fixtureSwarm({ showArgs: true });
+    assert.equal(loud.scope, 'CANARY-SCOPE fixture scope');
+    assert.equal(JSON.stringify(loud).includes('CANARY-ARGKEY'), false);
   });
 
   test('a stale node stops its clock at its last activity', async () => {
@@ -323,6 +372,42 @@ describe('buildSwarm on inline data', () => {
     assert.deepEqual(probed, [77]);
     build(root([member]), child(), { pidAlive: (pid) => { probed.push(pid); return false; } });
     assert.deepEqual(probed, [77]);
+  });
+
+  test('live fields come from the child status; terminalState is the top-level copy only', () => {
+    const [node] = build(root([member]), child({
+      deadlineAt: 900,
+      lastActivityAt: 40,
+      processTerminal: { state: 'observed', runId: 'CANARY-PT' },
+      steps: [{ agent: 'scout', exitCode: 0, processTerminal: { state: 'not-started' } }],
+    })).nodes;
+    assert.equal(node.deadlineAt, 900);
+    assert.equal(node.lastActivityAt, 40);
+    assert.equal(node.exitCode, 0);
+    assert.equal(node.terminalState, 'observed');
+    assert.equal(JSON.stringify(node).includes('CANARY-PT'), false);
+  });
+
+  test('live fields are null when absent, non-numeric, or the terminal state is over 32 characters', () => {
+    const [bare] = build(root([member]), child({ steps: [{ processTerminal: { state: 'not-started' } }] })).nodes;
+    assert.deepEqual([bare.deadlineAt, bare.lastActivityAt, bare.exitCode, bare.terminalState], [null, null, null, null]);
+    const [long] = build(root([member]), child({ deadlineAt: '9', processTerminal: { state: 'x'.repeat(33) } })).nodes;
+    assert.equal(long.deadlineAt, null);
+    assert.equal(long.terminalState, null);
+    const [edge] = build(root([member]), child({ processTerminal: { state: 'x'.repeat(32) } })).nodes;
+    assert.equal(edge.terminalState, 'x'.repeat(32));
+  });
+
+  test('a running child with no pid stays running and is never probed', () => {
+    const probed = [];
+    const [node] = build(root([member]), child({ state: 'running', pid: undefined, endedAt: undefined }), { pidAlive: (pid) => (probed.push(pid), false) }).nodes;
+    assert.equal(node.state, 'running');
+    assert.deepEqual(probed, []);
+  });
+
+  test('a failed child shows as failed with its exit code and terminal state', () => {
+    const [node] = build(root([member]), child({ state: 'failed', processTerminal: { state: 'failed' }, steps: [{ exitCode: 1 }] })).nodes;
+    assert.deepEqual([node.state, node.exitCode, node.terminalState], ['failed', 1, 'failed']);
   });
 
   test('a member with no status is listed as unknown; partial reflects inventoryComplete', () => {
@@ -429,10 +514,52 @@ describe('buildSwarm on inline data', () => {
     assert.equal(view.nodes[0].endedAt, 40);
   });
 
+  test('the view carries cwd, the repo the caller looked up, and round; cwd and repo are null when absent', () => {
+    const repo = { name: 'proj', path: '/work/proj', branch: 'main', head: null };
+    const view = build(root([member], { cwd: '/work/proj', workflow: { args: { round: 2 } } }), child(), { repo });
+    assert.equal(view.cwd, '/work/proj');
+    assert.deepEqual(view.repo, repo);
+    assert.equal(view.round, 2);
+    const bare = build(root([member]), child());
+    assert.equal(bare.cwd, null);
+    assert.equal(bare.repo, null);
+    assert.equal(bare.scope, null);
+  });
+
+  test('scope is in the view only with showArgs, and the view never holds the other args key', () => {
+    const rootStatus = root([member], { workflow: { args: { round: 1, scope: 'CANARY-SCOPE', prompt: 'CANARY-ARGKEY' } } });
+    const quiet = build(rootStatus, child());
+    assert.equal(quiet.scope, null);
+    assert.equal(JSON.stringify(quiet).includes('CANARY-SCOPE'), false);
+    const loud = build(rootStatus, child(), { showArgs: true });
+    assert.equal(loud.scope, 'CANARY-SCOPE');
+    assert.equal(JSON.stringify(loud).includes('CANARY-ARGKEY'), false);
+  });
+
   test('a live running node has no end, and its duration runs up to now', () => {
     const view = build(root([member]), child({ state: 'running', pid: 77, startedAt: 10, endedAt: undefined, lastActivityAt: 150 }));
     assert.equal(view.nodes[0].state, 'running');
     assert.equal(view.nodes[0].endedAt, null);
     assert.equal(view.nodes[0].durationMs, NOW - 10);
+  });
+});
+
+describe('countStates', () => {
+  const members = [{ childId: 'a', runId: 'c1' }, { childId: 'b', runId: 'c2' }, { childId: 'c', runId: 'c3' }];
+  const root = { workflowChildren: { children: members } };
+  const v3 = (extra) => ({ lifecycleArtifactVersion: 3, ...extra });
+
+  test('counts completed, stale and missing children; only running children are probed', () => {
+    const probed = [];
+    const counts = countStates(root, new Map([['c1', v3({ state: 'complete', pid: 1 })], ['c2', v3({ state: 'running', pid: 2 })]]), (pid) => {
+      probed.push(pid);
+      return false;
+    });
+    assert.deepEqual(counts, { completed: 1, stale: 1, unknown: 1 });
+    assert.deepEqual(probed, [2]);
+  });
+
+  test('an unsupported artifact version gives no counts', () => {
+    assert.deepEqual(countStates(root, new Map([['c1', v3({ lifecycleArtifactVersion: 4 })]]), () => true), {});
   });
 });

@@ -7,11 +7,11 @@ import { createApp } from '../../src/compose.js';
 const UI_DIR = fileURLToPath(new URL('../../src/adapters/inbound/ui/', import.meta.url));
 const HTTP_SOURCE = fileURLToPath(new URL('../../src/adapters/inbound/http.js', import.meta.url));
 const read = (name) => readFile(UI_DIR + name, 'utf8');
-const FORBIDDEN = ['innerHTML', 'outerHTML', 'insertAdjacentHTML', 'document.write', 'eval(', 'new Function'];
+const FORBIDDEN = ['innerHTML', 'outerHTML', 'insertAdjacentHTML', 'document.write', 'eval(', 'new Function', '.style', 'cssText', 'style=', "['style']", "setAttribute('style'"];
 
 describe('swarm viewer UI, static checks', () => {
   test('the page scripts render with DOM APIs and text nodes only', async () => {
-    for (const file of ['app.js', 'activity.js']) {
+    for (const file of ['index.html', 'app.js', 'activity.js']) {
       const js = await read(file);
       for (const token of FORBIDDEN) assert.equal(js.includes(token), false, `${file}: ${token}`);
     }
@@ -24,7 +24,7 @@ describe('swarm viewer UI, static checks', () => {
 
   test('app.js imports the activity cap, applies it per batch, and resets it on reconnect', async () => {
     const js = await read('app.js');
-    assert.match(js, /import \{ keepNewestPerNode \} from '\.\/activity\.js';/);
+    assert.match(js, /import \{ keepNewestPerNode[^}]*\} from '\.\/activity\.js';/);
     assert.match(js, /state\.activity = keepNewestPerNode\(state\.activity\.concat\(JSON\.parse\(event\.data\)\), MAX_ACTIVITY\);/);
     assert.match(js, /addEventListener\('open', \(\) => \{\s*state\.activity = \[\];/);
   });
@@ -97,5 +97,52 @@ describe('swarm viewer UI, static checks', () => {
 
   test('the link status is announced to assistive tech', async () => {
     assert.match(await read('index.html'), /<p id="link-status" class="link-status" role="status">/);
+  });
+
+  test('styles.css has dark mode, reduced motion, the narrow layout and a summary focus ring', async () => {
+    const css = await read('styles.css');
+    assert.match(css, /prefers-color-scheme: dark/);
+    assert.match(css, /prefers-reduced-motion/);
+    // The base .badge-running::before rule sits above the query, so the pulse is searched from the query's index.
+    const motion = css.indexOf('@media (prefers-reduced-motion: no-preference)');
+    const motionEnd = css.indexOf('\n}', motion);
+    const pulse = css.indexOf('.badge-running::before', motion);
+    assert.notEqual(motion, -1, 'reduced-motion media query');
+    assert.ok(pulse > motion && pulse < motionEnd, 'badge pulse sits inside the reduced-motion media query');
+    assert.match(css, /max-width: 1000px/);
+    assert.match(css, /summary:focus-visible/);
+  });
+
+  test('styles.css has a card rule for each of the seven core node states', async () => {
+    const css = await read('styles.css');
+    for (const state of ['running', 'completed', 'failed', 'paused', 'stopped', 'unknown', 'stale']) {
+      assert.match(css, new RegExp(`\\.card\\[data-state="${state}"\\]\\s*[{,]`), state);
+    }
+  });
+
+  test('index.html puts the timeline note behind a details disclosure', async () => {
+    const html = await read('index.html');
+    assert.match(html, /<details class="info"><summary>About this view<\/summary>/);
+  });
+
+  test('app.js drives the timeline toggle through dataset and aria-expanded, never its label', async () => {
+    const js = await read('app.js');
+    assert.match(js, /dataset\.timeline/);
+    assert.match(js, /\$\('timeline-toggle'\)\.setAttribute\('aria-expanded'/);
+    assert.match(js, /const open = document\.body\.dataset\.timeline !== 'collapsed';/);
+    assert.match(js, /document\.body\.dataset\.timeline = open \? 'collapsed' : 'open';/);
+    assert.match(js, /String\(!open\)/);
+    const start = js.indexOf("$('timeline-toggle').addEventListener");
+    const end = js.indexOf('});', start);
+    assert.notEqual(start, -1, 'toggle listener');
+    assert.notEqual(end, -1, 'end of toggle listener');
+    const listener = js.slice(start, end);
+    for (const token of ['textContent', 'innerText', 'replaceChildren', 'firstChild', 'label']) assert.equal(listener.includes(token), false, `toggle listener uses ${token}`);
+  });
+
+  test('running cards build a native progress bar and the drawer copies through the clipboard API', async () => {
+    const js = await read('app.js');
+    assert.match(js, /h\('progress'/);
+    assert.match(js, /navigator\.clipboard\?\.writeText/);
   });
 });

@@ -10,6 +10,7 @@
   <body>
     <header class="topbar">
       <h1>Swarm viewer</h1>
+      <p id="repo" class="repo" hidden></p>
       <p id="totals" class="totals"></p>
       <p id="link-status" class="link-status" role="status"></p>
     </header>
@@ -18,6 +19,7 @@
       <ul id="swarm-list" class="swarm-list"></ul>
     </aside>
     <main>
+      <p id="scope" class="scope" hidden></p>
       <div id="banner" class="banner" hidden></div>
       <div id="stages" class="stages"></div>
     </main>
@@ -28,8 +30,9 @@
     <section class="timeline" aria-label="Activity">
       <div class="timeline-head">
         <h2>Activity</h2>
+        <button id="timeline-toggle" type="button" aria-expanded="true" aria-controls="timeline">Timeline</button>
         <label>Node <select id="timeline-filter"></select></label>
-        <p class="note">Read-only. Tokens and cost are estimates reported by pi. Prompts and thinking from the event log are not shown. Tool arguments need --show-args; node tool output needs --show-output. Reports are shown as written and can quote tool output.</p>
+        <details class="info"><summary>About this view</summary><p>Read-only. Tokens and cost are estimates reported by pi. Prompts and thinking from the event log are not shown. Tool arguments need --show-args; node tool output needs --show-output. Reports are shown as written and can quote tool output.</p></details>
       </div>
       <ul id="timeline" class="timeline-list"></ul>
     </section>

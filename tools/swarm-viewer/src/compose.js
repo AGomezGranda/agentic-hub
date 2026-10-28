@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHttpHandler } from './adapters/inbound/http.js';
 import { createArtifactStore } from './adapters/outbound/artifacts-fs.js';
+import { createGitProbe } from './adapters/outbound/git-probe.js';
 import { processProbe, systemClock } from './adapters/outbound/system.js';
 import { createSwarmService } from './core/use-cases.js';
 
@@ -16,9 +17,9 @@ const UI_FILES = new Map([
 ]);
 
 // The only file that wires concrete adapters into core. Returns a server that is not yet listening.
-export function createApp({ artifactsRoot, piSessionsRoot, showArgs = false, showOutput = false }) {
+export function createApp({ artifactsRoot, piSessionsRoot, showArgs = false, showOutput = false, repoProbe = createGitProbe() }) {
   const store = createArtifactStore({ root: artifactsRoot, allowedRoots: [artifactsRoot, piSessionsRoot] });
-  const service = createSwarmService({ store, probe: processProbe, clock: systemClock, showArgs, showOutput });
+  const service = createSwarmService({ store, probe: processProbe, repoProbe, clock: systemClock, showArgs, showOutput });
   const server = createServer(createHttpHandler({ service, uiFiles: UI_FILES, getPort: () => server.address()?.port }));
   return { server };
 }

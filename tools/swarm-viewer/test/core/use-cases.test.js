@@ -58,15 +58,23 @@ const members = [
   { childId: 'review-r1', runId: 'c2', agent: 'reviewer' },
 ];
 
+// Answers from a cwd -> repo map and records each cwd it is asked about.
+function fakeRepoProbe(repos = {}) {
+  const calls = [];
+  return { calls, describe: async (cwd) => (calls.push(cwd), repos[cwd] ?? null) };
+}
+
 function service(runs, options = {}) {
   const fake = fakeStore(runs);
+  const repoProbe = options.repoProbe ?? fakeRepoProbe();
   const svc = createSwarmService({
     store: fake.store,
     probe: { isAlive: (pid) => pid !== 999 },
     clock: { now: () => 1000 },
     ...options,
+    repoProbe,
   });
-  return { svc, calls: fake.calls };
+  return { svc, calls: fake.calls, repoProbe };
 }
 
 describe('listSwarms', () => {
@@ -110,6 +118,19 @@ describe('listSwarms', () => {
     const view = await svc.getSwarm('root');
     assert.equal(listed.memberCount, 1);
     assert.equal(view.nodes.length, listed.memberCount);
+  });
+});
+
+describe('listSwarms state counts', () => {
+  test('rows count member states from the reads listSwarms already does, once per run id', async () => {
+    const { svc, calls } = service({
+      root: { status: rootOf('root', { members }) },
+      c1: { status: childOf('c1', { key: 'scout-r1' }) },
+      c2: { status: childOf('c2', { key: 'review-r1', state: 'running', pid: 999 }) },
+    });
+    const [row] = await svc.listSwarms();
+    assert.deepEqual(row.stateCounts, { completed: 1, stale: 1 });
+    assert.deepEqual([...calls.status].sort(), ['c1', 'c2', 'root']);
   });
 });
 
@@ -268,5 +289,68 @@ describe('listSwarms read concurrency', () => {
     assert.equal(maxInFlight, 16);
     // Equal startedAt and a stable sort: the output order is the read order.
     assert.deepEqual(list.map((s) => s.id), ids);
+  });
+});
+
+describe('repo lookups', () => {
+  const repo = { name: 'repo', path: '/work/repo', branch: 'feature/x', head: null };
+  const members2 = [
+    { childId: 'scout-r1', runId: 'c1', agent: 'scout' },
+    { childId: 'review-r1', runId: 'c2', agent: 'reviewer' },
+  ];
+  const runsWithCwd = (cwd) => ({
+    root: { status: { ...rootOf('root', { members: members2 }), ...(cwd ? { cwd } : {}) } },
+    c1: { status: childOf('c1', { key: 'scout-r1' }) },
+    c2: { status: childOf('c2', { key: 'review-r1' }) },
+  });
+
+  test('getSwarm looks the repo up once, from the root cwd, and puts it in the view', async () => {
+    const repoProbe = fakeRepoProbe({ '/work/repo': repo });
+    const { svc } = service(runsWithCwd('/work/repo'), { repoProbe });
+    const view = await svc.getSwarm('root');
+    assert.deepEqual(repoProbe.calls, ['/work/repo']);
+    assert.equal(view.cwd, '/work/repo');
+    assert.deepEqual(view.repo, repo);
+  });
+
+  test('no lookup when the root has no cwd', async () => {
+    const repoProbe = fakeRepoProbe({ '/work/repo': repo });
+    const { svc } = service(runsWithCwd(null), { repoProbe });
+    const view = await svc.getSwarm('root');
+    assert.deepEqual(repoProbe.calls, []);
+    assert.equal(view.repo, null);
+  });
+
+  test('followSwarm looks the repo up once per call and puts it in the view', async () => {
+    const repoProbe = fakeRepoProbe({ '/work/repo': repo });
+    const { svc } = service(runsWithCwd('/work/repo'), { repoProbe });
+    const result = await svc.followSwarm('root', {});
+    assert.deepEqual(repoProbe.calls, ['/work/repo']);
+    assert.deepEqual(result.view.repo, repo);
+  });
+
+  test('reportFor never looks the repo up', async () => {
+    const repoProbe = fakeRepoProbe({ '/work/repo': repo });
+    const runs = runsWithCwd('/work/repo');
+    runs.root.files = { 'workflow-receipt.json': receiptOf({ 'scout-r1': { outputReference: '/x/r1.md' } }) };
+    const { svc } = service(runs, { repoProbe });
+    await svc.reportFor('root', 'scout-r1');
+    assert.deepEqual(repoProbe.calls, []);
+  });
+
+  test('listSwarms looks up only the rows kept by listLimit; each row carries cwd, repo and round', async () => {
+    const repoA = { name: 'a', path: '/work/a', branch: 'main', head: null };
+    const repoProbe = fakeRepoProbe({ '/work/a': repoA });
+    const { svc } = service({
+      a: { status: { ...rootOf('a', { startedAt: 300 }), cwd: '/work/a', workflow: { args: { round: 2 } } } },
+      b: { status: { ...rootOf('b', { startedAt: 200 }), cwd: '/work/b' } },
+      c: { status: { ...rootOf('c', { startedAt: 100 }), cwd: '/work/c' } },
+    }, { repoProbe, listLimit: 2 });
+    const list = await svc.listSwarms();
+    assert.deepEqual([...repoProbe.calls].sort(), ['/work/a', '/work/b']);
+    assert.deepEqual(list.map((s) => [s.id, s.cwd, s.repo, s.round]), [
+      ['a', '/work/a', repoA, 2],
+      ['b', '/work/b', null, null],
+    ]);
   });
 });

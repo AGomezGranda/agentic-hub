@@ -14,4 +14,7 @@
 
 /** @typedef {{ now: () => number }} Clock */
 
+/** @typedef {{name: string, path: string, branch: string|null, head: string|null}} Repo */
+/** @typedef {{ describe: (cwd: string) => Promise<Repo|null> }} RepoProbe */
+
 export {};
