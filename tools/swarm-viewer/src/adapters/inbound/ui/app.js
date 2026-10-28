@@ -132,7 +132,9 @@ function select(id) {
     else if (source.readyState === EventSource.CLOSED) {
       source.close();
       state.swarmId = null;
+      state.view = null;
       setLink('swarm unavailable; retrying');
+      render();
     } else setLink('reconnecting…');
   });
   render();

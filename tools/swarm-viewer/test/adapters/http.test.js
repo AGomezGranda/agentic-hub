@@ -424,6 +424,10 @@ function fakeResponse() {
       if (chunk !== undefined) res.chunks.push(String(chunk));
       res.ended = true;
     },
+    destroy() {
+      res.destroyed = true;
+      res.emit('close');
+    },
   });
   return res;
 }
@@ -447,14 +451,16 @@ const delivered = (res) =>
 
 describe('events stream backpressure', () => {
   const req = { method: 'GET', url: '/api/swarms/known/events', headers: { host: '127.0.0.1:1' } };
-  const handlerFor = (service, log = () => {}) =>
-    createHttpHandler({ service, getPort: () => 1, pollMs: 10, pingMs: 60_000, stallMs: 50, log });
+  const handlerFor = (service, { log = () => {}, stallMs = 50 } = {}) =>
+    createHttpHandler({ service, getPort: () => 1, pollMs: 10, pingMs: 60_000, stallMs, log });
+  const MIB = 1024 * 1024;
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
   test('polls pause while over 1 MiB is buffered, resume after the drain, and lose no record', async () => {
     const service = countingService();
     const res = fakeResponse();
     try {
-      await handlerFor(service)(req, res);
+      await handlerFor(service, { stallMs: 10_000 })(req, res);
       await waitFor(() => service.follows >= 3);
       res.writableLength = 1024 * 1024 + 1;
       await new Promise((resolve) => setTimeout(resolve, 15));
@@ -465,6 +471,7 @@ describe('events stream backpressure', () => {
       await waitFor(() => service.follows >= paused + 3);
       const records = delivered(res);
       assert.deepEqual(records, records.map((_, i) => i));
+      assert.equal(records.length, service.follows);
       assert.equal(res.ended, false);
     } finally {
       res.emit('close');
@@ -478,6 +485,7 @@ describe('events stream backpressure', () => {
       await handlerFor(service)(req, res);
       res.writableLength = 2 * 1024 * 1024;
       await waitFor(() => res.ended, 1000);
+      assert.equal(res.destroyed, true, 'end() alone keeps a non-reading socket open');
     } finally {
       res.emit('close');
     }
@@ -487,11 +495,48 @@ describe('events stream backpressure', () => {
     const logged = [];
     const res = fakeResponse();
     try {
-      await handlerFor(countingService({ failFirst: true }), (...args) => logged.push(args))(req, res);
+      await handlerFor(countingService({ failFirst: true }), { log: (...args) => logged.push(args) })(req, res);
       assert.equal(res.status, 500);
       assert.equal(logged.length, 1);
     } finally {
       res.emit('close');
+    }
+  });
+
+  test('a drain resets the stall clock, so two short stalls do not end the stream', async () => {
+    const service = countingService();
+    const res = fakeResponse();
+    try {
+      await handlerFor(service, { stallMs: 200 })(req, res);
+      res.writableLength = 2 * MIB;
+      await sleep(120);
+      res.writableLength = 0;
+      const before = service.follows;
+      await waitFor(() => service.follows > before);
+      res.writableLength = 2 * MIB;
+      await sleep(120);
+      assert.equal(res.ended, false);
+    } finally {
+      res.emit('close');
+    }
+  });
+
+  test('a real client that stops reading has its socket closed after the stall', async () => {
+    // Each poll returns ~256 KiB, so a paused reader fills the buffer past 1 MiB quickly.
+    const big = 'x'.repeat(256 * 1024);
+    const service = { follows: 0, async followSwarm(id, cursors) { service.follows += 1; return { view: { id }, activity: [{ big }], cursors }; } };
+    const server = http.createServer(createHttpHandler({ service, getPort: () => server.address()?.port, pollMs: 5, pingMs: 60_000, stallMs: 100, log: () => {} }));
+    servers.push(server);
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const { port } = server.address();
+    let serverSocketClosed = false;
+    server.on('connection', (socket) => socket.on('close', () => { serverSocketClosed = true; }));
+    const req = http.get({ host: '127.0.0.1', port, path: '/api/swarms/known/events', headers: { Host: `127.0.0.1:${port}` } }, (res) => res.pause());
+    req.on('error', () => {});
+    try {
+      await waitFor(() => serverSocketClosed, 5000);
+    } finally {
+      req.destroy();
     }
   });
 });

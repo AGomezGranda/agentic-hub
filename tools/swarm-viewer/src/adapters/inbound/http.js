@@ -112,10 +112,14 @@ export function createHttpHandler({ service, uiFiles = new Map(), getPort, pollM
     };
     const tick = async () => {
       if (busy || closed) return;
-      // A slow client: skip polls (cursors stay put, so nothing is lost) and end the stream if it never drains.
+      // A slow client: skip polls; cursors stay put, so a skip loses nothing. A client that never drains is
+      // cut off; end() alone would wait on the unread bytes, so the socket is destroyed. Its reconnect replays the tail.
       if (res.writableLength > MAX_BUFFERED_BYTES) {
         stalledSince ??= Date.now();
-        if (Date.now() - stalledSince >= stallMs) stop();
+        if (Date.now() - stalledSince >= stallMs) {
+          stop();
+          res.destroy();
+        }
         return;
       }
       stalledSince = null;
