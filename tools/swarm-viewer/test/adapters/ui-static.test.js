@@ -74,4 +74,25 @@ describe('swarm viewer UI, static checks', () => {
     for (const name of sent) assert.ok(listened.has(name), `server sends ${name}, app.js ignores it`);
     for (const name of listened) assert.ok(name === 'open' || sent.has(name), `app.js listens for ${name}, server never sends it`);
   });
+
+  test('gone and a closed stream clear the swarm so the list refresh reselects', async () => {
+    const js = await read('app.js');
+    const body = (event) => {
+      const start = js.indexOf(`source.addEventListener('${event}'`);
+      assert.notEqual(start, -1, event);
+      return js.slice(start, js.indexOf('\n  });', start));
+    };
+    const gone = body('gone');
+    assert.match(gone, /state\.swarmId = null;/);
+    assert.match(gone, /state\.view = null;/);
+    const error = body('error');
+    const closed = error.slice(error.indexOf('EventSource.CLOSED'));
+    assert.match(closed, /^EventSource\.CLOSED\) \{\s*source\.close\(\);\s*state\.swarmId = null;/);
+    assert.equal(error.slice(0, error.indexOf('EventSource.CLOSED')).includes('swarmId'), false);
+    assert.equal(closed.slice(closed.indexOf('} else')).includes('swarmId'), false);
+  });
+
+  test('the link status is announced to assistive tech', async () => {
+    assert.match(await read('index.html'), /<p id="link-status" class="link-status" role="status">/);
+  });
 });

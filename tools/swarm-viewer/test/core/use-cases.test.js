@@ -247,3 +247,26 @@ describe('followSwarm', () => {
     assert.deepEqual(calls.events, []);
   });
 });
+
+describe('listSwarms read concurrency', () => {
+  test('reads statuses at most 16 at a time and keeps input order', async () => {
+    const ids = Array.from({ length: 50 }, (_, i) => `r${String(i).padStart(2, '0')}`);
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const store = {
+      listRunIds: async () => ids,
+      async readStatus(id) {
+        inFlight += 1;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        await Promise.resolve();
+        inFlight -= 1;
+        return rootOf(id, { startedAt: 1 });
+      },
+    };
+    const svc = createSwarmService({ store, probe: { isAlive: () => true }, clock: { now: () => 0 }, listLimit: 50 });
+    const list = await svc.listSwarms();
+    assert.equal(maxInFlight, 16);
+    // Equal startedAt and a stable sort: the output order is the read order.
+    assert.deepEqual(list.map((s) => s.id), ids);
+  });
+});

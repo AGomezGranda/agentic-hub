@@ -118,15 +118,22 @@ function select(id) {
     renderTimeline();
     renderDrawer();
   });
+  // Clearing swarmId lets the next refreshList reselect: the hash if still listed, else the newest.
   source.addEventListener('gone', () => {
     source.close();
-    setLink('swarm no longer available');
+    state.swarmId = null;
+    state.view = null;
+    setLink('swarm no longer available; retrying');
+    render();
   });
-  // Server-sent "error" carries data; a connection error does not.
+  // Server-sent "error" carries data; a connection error does not. CLOSED means the browser gave up (a non-200 answer).
   source.addEventListener('error', (event) => {
     if (typeof event.data === 'string') setLink('poll failed; the server retries');
-    else if (source.readyState === EventSource.CLOSED) setLink('swarm not found');
-    else setLink('reconnecting…');
+    else if (source.readyState === EventSource.CLOSED) {
+      source.close();
+      state.swarmId = null;
+      setLink('swarm unavailable; retrying');
+    } else setLink('reconnecting…');
   });
   render();
 }

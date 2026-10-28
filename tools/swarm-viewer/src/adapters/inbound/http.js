@@ -12,13 +12,15 @@ const JSON_TYPE = 'application/json; charset=utf-8';
 const REPORT_PATH = /^\/api\/swarms\/([^/]+)\/nodes\/([^/]+)\/report$/;
 const EVENTS_PATH = /^\/api\/swarms\/([^/]+)\/events$/;
 const SWARM_PATH = /^\/api\/swarms\/([^/]+)$/;
+const MAX_BUFFERED_BYTES = 1024 * 1024;
 
 /**
  * Inbound HTTP adapter. Talks to the swarm service only; never touches the filesystem except for UI files.
  * @param {{service: object, uiFiles?: Map<string, {file: string, contentType: string}>,
- *   getPort: () => number|undefined, pollMs?: number, pingMs?: number, log?: (...args: unknown[]) => void}} options
+ *   getPort: () => number|undefined, pollMs?: number, pingMs?: number, stallMs?: number,
+ *   log?: (...args: unknown[]) => void}} options
  */
-export function createHttpHandler({ service, uiFiles = new Map(), getPort, pollMs = 1000, pingMs = 15000, log = console.error }) {
+export function createHttpHandler({ service, uiFiles = new Map(), getPort, pollMs = 1000, pingMs = 15000, stallMs = 60_000, log = console.error }) {
   return async function handle(req, res) {
     for (const [name, value] of Object.entries(SECURITY_HEADERS)) res.setHeader(name, value);
     try {
@@ -88,6 +90,7 @@ export function createHttpHandler({ service, uiFiles = new Map(), getPort, pollM
     let lastView = null;
     let closed = false;
     let busy = false;
+    let stalledSince = null;
     const timers = [];
 
     const write = (chunk) => {
@@ -109,6 +112,13 @@ export function createHttpHandler({ service, uiFiles = new Map(), getPort, pollM
     };
     const tick = async () => {
       if (busy || closed) return;
+      // A slow client: skip polls (cursors stay put, so nothing is lost) and end the stream if it never drains.
+      if (res.writableLength > MAX_BUFFERED_BYTES) {
+        stalledSince ??= Date.now();
+        if (Date.now() - stalledSince >= stallMs) stop();
+        return;
+      }
+      stalledSince = null;
       busy = true;
       try {
         const next = await service.followSwarm(id, cursors);

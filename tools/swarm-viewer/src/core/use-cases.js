@@ -3,6 +3,22 @@ import { buildSwarm, membersOf, normalizeState, numberOrNull, reportReference, s
 const EVENTS_FILE = 'events.jsonl';
 const RECEIPT_FILE = 'workflow-receipt.json';
 
+const READ_CONCURRENCY = 16;
+
+// Like Promise.all over items.map(fn), with at most `limit` calls in flight. Keeps input order.
+async function mapLimit(items, limit, fn) {
+  const results = new Array(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await fn(items[i]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
 const isWorkflowRoot = (status) => status?.mode === 'workflow' && !status.parentWorkflowRunId;
 
 /**
@@ -28,7 +44,7 @@ export function createSwarmService({ store, probe, clock, listLimit = 20, report
   return {
     async listSwarms() {
       const ids = await store.listRunIds();
-      const runs = await Promise.all(ids.map(async (id) => ({ id, status: await store.readStatus(id) })));
+      const runs = await mapLimit(ids, READ_CONCURRENCY, async (id) => ({ id, status: await store.readStatus(id) }));
       return runs
         .filter(({ status }) => isWorkflowRoot(status))
         .sort((a, b) => (numberOrNull(b.status.startedAt) ?? 0) - (numberOrNull(a.status.startedAt) ?? 0))

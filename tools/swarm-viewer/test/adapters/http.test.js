@@ -1,6 +1,7 @@
 import { afterEach, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
+import { EventEmitter } from 'node:events';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -398,6 +399,99 @@ describe('security headers', () => {
       assert.equal(res.headers['content-security-policy'], CSP);
       assert.equal(res.headers['cache-control'], 'no-store');
       assert.equal(res.headers['referrer-policy'], 'no-referrer');
+    }
+  });
+});
+
+// A fake response whose buffered size the test sets, standing in for a client that stops reading.
+function fakeResponse() {
+  const res = new EventEmitter();
+  Object.assign(res, {
+    writableLength: 0,
+    headersSent: false,
+    status: null,
+    chunks: [],
+    ended: false,
+    setHeader() {},
+    writeHead(status) {
+      res.status = status;
+      res.headersSent = true;
+    },
+    write(chunk) {
+      res.chunks.push(String(chunk));
+    },
+    end(chunk) {
+      if (chunk !== undefined) res.chunks.push(String(chunk));
+      res.ended = true;
+    },
+  });
+  return res;
+}
+
+// Each poll returns one record numbered by the cursor it was given, so a gap or a duplicate shows.
+function countingService({ failFirst = false } = {}) {
+  const service = {
+    follows: 0,
+    async followSwarm(id, cursors) {
+      service.follows += 1;
+      if (failFirst && service.follows === 1) throw new Error('first poll exploded');
+      const n = cursors.n ?? 0;
+      return { view: { id }, activity: [{ n }], cursors: { n: n + 1 } };
+    },
+  };
+  return service;
+}
+
+const delivered = (res) =>
+  res.chunks.filter((c) => c.startsWith('event: activity')).flatMap((c) => JSON.parse(c.split('data: ')[1]).map((r) => r.n));
+
+describe('events stream backpressure', () => {
+  const req = { method: 'GET', url: '/api/swarms/known/events', headers: { host: '127.0.0.1:1' } };
+  const handlerFor = (service, log = () => {}) =>
+    createHttpHandler({ service, getPort: () => 1, pollMs: 10, pingMs: 60_000, stallMs: 50, log });
+
+  test('polls pause while over 1 MiB is buffered, resume after the drain, and lose no record', async () => {
+    const service = countingService();
+    const res = fakeResponse();
+    try {
+      await handlerFor(service)(req, res);
+      await waitFor(() => service.follows >= 3);
+      res.writableLength = 1024 * 1024 + 1;
+      await new Promise((resolve) => setTimeout(resolve, 15));
+      const paused = service.follows;
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      assert.equal(service.follows, paused);
+      res.writableLength = 0;
+      await waitFor(() => service.follows >= paused + 3);
+      const records = delivered(res);
+      assert.deepEqual(records, records.map((_, i) => i));
+      assert.equal(res.ended, false);
+    } finally {
+      res.emit('close');
+    }
+  });
+
+  test('a stream that stays over the limit past stallMs is ended', async () => {
+    const service = countingService();
+    const res = fakeResponse();
+    try {
+      await handlerFor(service)(req, res);
+      res.writableLength = 2 * 1024 * 1024;
+      await waitFor(() => res.ended, 1000);
+    } finally {
+      res.emit('close');
+    }
+  });
+
+  test('a first poll that throws answers 500 and logs one line', async () => {
+    const logged = [];
+    const res = fakeResponse();
+    try {
+      await handlerFor(countingService({ failFirst: true }), (...args) => logged.push(args))(req, res);
+      assert.equal(res.status, 500);
+      assert.equal(logged.length, 1);
+    } finally {
+      res.emit('close');
     }
   });
 });
