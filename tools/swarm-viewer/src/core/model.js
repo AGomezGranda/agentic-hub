@@ -91,8 +91,22 @@ export function summarizeEvent(raw, { showArgs = false } = {}) {
   }
 }
 
+export function cwdOf(root) {
+  return typeof root?.cwd === 'string' ? root.cwd : null;
+}
+
+// Round is always kept. Scope is caller-written text, so it needs showArgs. No other args key is read.
+export function workflowArgs(root, { showArgs = false } = {}) {
+  const args = root?.workflow?.args;
+  if (!isRecord(args)) return { round: null, scope: null };
+  return {
+    round: Number.isInteger(args.round) ? args.round : null,
+    scope: showArgs && typeof args.scope === 'string' ? args.scope : null,
+  };
+}
+
 // children: Map<runId, status | null>, one entry per member of root.workflowChildren.
-export function buildSwarm({ root, children, receipt, nowMs, pidAlive, showArgs = false, showOutput = false }) {
+export function buildSwarm({ root, children, receipt, nowMs, pidAlive, showArgs = false, showOutput = false, repo = null }) {
   const members = membersOf(root);
   const statuses = [...children.values()];
   const unsupportedVersion = statuses.some((status) => status !== null && status.lifecycleArtifactVersion !== LIFECYCLE_VERSION);
@@ -100,9 +114,14 @@ export function buildSwarm({ root, children, receipt, nowMs, pidAlive, showArgs 
     ? []
     : members.map((member) => buildNode({ member, status: children.get(member.runId) ?? null, root, receipt, nowMs, pidAlive, showArgs, showOutput }));
   const nodes = inferStages(built);
+  const { round, scope } = workflowArgs(root, { showArgs });
   return {
     id: root.runId,
     state: normalizeState(root.state),
+    cwd: cwdOf(root),
+    repo,
+    round,
+    scope,
     startedAt: numberOrNull(root.startedAt),
     endedAt: numberOrNull(root.endedAt),
     durationMs: durationOf(root, nowMs),

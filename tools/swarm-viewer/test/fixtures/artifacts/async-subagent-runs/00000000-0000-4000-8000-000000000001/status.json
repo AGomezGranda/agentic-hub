@@ -1,6 +1,8 @@
 {
   "runId": "00000000-0000-4000-8000-000000000001",
   "toolCallId": "toolu_fixture_root",
+  "cwd": "/fixture/repo",
+  "workflow": { "args": { "round": 1, "scope": "CANARY-SCOPE fixture scope", "prompt": "CANARY-ARGKEY" } },
   "mode": "workflow",
   "state": "running",
   "startedAt": 1793099279673,

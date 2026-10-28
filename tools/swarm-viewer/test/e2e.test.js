@@ -1,12 +1,17 @@
 import { after, before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { readFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { basename, join } from 'node:path';
+import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { createApp } from '../src/compose.js';
 import { materializeFixtures } from './helpers/fixtures.js';
 
-const CANARIES = ['CANARY-SYSTEM', 'CANARY-THINKING', 'CANARY-TOOLARG', 'CANARY-TOOLOUT', 'CANARY-RESULT', 'CANARY-UPDATE'];
+const CANARIES = ['CANARY-SYSTEM', 'CANARY-THINKING', 'CANARY-TOOLARG', 'CANARY-TOOLOUT', 'CANARY-RESULT', 'CANARY-UPDATE', 'CANARY-SCOPE', 'CANARY-ARGKEY'];
+const exec = promisify(execFile);
 const ROOT = '00000000-0000-4000-8000-000000000001';
 const SCOUT = '00000000-0000-4000-8000-000000000002';
 const FIXTURE_REPORT = fileURLToPath(new URL('./fixtures/sessions/subagent-artifacts/outputs/00000000-0000-4000-8000-000000000001/swarm/r1-scout.md', import.meta.url));
@@ -67,6 +72,13 @@ describe('swarm viewer end to end, on the copied fixture', () => {
     assert.equal(list[0].memberCount, 4);
   });
 
+  test('the list row carries the fixture cwd, no repo (the path does not exist), and round', async () => {
+    const [row] = JSON.parse((await get('/api/swarms')).body);
+    assert.equal(row.cwd, '/fixture/repo');
+    assert.equal(row.repo, null);
+    assert.equal(row.round, 1);
+  });
+
   test('the swarm view has stale, finished and unknown nodes and stays free of canaries', async () => {
     const view = JSON.parse((await get(`/api/swarms/${ROOT}`)).body);
     const states = Object.fromEntries(view.nodes.map((n) => [n.key, n.state]));
@@ -121,5 +133,29 @@ describe('swarm viewer end to end, on the copied fixture', () => {
 
   test('a member run id is not a swarm; only workflow roots are', async () => {
     assert.equal((await get(`/api/swarms/${SCOUT}`)).status, 404);
+  });
+
+  test('a swarm whose cwd is a git repo on feature/x shows that repo and branch', async () => {
+    const copy = await materializeFixtures();
+    const repoDir = await mkdtemp(join(tmpdir(), 'swarm-viewer-repo-'));
+    let wired;
+    try {
+      await exec('git', ['init', '-q'], { cwd: repoDir });
+      await exec('git', ['symbolic-ref', 'HEAD', 'refs/heads/feature/x'], { cwd: repoDir });
+      const statusFile = join(copy.artifactsRoot, ROOT, 'status.json');
+      const root = JSON.parse(await readFile(statusFile, 'utf8'));
+      await writeFile(statusFile, JSON.stringify({ ...root, cwd: repoDir }));
+      wired = createApp({ artifactsRoot: copy.artifactsRoot, piSessionsRoot: copy.sessionsRoot });
+      await new Promise((resolve) => wired.server.listen(0, '127.0.0.1', resolve));
+      const res = await fetch(`http://127.0.0.1:${wired.server.address().port}/api/swarms/${ROOT}`);
+      const view = await res.json();
+      assert.equal(view.repo.branch, 'feature/x');
+      assert.equal(view.repo.name, basename(repoDir));
+    } finally {
+      wired?.server.closeAllConnections();
+      await new Promise((resolve) => (wired ? wired.server.close(resolve) : resolve()));
+      await copy.cleanup();
+      await rm(repoDir, { recursive: true, force: true });
+    }
   });
 });

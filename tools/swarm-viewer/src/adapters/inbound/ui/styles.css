@@ -38,7 +38,9 @@ button:focus-visible, select:focus-visible { outline: 2px solid var(--accent); o
   border-bottom: 1px solid var(--line);
 }
 .topbar h1 { font-size: 16px; }
+.repo { margin: 0; }
 .totals { margin: 0; font-variant-numeric: tabular-nums; }
+.scope { margin: 0 0 12px; color: var(--muted); font-size: 12px; }
 .link-status { margin: 0 0 0 auto; color: var(--muted); }
 
 .swarms, main, .drawer { min-height: 0; overflow: auto; padding: 12px; }

@@ -8,6 +8,7 @@ import {
   nodeState,
   reportReference,
   summarizeEvent,
+  workflowArgs,
 } from '../../src/core/model.js';
 
 const RUNS = new URL('../fixtures/artifacts/async-subagent-runs/', import.meta.url);
@@ -15,7 +16,7 @@ const ROOT = '00000000-0000-4000-8000-000000000001';
 const SCOUT = '00000000-0000-4000-8000-000000000002';
 const CORRECTNESS = '00000000-0000-4000-8000-000000000003';
 const ARCHITECTURE = '00000000-0000-4000-8000-000000000004';
-const CANARIES = ['CANARY-SYSTEM', 'CANARY-THINKING', 'CANARY-TOOLARG', 'CANARY-TOOLOUT', 'CANARY-RESULT', 'CANARY-UPDATE'];
+const CANARIES = ['CANARY-SYSTEM', 'CANARY-THINKING', 'CANARY-TOOLARG', 'CANARY-TOOLOUT', 'CANARY-RESULT', 'CANARY-UPDATE', 'CANARY-SCOPE', 'CANARY-ARGKEY'];
 const NOW = 1793100000000;
 
 const readJson = async (runId, file) => JSON.parse(await readFile(new URL(`${runId}/${file}`, RUNS), 'utf8'));
@@ -170,6 +171,28 @@ describe('summarizeEvent', () => {
   });
 });
 
+describe('workflowArgs', () => {
+  const withArgs = (args) => ({ workflow: { args } });
+
+  test('round is kept only when it is an integer', () => {
+    assert.deepEqual(workflowArgs(withArgs({ round: 3 })), { round: 3, scope: null });
+    assert.equal(workflowArgs(withArgs({ round: '3' })).round, null);
+    assert.equal(workflowArgs(withArgs({ round: 2.5 })).round, null);
+  });
+
+  test('scope is kept only with showArgs, and only as a string', () => {
+    assert.equal(workflowArgs(withArgs({ scope: 'x' })).scope, null);
+    assert.equal(workflowArgs(withArgs({ scope: 'x' }), { showArgs: true }).scope, 'x');
+    assert.equal(workflowArgs(withArgs({ scope: 7 }), { showArgs: true }).scope, null);
+  });
+
+  test('no args, or args that are not an object, give nulls; other keys are never read', () => {
+    assert.deepEqual(workflowArgs({}), { round: null, scope: null });
+    assert.deepEqual(workflowArgs({ workflow: { args: 'nope' } }, { showArgs: true }), { round: null, scope: null });
+    assert.deepEqual(workflowArgs(withArgs({ prompt: 'CANARY-ARGKEY' }), { showArgs: true }), { round: null, scope: null });
+  });
+});
+
 describe('buildSwarm on the copied fixture', () => {
   test('the field paths the model reads exist in the fixture (A2)', async () => {
     const root = await readJson(ROOT, 'status.json');
@@ -244,6 +267,19 @@ describe('buildSwarm on the copied fixture', () => {
     const loudScout = loud.nodes.find((n) => n.key === 'scout-r1');
     assert.equal(loudScout.recentTools.every((t) => typeof t.args === 'string'), true);
     assert.equal(loudScout.recentOutput.length, 3);
+  });
+
+  test('the fixture launch args: round is shown, scope only with showArgs, the other key never', async () => {
+    const quiet = await fixtureSwarm();
+    assert.equal(quiet.round, 1);
+    assert.equal(quiet.scope, null);
+    assert.equal(quiet.cwd, '/fixture/repo');
+    const text = JSON.stringify(quiet);
+    assert.equal(text.includes('CANARY-SCOPE'), false);
+    assert.equal(text.includes('CANARY-ARGKEY'), false);
+    const loud = await fixtureSwarm({ showArgs: true });
+    assert.equal(loud.scope, 'CANARY-SCOPE fixture scope');
+    assert.equal(JSON.stringify(loud).includes('CANARY-ARGKEY'), false);
   });
 
   test('a stale node stops its clock at its last activity', async () => {
@@ -427,6 +463,28 @@ describe('buildSwarm on inline data', () => {
     const view = build(root([member]), child({ state: 'running', pid: 77, startedAt: 10, endedAt: 40, lastActivityAt: 30 }));
     assert.equal(view.nodes[0].state, 'running');
     assert.equal(view.nodes[0].endedAt, 40);
+  });
+
+  test('the view carries cwd, the repo the caller looked up, and round; cwd and repo are null when absent', () => {
+    const repo = { name: 'proj', path: '/work/proj', branch: 'main', head: null };
+    const view = build(root([member], { cwd: '/work/proj', workflow: { args: { round: 2 } } }), child(), { repo });
+    assert.equal(view.cwd, '/work/proj');
+    assert.deepEqual(view.repo, repo);
+    assert.equal(view.round, 2);
+    const bare = build(root([member]), child());
+    assert.equal(bare.cwd, null);
+    assert.equal(bare.repo, null);
+    assert.equal(bare.scope, null);
+  });
+
+  test('scope is in the view only with showArgs, and the view never holds the other args key', () => {
+    const rootStatus = root([member], { workflow: { args: { round: 1, scope: 'CANARY-SCOPE', prompt: 'CANARY-ARGKEY' } } });
+    const quiet = build(rootStatus, child());
+    assert.equal(quiet.scope, null);
+    assert.equal(JSON.stringify(quiet).includes('CANARY-SCOPE'), false);
+    const loud = build(rootStatus, child(), { showArgs: true });
+    assert.equal(loud.scope, 'CANARY-SCOPE');
+    assert.equal(JSON.stringify(loud).includes('CANARY-ARGKEY'), false);
   });
 
   test('a live running node has no end, and its duration runs up to now', () => {

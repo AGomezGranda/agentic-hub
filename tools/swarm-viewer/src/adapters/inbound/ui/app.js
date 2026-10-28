@@ -47,6 +47,9 @@ const fmtDuration = (ms) => {
   const s = Math.round(ms / 1000);
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
 };
+// "main", "detached at <head>" or "detached". Null when there is no repo to read a branch from.
+const branchText = (repo) => (repo ? (repo.branch ?? (repo.head ? `detached at ${repo.head}` : 'detached')) : null);
+const cwdName = (cwd) => cwd.split('/').filter(Boolean).pop() ?? cwd;
 const fmtUsd = (usd) => (typeof usd === 'number' ? `$${usd.toFixed(4)}` : '—');
 const fmtNum = (n) => (typeof n === 'number' ? n.toLocaleString() : '—');
 const badge = (name) => h('span', `badge badge-${name}`, name);
@@ -133,6 +136,8 @@ function select(id) {
 
 function render() {
   renderList();
+  renderRepo();
+  renderScope();
   renderTotals();
   renderBanner();
   renderStages();
@@ -141,11 +146,36 @@ function render() {
   renderDrawer();
 }
 
+function renderRepo() {
+  const el = $('repo');
+  const { cwd = null, repo = null } = state.view ?? {};
+  el.hidden = cwd === null;
+  if (cwd === null) {
+    el.replaceChildren();
+    return;
+  }
+  el.title = repo?.path ?? cwd;
+  const parts = [h('strong', null, repo?.name ?? cwdName(cwd))];
+  const branch = branchText(repo);
+  if (branch !== null) parts.push(` · ${branch}`, h('span', 'meta', ' branch now'));
+  el.replaceChildren(...parts);
+}
+
+function renderScope() {
+  const el = $('scope');
+  const scope = state.view?.scope ?? null;
+  el.hidden = scope === null;
+  el.textContent = scope === null ? '' : `Scope: ${scope}`;
+}
+
 function renderList() {
   rerender($('swarm-list'), () => state.swarms.map((swarm) => {
+    const branch = branchText(swarm.repo);
+    const name = swarm.repo?.name ?? (swarm.cwd === null ? '—' : cwdName(swarm.cwd));
     const item = h('button', 'swarm-item',
-      h('span', null, `${swarm.id.slice(0, 8)} · ${fmtTime(swarm.startedAt)}`),
-      h('span', null, badge(swarm.state), ` ${swarm.memberCount} nodes`));
+      h('span', null, h('strong', null, name), branch === null ? null : ` · ${branch}`),
+      h('span', 'meta', `${swarm.id.slice(0, 8)} · ${fmtTime(swarm.startedAt)}`),
+      h('span', null, badge(swarm.state), typeof swarm.round === 'number' ? ` round ${swarm.round}` : null, ` ${swarm.memberCount} nodes`));
     item.type = 'button';
     item.dataset.focusKey = swarm.id;
     item.setAttribute('aria-pressed', String(swarm.id === state.swarmId));
