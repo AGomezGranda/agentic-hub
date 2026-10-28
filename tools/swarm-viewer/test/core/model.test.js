@@ -214,6 +214,10 @@ describe('buildSwarm on the copied fixture', () => {
     assert.equal(child.lifecycleArtifactVersion, 3);
     assert.equal(child.parentWorkflowRunId, ROOT);
     assert.equal(typeof child.pid, 'number');
+    assert.equal(typeof child.deadlineAt, 'number');
+    assert.equal(typeof child.lastActivityAt, 'number');
+    assert.equal(typeof child.processTerminal.state, 'string');
+    assert.equal(typeof step.exitCode, 'number');
     assert.equal(typeof child.totalCost.costUsd, 'number');
     assert.equal(typeof step.resolvedModel.provider, 'string');
     assert.equal(typeof step.requestedModel, 'string');
@@ -390,6 +394,15 @@ describe('buildSwarm on inline data', () => {
     const [long] = build(root([member]), child({ deadlineAt: '9', processTerminal: { state: 'x'.repeat(33) } })).nodes;
     assert.equal(long.deadlineAt, null);
     assert.equal(long.terminalState, null);
+    const [edge] = build(root([member]), child({ processTerminal: { state: 'x'.repeat(32) } })).nodes;
+    assert.equal(edge.terminalState, 'x'.repeat(32));
+  });
+
+  test('a running child with no pid stays running and is never probed', () => {
+    const probed = [];
+    const [node] = build(root([member]), child({ state: 'running', pid: undefined, endedAt: undefined }), { pidAlive: (pid) => (probed.push(pid), false) }).nodes;
+    assert.equal(node.state, 'running');
+    assert.deepEqual(probed, []);
   });
 
   test('a failed child shows as failed with its exit code and terminal state', () => {

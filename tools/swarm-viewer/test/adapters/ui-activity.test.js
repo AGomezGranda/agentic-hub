@@ -1,6 +1,6 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { keepNewestPerNode, offsetLabel, progressOf } from '../../src/adapters/inbound/ui/activity.js';
+import { fmtDuration, keepNewestPerNode, offsetLabel, progressOf } from '../../src/adapters/inbound/ui/activity.js';
 
 const rows = (nodeKey, count) => Array.from({ length: count }, (_, n) => ({ nodeKey, n }));
 const labels = (items) => items.map((item) => `${item.nodeKey}${item.n}`);
@@ -51,5 +51,13 @@ describe('offsetLabel (timeline prefix)', () => {
     assert.equal(offsetLabel(12_400, 0), '+12.4s');
     assert.equal(offsetLabel(125_000, 0), '+2m 5s');
     assert.equal(offsetLabel(0, 1000), '+0.0s');
+    assert.equal(offsetLabel(59_940, 0), '+59.9s');
+    assert.equal(offsetLabel(59_960, 0), '+1m 0s');
+  });
+
+  test('fmtDuration rounds to seconds, then switches to minutes', () => {
+    assert.equal(fmtDuration(42_000), '42s');
+    assert.equal(fmtDuration(59_600), '1m 0s');
+    assert.equal(fmtDuration(undefined), '—');
   });
 });

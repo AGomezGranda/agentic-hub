@@ -75,7 +75,8 @@
         "CANARY-TOOLOUT first line",
         "CANARY-TOOLOUT second line",
         "CANARY-TOOLOUT third line"
-      ]
+      ],
+      "exitCode": 0
     }
   ],
   "totalTokens": {
@@ -91,5 +92,9 @@
     "costUsd": 0.054528824999999996
   },
   "turnCount": 36,
-  "toolCount": 40
+  "toolCount": 40,
+  "deadlineAt": 1793101078568,
+  "processTerminal": {
+    "state": "observed"
+  }
 }

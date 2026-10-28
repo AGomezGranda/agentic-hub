@@ -55,8 +55,8 @@ Only the workflow root and its listed members are read. Other run directories ar
 - **est.**: tokens and cost come from pi's own reports (`totalCost`, and `turn_end` usage). They are estimates, not billing.
 - **model differs from the request**: the model that ran is not the one requested.
 - **Start time unknown**: the node has no start time yet.
-- **Progress bar** (running nodes): time elapsed from the node's start to its deadline, not work done. No bar when either time is missing.
-- **active Ns ago** and **Last activity**: `lastActivityAt` from the child status.
+- **Progress bar** (running nodes): time elapsed from the node's start to its deadline, not work done. No bar unless both times are known and the deadline is after the start.
+- **active <duration> ago** and **Last activity**: `lastActivityAt` from the child status.
 - **Exit code**: from the node's step. **Terminal state**: the top-level `processTerminal.state`, shown for finished nodes only.
 - **Timeline offsets** (`+12.4s`): time since the swarm started.
 - **List counts**: node states per swarm, from the status files the list already reads.

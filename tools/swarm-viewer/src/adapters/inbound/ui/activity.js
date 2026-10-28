@@ -29,5 +29,6 @@ export function progressOf({ startedAt, deadlineAt } = {}, nowMs) {
 export function offsetLabel(ts, startedAt) {
   if (typeof ts !== 'number' || typeof startedAt !== 'number') return '';
   const ms = Math.max(0, ts - startedAt);
-  return ms < 60_000 ? `+${(ms / 1000).toFixed(1)}s` : `+${fmtDuration(ms)}`;
+  const tenths = Math.round(ms / 100); // threshold on the rounded value, so 59.96 s reads "+1m 0s", not "+60.0s"
+  return tenths < 600 ? `+${(tenths / 10).toFixed(1)}s` : `+${fmtDuration(ms)}`;
 }

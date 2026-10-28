@@ -250,8 +250,7 @@ function runningLines(node) {
   const fraction = progressOf(node, Date.now());
   let bar = null;
   if (fraction !== null) {
-    bar = h('progress');
-    bar.max = 1;
+    bar = h('progress'); // default max is 1
     bar.value = fraction;
   }
   const ago = fmtAgo(node.lastActivityAt);
@@ -326,18 +325,20 @@ function drawerContent(node) {
 
 // Feedback lives in state, so a drawer rebuild keeps it until the timer clears it.
 function copyButton(key, label, text) {
-  if (!navigator.clipboard) return null;
+  if (!navigator.clipboard || typeof text !== 'string') return null;
   const feedback = state.copyStatus?.key === key ? state.copyStatus.text : null;
   const button = h('button', null, feedback ?? label);
   button.type = 'button';
   button.dataset.focusKey = key;
   button.addEventListener('click', async () => {
+    const owner = state.selectedKey;
     let result = 'Copied';
     try {
       await navigator.clipboard?.writeText(text);
     } catch {
       result = 'Copy failed';
     }
+    if (state.selectedKey !== owner) return; // the drawer moved to another node meanwhile
     state.copyStatus = { key, text: result };
     clearTimeout(state.copyTimer);
     state.copyTimer = setTimeout(() => {
@@ -384,4 +385,8 @@ $('timeline-toggle').addEventListener('click', () => {
   $('timeline-toggle').setAttribute('aria-expanded', String(!open));
 });
 refreshList();
-setInterval(refreshList, LIST_REFRESH_MS);
+// Also refreshes the drawer's relative times, which a stable snapshot never re-renders.
+setInterval(() => {
+  refreshList();
+  if (state.selectedKey) renderDrawer();
+}, LIST_REFRESH_MS);

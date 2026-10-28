@@ -78,6 +78,7 @@ describe('swarm viewer end to end, on the copied fixture', () => {
     assert.equal(row.cwd, '/fixture/repo');
     assert.equal(row.repo, null);
     assert.equal(row.round, 1);
+    assert.deepEqual(row.stateCounts, { completed: 2, stale: 1, unknown: 1 });
   });
 
   test('the swarm view has stale, finished and unknown nodes and stays free of canaries', async () => {

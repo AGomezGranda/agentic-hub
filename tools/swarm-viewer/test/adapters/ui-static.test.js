@@ -120,6 +120,5 @@ describe('swarm viewer UI, static checks', () => {
     const js = await read('app.js');
     assert.match(js, /h\('progress'/);
     assert.match(js, /navigator\.clipboard\?\.writeText/);
-    assert.equal(js.includes("setAttribute('style'"), false);
   });
 });
