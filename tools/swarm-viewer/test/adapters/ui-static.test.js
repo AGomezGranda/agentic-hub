@@ -7,11 +7,11 @@ import { createApp } from '../../src/compose.js';
 const UI_DIR = fileURLToPath(new URL('../../src/adapters/inbound/ui/', import.meta.url));
 const HTTP_SOURCE = fileURLToPath(new URL('../../src/adapters/inbound/http.js', import.meta.url));
 const read = (name) => readFile(UI_DIR + name, 'utf8');
-const FORBIDDEN = ['innerHTML', 'outerHTML', 'insertAdjacentHTML', 'document.write', 'eval(', 'new Function'];
+const FORBIDDEN = ['innerHTML', 'outerHTML', 'insertAdjacentHTML', 'document.write', 'eval(', 'new Function', '.style', 'cssText', 'style='];
 
 describe('swarm viewer UI, static checks', () => {
   test('the page scripts render with DOM APIs and text nodes only', async () => {
-    for (const file of ['app.js', 'activity.js']) {
+    for (const file of ['index.html', 'app.js', 'activity.js']) {
       const js = await read(file);
       for (const token of FORBIDDEN) assert.equal(js.includes(token), false, `${file}: ${token}`);
     }
@@ -73,5 +73,25 @@ describe('swarm viewer UI, static checks', () => {
     assert.ok(sent.size > 0);
     for (const name of sent) assert.ok(listened.has(name), `server sends ${name}, app.js ignores it`);
     for (const name of listened) assert.ok(name === 'open' || sent.has(name), `app.js listens for ${name}, server never sends it`);
+  });
+
+  test('styles.css has dark mode, reduced motion, the narrow layout and a summary focus ring', async () => {
+    const css = await read('styles.css');
+    assert.match(css, /prefers-color-scheme: dark/);
+    assert.match(css, /prefers-reduced-motion/);
+    assert.match(css, /max-width: 1000px/);
+    assert.match(css, /summary:focus-visible/);
+  });
+
+  test('index.html puts the timeline note behind a details disclosure', async () => {
+    const html = await read('index.html');
+    assert.match(html, /<details class="info">/);
+  });
+
+  test('app.js drives the timeline toggle through dataset and aria-expanded, never its label', async () => {
+    const js = await read('app.js');
+    assert.match(js, /dataset\.timeline/);
+    assert.match(js, /\$\('timeline-toggle'\)\.setAttribute\('aria-expanded'/);
+    assert.doesNotMatch(js, /timeline-toggle[^;]*textContent/);
   });
 });

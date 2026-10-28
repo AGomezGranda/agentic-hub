@@ -215,7 +215,7 @@ function renderStages() {
     }));
     const unscheduled = view.nodes.filter((node) => node.stage === null);
     if (unscheduled.length) columns.push({ title: 'Start time unknown', nodes: unscheduled });
-    return columns.map(({ title, nodes }) => h('section', 'stage', h('h3', null, `${title} · ${nodes.length}`), ...nodes.map(card)));
+    return columns.map(({ title, nodes }) => h('section', 'stage', h('h3', null, title, h('span', 'count', String(nodes.length))), ...nodes.map(card)));
   });
 }
 
@@ -225,6 +225,7 @@ function card(node) {
     h('span', 'meta', [node.agent, modelText(node)].filter(Boolean).join(' · ')),
     h('span', 'meta', `${fmtDuration(node.durationMs)} · est. ${fmtUsd(node.costUsd)} · ${fmtNum(node.toolCount)} tools`),
     node.modelMismatch ? h('span', 'warn', 'model differs from the request') : null);
+  button.dataset.state = node.state;
   button.type = 'button';
   button.dataset.focusKey = node.key;
   button.addEventListener('click', () => {
@@ -321,5 +322,10 @@ $('drawer-close').addEventListener('click', () => {
   renderDrawer();
 });
 $('timeline-filter').addEventListener('change', renderTimeline);
+$('timeline-toggle').addEventListener('click', () => {
+  const open = document.body.dataset.timeline !== 'collapsed';
+  document.body.dataset.timeline = open ? 'collapsed' : 'open';
+  $('timeline-toggle').setAttribute('aria-expanded', String(!open));
+});
 refreshList();
 setInterval(refreshList, LIST_REFRESH_MS);
