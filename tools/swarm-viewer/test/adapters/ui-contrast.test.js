@@ -16,11 +16,13 @@ const PAIRS = [
   ['fg', 'panel'],
   ['fg', 'panel-2'],
   ['warn', 'panel'],
+  ['muted', 'bg'],
+  ['fg', 'bg'],
 ];
-const LIGHT_ROOT = /:root\s*\{([^}]*)\}/;
+const LIGHT_ROOT = /^:root\s*\{([^}]*)\}/m;
 const DARK_ROOT = /@media \(prefers-color-scheme: dark\)\s*\{\s*:root\s*\{([^}]*)\}\s*\}/;
 const DECLARATION = /--([\w-]+)\s*:\s*([^;]+);/g;
-const HEX = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i;
+const HEX = /^#[0-9a-f]{6}$/i;
 
 function declarations(block) {
   return Object.fromEntries([...block.matchAll(DECLARATION)].map(([, name, value]) => [name, value.trim()]));
@@ -28,16 +30,15 @@ function declarations(block) {
 
 function colour(tokens, name) {
   const value = tokens[name] ?? '';
-  assert.match(value, HEX, `--${name} must be a #rgb or #rrggbb colour`);
+  assert.match(value, HEX, `--${name} must be a #rrggbb colour`);
   return value;
 }
 
-// WCAG 2.x relative luminance of a #rgb or #rrggbb colour.
+// WCAG 2.x relative luminance of a #rrggbb colour.
 function luminance(hex) {
   const digits = hex.slice(1);
-  const full = digits.length === 3 ? [...digits].map((digit) => digit + digit).join('') : digits;
   const [r, g, b] = [0, 2, 4].map((offset) => {
-    const channel = parseInt(full.slice(offset, offset + 2), 16) / 255;
+    const channel = parseInt(digits.slice(offset, offset + 2), 16) / 255;
     return channel <= 0.03928 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
   });
   return 0.2126 * r + 0.7152 * g + 0.0722 * b;
@@ -51,8 +52,10 @@ function contrast(a, b) {
 describe('swarm viewer stylesheet contrast', () => {
   test('every text pair reaches 4.5:1 in the light and the dark scheme', () => {
     const css = readFileSync(STYLES, 'utf8');
-    const light = declarations(css.match(LIGHT_ROOT)?.[1] ?? '');
-    const dark = { ...light, ...declarations(css.match(DARK_ROOT)?.[1] ?? '') };
+    assert.ok(css.match(LIGHT_ROOT), 'light-scheme :root block not found');
+    assert.ok(css.match(DARK_ROOT), 'dark-scheme :root block not found');
+    const light = declarations(css.match(LIGHT_ROOT)[1]);
+    const dark = { ...light, ...declarations(css.match(DARK_ROOT)[1]) };
     const failures = [];
     for (const [scheme, tokens] of [['light', light], ['dark', dark]]) {
       for (const [text, background] of PAIRS) {

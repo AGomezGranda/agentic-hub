@@ -112,6 +112,7 @@ main { grid-column: 2; grid-row: 2; }
 .stage { flex: 0 0 250px; }
 .stage h3 { display: flex; justify-content: space-between; }
 .count { color: var(--muted); font-weight: 400; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .card {
   display: block;
   width: 100%;

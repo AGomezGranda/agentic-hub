@@ -215,7 +215,7 @@ function renderStages() {
     }));
     const unscheduled = view.nodes.filter((node) => node.stage === null);
     if (unscheduled.length) columns.push({ title: 'Start time unknown', nodes: unscheduled });
-    return columns.map(({ title, nodes }) => h('section', 'stage', h('h3', null, title, h('span', 'count', String(nodes.length))), ...nodes.map(card)));
+    return columns.map(({ title, nodes }) => h('section', 'stage', h('h3', null, title, h('span', 'sr-only', ' · '), h('span', 'count', nodes.length)), ...nodes.map(card)));
   });
 }
 
