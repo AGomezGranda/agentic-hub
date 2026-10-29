@@ -1,13 +1,14 @@
 ---
 name: code-quality-audit
-description: 'Audit code-level design against SOLID, DRY, KISS, typing discipline and error handling for a repo, a path, or a git diff/PR. Use when asked to review code quality, check design principles, or review a PR for design smells in classes and functions. Not module boundaries, dependency direction, DDD or responsibility placement across modules (architecture-audit), over-engineering (ponytail-review/audit), tests (testing-strategy), security or performance.'
+description: 'Audit code-level design against SOLID, dependency injection, DRY, KISS, typing discipline and error handling for a repo, a path, or a git diff/PR. Use when asked to review code quality, check design principles, or review a PR for design smells in classes and functions. Not module boundaries, dependency direction, DDD or responsibility placement across modules (architecture-audit), over-engineering (ponytail-review/audit), tests (testing-strategy), security or performance.'
 argument-hint: '[repo | path | diff/PR ref]'
 ---
 
 # Code Quality Audit
 
-Audit code against five code-level design dimensions — SOLID, DRY, KISS,
-typing, error handling — and report findings worth acting on.
+Audit code against six code-level design dimensions — SOLID, dependency
+injection (DI), DRY, KISS, typing, and error handling — and report findings
+worth acting on.
 
 **Audit, don't rewrite.** Produce a report. Only change code if the user asks
 for that after seeing it. (Dispatching dimension children to a read-only
@@ -27,9 +28,11 @@ findings that belong elsewhere instead of duplicating those skills:
 - "This is more complex/abstract than it needs to be" → `ponytail-review`
   (diff) or `ponytail-audit` (repo). Not here.
 - Test coverage, test pyramid balance → `testing-strategy`. Not here.
-- Security (injection, secrets, trust boundaries), performance (N+1,
-  allocations), dependency health → out of scope entirely. Say so, don't
-  attempt them.
+- DI choices within a class/function are covered by the DI lens below;
+  dependency direction and composition ownership across modules belong to
+  `architecture-audit`. Security (injection, secrets, trust boundaries),
+  performance (N+1, allocations), and dependency health → out of scope. Say
+  so, don't attempt them.
 
 If a finding is genuinely both (e.g. an abstraction that's both unnecessary
 *and* violates SRP), report it here as the SOLID finding and skip the
@@ -140,6 +143,7 @@ non-finding:
 - **DRY** — `references/dry.md`
 - **KISS** — `references/kiss.md`
 - **Typing** — `references/typing.md`
+- **Dependency injection (DI)** — `references/dependency-injection.md`
 - **Error handling** — `references/errors.md`
 
 ## 4. Report
