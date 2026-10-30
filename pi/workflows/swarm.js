@@ -1,12 +1,14 @@
 // Audit swarm: scout -> parallel lens reviewers -> verifier. Read-only; the parent triages and fixes.
-// args: { scope: "diff vs main" | "path/or/module", round?: 1, lenses?: ["correctness", ...] }
+// args: { scope: "diff vs main" | "path/or/module", round?: 1, lenses?: ["correctness", ...], plan?: "plan path, phase N" }
 // shortcut: absolute skill paths hardcoded for this machine, parameterise when used elsewhere.
 const scope = args.scope || "uncommitted changes plus the last commit";
 const round = args.round || 1;
+const plan = args.plan ? "\nPlan under implementation: " + args.plan + ". Read it (that phase) before judging; the diff should deliver it." : "";
 const S = "/Users/alvaro.gomez/.pi/agent/skills/";
 const P = "/Users/alvaro.gomez/.pi/agent/git/github.com/DietrichGebert/ponytail/skills/";
 
 const LENSES = [
+  { key: "plan-conformance", brief: "Compare the diff to the plan phase: missing or half-done items, changes the plan does not call for, success criteria unmet, undocumented deviations. Requires the plan arg." },
   { key: "correctness", brief: "Logic bugs, unhandled edge cases, regressions, error paths that lose data. Judge from the code; no skill file." },
   { key: "architecture", brief: "Apply the boundaries and responsibilities lenses. Read " + S + "architecture-audit/SKILL.md and its references/ first. No import graph is precomputed: derive edges with grep." },
   { key: "quality", brief: "Apply SOLID, DRY, KISS, typing and error-handling dimensions. Read " + S + "code-quality-audit/SKILL.md and its references/ first." },
@@ -14,13 +16,13 @@ const LENSES = [
   { key: "simplicity", brief: "Over-engineering, dead code, needless abstraction, what can be deleted. Read " + P + "ponytail-review/SKILL.md first." },
   { key: "security", brief: "Trust-boundary validation, injection, secrets, authz, unsafe deserialization; and what breaks under load (unbounded loops, N+1, blocking I/O). Judge from the code." },
 ];
-const wanted = args.lenses || LENSES.map((l) => l.key);
+const wanted = args.lenses || LENSES.filter((l) => plan || l.key !== "plan-conformance").map((l) => l.key);
 
 const scout = await runs.run("scout-r" + round, {
   label: "Map swarm scope",
   agent: "scout",
   output: "swarm/r" + round + "-scout.md",
-  task: "Recon only, change nothing. Scope: " + scope + ".\n" +
+  task: "Recon only, change nothing. Scope: " + scope + "." + plan + "\n" +
     "Return under 150 lines: (1) files in scope with a one-line role each; (2) entry points and public interfaces; " +
     "(3) module boundaries and declared rules (ADRs, import contracts, AGENTS.md/CLAUDE.md); (4) the exact test and lint commands; " +
     "(5) if the scope is a diff, run `git status --short`, `git diff` and `git diff main...HEAD` (or the repo's default branch) and include the changed hunks verbatim, trimmed to the riskiest 400 lines.",
@@ -38,7 +40,7 @@ const reviews = await runs.all(lenses.map((l) => ({
   label: "Review " + l.key,
   agent: "reviewer",
   output: "swarm/r" + round + "-" + l.key + ".md",
-  task: "Lens: " + l.key + ". " + l.brief + "\nScope: " + scope + "\n\nScout map:\n" + scout.output + rules,
+  task: "Lens: " + l.key + ". " + l.brief + "\nScope: " + scope + plan + "\n\nScout map:\n" + scout.output + rules,
 })));
 
 const reports = reviews.map((r, i) => "## Lens " + lenses[i].key + (r.ok ? "" : " (RUN FAILED, unchecked)") + "\n" + r.output).join("\n\n");

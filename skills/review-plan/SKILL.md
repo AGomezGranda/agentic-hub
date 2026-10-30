@@ -24,8 +24,8 @@ what recurs vs. what's been fixed — but still review the plan fresh.
 
 Full lens table (focus area per lens): `references/lenses.md`.
 
-Architecture, Code Quality, Test Coverage, and Correctness are near-always
-relevant. Pick the rest by what the plan actually touches — skip lenses that
+Architecture, Code Quality, Test Coverage, Correctness, and Simplicity are
+near-always relevant. Pick the rest by what the plan actually touches — skip lenses that
 plainly don't apply (a docs-only plan doesn't need a Security lens). Combine
 related lenses that share the same source set in one reviewer; keep an
 independent second view only for high-risk or disputed conclusions. A small,

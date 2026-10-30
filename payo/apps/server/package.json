@@ -1,0 +1,17 @@
+{
+	"name": "@payo/server",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"dependencies": {
+		"@payo/contracts": "workspace:*",
+		"@payo/kernel": "workspace:*",
+		"@payo/factory": "workspace:*",
+		"@payo/runner-fake": "workspace:*",
+		"@payo/runner-pi": "workspace:*",
+		"@payo/jira-acli": "workspace:*",
+		"@payo/git": "workspace:*",
+		"@payo/store-sqlite": "workspace:*",
+		"@payo/cli": "workspace:*"
+	}
+}

@@ -21,3 +21,10 @@ Optional `lenses`: correctness, architecture, quality, tests, simplicity, securi
 - Children never spawn children. Never push, merge or release without an explicit ask.
 - Follow the repo's existing patterns; the swarm lenses are the quality bar.
 - Final report: lenses run, findings accepted and rejected, rounds, what was not checked.
+
+## Jira
+When given a Jira URL or key (e.g. ABC-123, take the key from `/browse/ABC-123`), fetch it with the `acli` CLI, not web fetch (auth required):
+- `acli jira workitem view ABC-123 --fields '*navigable'` (add `--json` for structured output)
+- Comments: `acli jira workitem comment list --key ABC-123`
+- Search: `acli jira workitem search --help`
+Read-only unless asked: never transition, comment, edit or assign without an explicit request.

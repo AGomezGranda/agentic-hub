@@ -40,3 +40,26 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
       - run: npm test
+
+  payo:
+    name: payo check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: payo
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: payo/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: payo/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check

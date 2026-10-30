@@ -81,6 +81,7 @@ Install with `agentic-hub install <name>`, or `agentic-hub sync` for everything.
 | `remove-comment-slop` | Compress verbose comments and docstrings in Python `src/` and `tests/` without changing behavior |
 | `research-codebase` | Answer how something works, with cited `file:line` evidence (read-only) |
 | `review-plan` | Review a plan through lenses such as architecture, security, and tests |
+| `review-implementation` | Review the local git diff against its plan phase, then run the audit swarm |
 | `testing-strategy` | Audit a service's tests against the test pyramid and prioritise gaps |
 
 `agents/*.md` are Pi-only, read-only subagents that skills dispatch: `repo-scout`
@@ -186,7 +187,15 @@ uv run ruff check .
 uv run pyrefly check
 ```
 
-CI runs these same checks. Behavioural spot-checks are manual; there is no evals
+Payo, the TypeScript workspace in `payo/`:
+
+```
+cd payo
+pnpm install
+pnpm check    # Biome, tsc --noEmit, Vitest; also enforces package dependency rules
+```
+
+CI runs these same checks for both. Behavioural spot-checks are manual; there is no evals
 harness. Changes follow the test-first loop in `implement-plan`: one focused test,
 confirm it fails, smallest change, rerun.
 
@@ -203,6 +212,7 @@ spliced in at install time, so common prose carries no host-specific commands.
 - `src/agentic_hub/tui.py`: Textual grid
 - `tests/`: pytest suite
 - `meta/`: plans and reviews
+- `payo/`: TypeScript workspace for the Payo engine (scaffold only; see `docs/payo/engine-design.md`)
 
 ## Tools
 
@@ -214,4 +224,4 @@ spliced in at install time, so common prose carries no host-specific commands.
 - [docs/behavior-modes.md](docs/behavior-modes.md): mode contracts, plus instruction files, status, and recovery
 - [docs/behavior-modes-acceptance.md](docs/behavior-modes-acceptance.md): behavior-mode acceptance record
 - [docs/pi-extension-recommendations.txt](docs/pi-extension-recommendations.txt): Pi extension recommendations and adoption order
-- [docs/payo/](docs/payo/): proposed local agent workbench design and research (not implemented)
+- [docs/payo/](docs/payo/): proposed local agent workbench design and research (workspace scaffold in `payo/`; engine not implemented)

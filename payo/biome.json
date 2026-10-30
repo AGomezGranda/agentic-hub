@@ -1,0 +1,231 @@
+{
+	"$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+	"linter": {
+		"enabled": true
+	},
+	"formatter": {
+		"enabled": true
+	},
+	"overrides": [
+		{
+			"includes": ["packages/contracts/**"],
+			"linter": {
+				"rules": {
+					"style": {
+						"noRestrictedImports": {
+							"level": "error",
+							"options": {
+								"patterns": [
+									{
+										"group": ["@payo/*"],
+										"message": "contracts imports no other @payo package."
+									},
+									{
+										"group": [
+											"**/packages/**",
+											"**/modules/**",
+											"**/adapters/**",
+											"**/apps/**",
+											"../../*/**"
+										],
+										"message": "Import another Payo package by its @payo name, not a relative path."
+									}
+								]
+							}
+						}
+					}
+				}
+			}
+		},
+		{
+			"includes": ["packages/kernel/**"],
+			"linter": {
+				"rules": {
+					"style": {
+						"noRestrictedImports": {
+							"level": "error",
+							"options": {
+								"patterns": [
+									{
+										"group": ["@payo/*", "!@payo/contracts"],
+										"message": "kernel imports only @payo/contracts."
+									},
+									{
+										"group": [
+											"**/packages/**",
+											"**/modules/**",
+											"**/adapters/**",
+											"**/apps/**",
+											"../../*/**"
+										],
+										"message": "Import another Payo package by its @payo name, not a relative path."
+									}
+								]
+							}
+						}
+					}
+				}
+			}
+		},
+		{
+			"includes": ["modules/**"],
+			"linter": {
+				"rules": {
+					"style": {
+						"noRestrictedImports": {
+							"level": "error",
+							"options": {
+								"patterns": [
+									{
+										"group": [
+											"@payo/*",
+											"@payo/kernel/testing",
+											"!@payo/kernel",
+											"!@payo/contracts"
+										],
+										"message": "Modules import only @payo/kernel and @payo/contracts."
+									},
+									{
+										"group": [
+											"**/packages/**",
+											"**/modules/**",
+											"**/adapters/**",
+											"**/apps/**",
+											"../../*/**"
+										],
+										"message": "Import another Payo package by its @payo name, not a relative path."
+									}
+								]
+							}
+						}
+					}
+				}
+			}
+		},
+		{
+			"includes": ["adapters/**"],
+			"linter": {
+				"rules": {
+					"style": {
+						"noRestrictedImports": {
+							"level": "error",
+							"options": {
+								"patterns": [
+									{
+										"group": [
+											"@payo/*",
+											"@payo/kernel/testing",
+											"!@payo/kernel",
+											"!@payo/contracts"
+										],
+										"message": "Adapters import only @payo/kernel and @payo/contracts; only apps/server wires adapters."
+									},
+									{
+										"group": [
+											"**/packages/**",
+											"**/modules/**",
+											"**/adapters/**",
+											"**/apps/**",
+											"../../*/**"
+										],
+										"message": "Import another Payo package by its @payo name, not a relative path."
+									}
+								]
+							}
+						}
+					}
+				}
+			}
+		},
+		{
+			"includes": ["adapters/**/*.test.ts"],
+			"linter": {
+				"rules": {
+					"style": {
+						"noRestrictedImports": {
+							"level": "error",
+							"options": {
+								"patterns": [
+									{
+										"group": ["@payo/*", "!@payo/kernel", "!@payo/contracts"],
+										"message": "Adapters import only @payo/kernel and @payo/contracts; only apps/server wires adapters."
+									},
+									{
+										"group": [
+											"**/packages/**",
+											"**/modules/**",
+											"**/adapters/**",
+											"**/apps/**",
+											"../../*/**"
+										],
+										"message": "Import another Payo package by its @payo name, not a relative path."
+									}
+								]
+							}
+						}
+					}
+				}
+			}
+		},
+		{
+			"includes": ["apps/cli/**"],
+			"linter": {
+				"rules": {
+					"style": {
+						"noRestrictedImports": {
+							"level": "error",
+							"options": {
+								"patterns": [
+									{
+										"group": [
+											"@payo/*",
+											"@payo/kernel/testing",
+											"!@payo/contracts"
+										],
+										"message": "cli is a thin HTTP client: it imports only @payo/contracts."
+									},
+									{
+										"group": [
+											"**/packages/**",
+											"**/modules/**",
+											"**/adapters/**",
+											"**/apps/**",
+											"../../*/**"
+										],
+										"message": "Import another Payo package by its @payo name, not a relative path."
+									}
+								]
+							}
+						}
+					}
+				}
+			}
+		},
+		{
+			"includes": ["apps/server/**"],
+			"linter": {
+				"rules": {
+					"style": {
+						"noRestrictedImports": {
+							"level": "error",
+							"options": {
+								"patterns": [
+									{
+										"group": [
+											"**/packages/**",
+											"**/modules/**",
+											"**/adapters/**",
+											"**/apps/**",
+											"../../*/**"
+										],
+										"message": "Import another Payo package by its @payo name, not a relative path."
+									}
+								]
+							}
+						}
+					}
+				}
+			}
+		}
+	]
+}

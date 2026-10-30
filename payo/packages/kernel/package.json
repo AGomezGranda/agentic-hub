@@ -1,0 +1,17 @@
+{
+	"name": "@payo/kernel",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"exports": {
+		".": "./src/index.ts",
+		"./testing": "./src/testing.ts"
+	},
+	"dependencies": {
+		"@payo/contracts": "workspace:*"
+	},
+	"devDependencies": {
+		"vitest": "^5.0.5",
+		"zod": "^4.6.7"
+	}
+}
