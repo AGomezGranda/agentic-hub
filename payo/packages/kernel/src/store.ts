@@ -16,6 +16,8 @@ export interface RunStore {
 	): Promise<void>;
 	/** Events with `seq >= fromSeq`, in seq order. */
 	read(runId: string, fromSeq?: number): Promise<RunEvent[]>;
+	/** Every run with at least one event, in deterministic ascending ID order. */
+	listRunIds(): Promise<string[]>;
 	putArtifact(
 		content: Uint8Array,
 		meta: { kind: string; mediaType: string },
@@ -79,6 +81,10 @@ export function createMemoryRunStore(
 			return (backing.events.get(runId) ?? [])
 				.filter((event) => event.seq >= fromSeq)
 				.map((event) => structuredClone(event));
+		},
+
+		async listRunIds() {
+			return [...backing.events.keys()].sort();
 		},
 
 		async putArtifact(content, meta) {

@@ -6,6 +6,9 @@
 	"exports": {
 		".": "./src/index.ts"
 	},
+	"bin": {
+		"payo": "./src/index.ts"
+	},
 	"dependencies": {
 		"@payo/contracts": "workspace:*"
 	}

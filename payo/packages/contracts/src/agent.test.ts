@@ -33,6 +33,30 @@ describe("AgentSpec", () => {
 		).toBe(true);
 	});
 
+	it("accepts correlation ids and a raw log path", () => {
+		expect(
+			AgentSpec.safeParse({
+				...validSpec,
+				correlation: { runId: "r1", stepId: "s1", attemptId: "a1" },
+				rawLogPath: "/tmp/events.jsonl",
+			}).success,
+		).toBe(true);
+	});
+
+	it.each([
+		[
+			"an empty correlation run id",
+			{
+				...validSpec,
+				correlation: { runId: "", stepId: "s1", attemptId: "a1" },
+			},
+		],
+		["a blank raw log path", { ...validSpec, rawLogPath: "  " }],
+		["a model over 256 characters", { ...validSpec, model: "m".repeat(257) }],
+	])("rejects %s", (_label, spec) => {
+		expect(AgentSpec.safeParse(spec).success).toBe(false);
+	});
+
 	it.each([
 		["timeoutMs: 0", { ...validSpec, timeoutMs: 0 }],
 		[
@@ -107,6 +131,22 @@ describe("AgentEvent", () => {
 		const name = "x".repeat(129);
 		expect(
 			AgentEvent.safeParse({ type: "tool_call", callId: "c1", name }).success,
+		).toBe(false);
+	});
+
+	it("caps the started model at 256 characters", () => {
+		expect(
+			AgentEvent.safeParse({ type: "started", model: "m".repeat(256) }).success,
+		).toBe(true);
+		expect(
+			AgentEvent.safeParse({ type: "started", model: "m".repeat(257) }).success,
+		).toBe(false);
+	});
+
+	it("caps the tool call id at 256 characters", () => {
+		const callId = "c".repeat(257);
+		expect(
+			AgentEvent.safeParse({ type: "tool_call", callId, name: "read" }).success,
 		).toBe(false);
 	});
 });

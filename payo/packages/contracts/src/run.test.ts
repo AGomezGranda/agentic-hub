@@ -7,9 +7,12 @@ describe("Usage", () => {
 		expect(Usage.safeParse(value).success).toBe(true);
 	});
 
-	it.each(["0", -1, null, undefined, Number.NaN])("rejects %j", (value) => {
-		expect(Usage.safeParse(value).success).toBe(false);
-	});
+	it.each(["0", -1, null, undefined, Number.NaN, Infinity, -Infinity])(
+		"rejects %j",
+		(value) => {
+			expect(Usage.safeParse(value).success).toBe(false);
+		},
+	);
 });
 
 describe("RunEventBody", () => {
@@ -17,6 +20,17 @@ describe("RunEventBody", () => {
 		expect(RunEventBody.safeParse({ type: "run.exploded" }).success).toBe(
 			false,
 		);
+	});
+
+	it("rejects attempt.finished with non-finite usage", () => {
+		expect(
+			RunEventBody.safeParse({
+				type: "attempt.finished",
+				attemptId: "a1",
+				outcome: "succeeded",
+				usage: { tokensIn: Infinity, tokensOut: 0, cost: 0 },
+			}).success,
+		).toBe(false);
 	});
 
 	it("rejects gate.raised without allowedCommands", () => {
@@ -108,5 +122,11 @@ describe("Json and RunConfig", () => {
 
 	it("rejects a top-level array as RunConfig", () => {
 		expect(RunConfig.safeParse([1, 2]).success).toBe(false);
+	});
+
+	it("rejects non-finite numbers at the contract boundary", () => {
+		expect(Json.safeParse({ a: Infinity }).success).toBe(false);
+		expect(Json.safeParse({ a: -Infinity }).success).toBe(false);
+		expect(RunConfig.safeParse({ a: Infinity }).success).toBe(false);
 	});
 });

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ArtifactRef, Id, UsageRecord } from "./primitives.ts";
+import { ArtifactRef, Id, ModelId, UsageRecord } from "./primitives.ts";
 
 const MAX_TEXT = 262144;
 
@@ -12,25 +12,27 @@ export const AgentSpec = z.object({
 	roleSpecSha: Id.nullable(),
 	cwd: z.string().min(1),
 	tools: z.enum(["read-only", "write"]),
-	model: Id.nullable(),
+	model: ModelId.nullable(),
 	timeoutMs: z.int().positive().max(2147483647), // setTimeout's ceiling; larger values fire at once
 	outputContract: Id,
 	inputs: z.array(AgentInput),
+	correlation: z.object({ runId: Id, stepId: Id, attemptId: Id }).optional(),
+	rawLogPath: z.string().trim().min(1).optional(),
 });
 export type AgentSpec = z.infer<typeof AgentSpec>;
 
 // Normalised by the runner adapter. Text is capped here, a trust boundary; adapters truncate before emitting.
 export const AgentEvent = z.discriminatedUnion("type", [
-	z.object({ type: z.literal("started"), model: Id.nullable() }),
+	z.object({ type: z.literal("started"), model: ModelId.nullable() }),
 	z.object({ type: z.literal("message"), text: z.string().max(MAX_TEXT) }),
 	z.object({
 		type: z.literal("tool_call"),
-		callId: Id,
+		callId: z.string().min(1).max(256),
 		name: z.string().min(1).max(128),
 	}),
 	z.object({
 		type: z.literal("tool_result"),
-		callId: Id,
+		callId: z.string().min(1).max(256),
 		name: z.string().min(1).max(128),
 		ok: z.boolean(),
 	}),

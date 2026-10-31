@@ -52,6 +52,11 @@ export function reduce(state: RunState | null, event: Sequenced): RunState {
 	if (state.status === "ended") {
 		throw new Error(`run ${state.runId} has ended; cannot apply ${event.type}`);
 	}
+	// The maps are never mutated, so a lastSeq-only event can share them.
+	if (event.type === "attempt.event") {
+		requireRunning(state.attempts, event.attemptId, "attempt");
+		return { ...state, lastSeq: event.seq };
+	}
 
 	const next: RunState = {
 		...state,
@@ -120,9 +125,6 @@ export function reduce(state: RunState | null, event: Sequenced): RunState {
 				usage: null,
 			});
 			return next;
-		case "attempt.event":
-			requireRunning(state.attempts, event.attemptId, "attempt");
-			return next;
 		case "attempt.finished": {
 			const attempt = requireRunning(
 				state.attempts,
@@ -139,7 +141,7 @@ export function reduce(state: RunState | null, event: Sequenced): RunState {
 		}
 		case "gate.raised":
 			assertFresh(state.gates, event.gateId, "gate");
-			requireKnown(state.steps, event.stepId, "step");
+			requireRunning(state.steps, event.stepId, "step");
 			if (event.gateId.startsWith("interrupted:")) {
 				const attempt = state.attempts.get(
 					event.gateId.slice("interrupted:".length),

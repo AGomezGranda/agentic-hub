@@ -1,0 +1,67 @@
+{
+	"key": "PAYO-123",
+	"self": "https://example.atlassian.net/rest/api/3/issue/10001",
+	"fields": {
+		"summary": "Real adapters",
+		"description": {
+			"type": "doc",
+			"version": 1,
+			"content": [
+				{
+					"type": "paragraph",
+					"content": [
+						{ "type": "text", "text": "First paragraph with " },
+						{
+							"type": "text",
+							"text": "inline code",
+							"marks": [{ "type": "code" }]
+						},
+						{ "type": "text", "text": " text." }
+					]
+				},
+				{
+					"type": "paragraph",
+					"content": [
+						{ "type": "text", "text": "Line one" },
+						{ "type": "hardBreak" },
+						{ "type": "text", "text": "Line two" }
+					]
+				},
+				{
+					"type": "bulletList",
+					"content": [
+						{
+							"type": "listItem",
+							"content": [
+								{
+									"type": "paragraph",
+									"content": [{ "type": "text", "text": "Item one" }]
+								}
+							]
+						},
+						{
+							"type": "listItem",
+							"content": [
+								{
+									"type": "paragraph",
+									"content": [{ "type": "text", "text": "Item two" }]
+								}
+							]
+						}
+					]
+				},
+				{
+					"type": "paragraph",
+					"content": [
+						{ "type": "text", "text": "Thanks " },
+						{
+							"type": "mention",
+							"attrs": { "id": "abc", "text": "@alice" }
+						},
+						{ "type": "text", "text": "!" }
+					]
+				}
+			]
+		}
+	}
+}

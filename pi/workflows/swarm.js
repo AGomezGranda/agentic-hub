@@ -1,11 +1,10 @@
 // Audit swarm: scout -> parallel lens reviewers -> verifier. Read-only; the parent triages and fixes.
 // args: { scope: "diff vs main" | "path/or/module", round?: 1, lenses?: ["correctness", ...], plan?: "plan path, phase N" }
-// shortcut: absolute skill paths hardcoded for this machine, parameterise when used elsewhere.
+// Reviewer skill paths are relative to the repository root.
 const scope = args.scope || "uncommitted changes plus the last commit";
 const round = args.round || 1;
 const plan = args.plan ? "\nPlan under implementation: " + args.plan + ". Read it (that phase) before judging; the diff should deliver it." : "";
-const S = "/Users/alvaro.gomez/.pi/agent/skills/";
-const P = "/Users/alvaro.gomez/.pi/agent/git/github.com/DietrichGebert/ponytail/skills/";
+const S = "skills/";
 
 const LENSES = [
   { key: "plan-conformance", brief: "Compare the diff to the plan phase: missing or half-done items, changes the plan does not call for, success criteria unmet, undocumented deviations. Requires the plan arg." },
@@ -13,7 +12,7 @@ const LENSES = [
   { key: "architecture", brief: "Apply the boundaries and responsibilities lenses. Read " + S + "architecture-audit/SKILL.md and its references/ first. No import graph is precomputed: derive edges with grep." },
   { key: "quality", brief: "Apply SOLID, DRY, KISS, typing and error-handling dimensions. Read " + S + "code-quality-audit/SKILL.md and its references/ first." },
   { key: "tests", brief: "Is risky changed code untested, or are tests weak, flaky or mis-leveled? Read " + S + "testing-strategy/SKILL.md first." },
-  { key: "simplicity", brief: "Over-engineering, dead code, needless abstraction, what can be deleted. Read " + P + "ponytail-review/SKILL.md first." },
+  { key: "simplicity", brief: "Over-engineering, dead code, needless abstraction, and what can be deleted. No external skill file is required." },
   { key: "security", brief: "Trust-boundary validation, injection, secrets, authz, unsafe deserialization; and what breaks under load (unbounded loops, N+1, blocking I/O). Judge from the code." },
 ];
 const wanted = args.lenses || LENSES.filter((l) => plan || l.key !== "plan-conformance").map((l) => l.key);

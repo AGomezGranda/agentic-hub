@@ -1,0 +1,12 @@
+{"type":"session","version":3,"id":"session-tools","timestamp":"2026-10-31T00:00:00.000Z","cwd":"/tmp/work"}
+{"type":"agent_start"}
+{"type":"turn_start"}
+{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"Let me inspect."},{"type":"toolCall","id":"call_1","name":"read","arguments":{"path":"README.md"}}],"api":"anthropic","provider":"anthropic","model":"claude-sonnet-4","usage":{"input":4,"output":2,"cacheRead":0,"cacheWrite":0,"totalTokens":6,"cost":{"input":0.0004,"output":0.0004,"cacheRead":0,"cacheWrite":0,"total":0.001}},"stopReason":"toolUse","timestamp":1733234402000}}
+{"type":"tool_execution_start","toolCallId":"call_1","toolName":"read","args":{"path":"README.md"}}
+{"type":"tool_execution_end","toolCallId":"call_1","toolName":"read","result":{"content":[{"type":"text","text":"# Readme"}],"details":{}},"isError":false}
+{"type":"turn_end","message":{"role":"assistant","content":[],"stopReason":"toolUse","timestamp":1733234402000},"toolResults":[]}
+{"type":"turn_start"}
+{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"{\"ok\":true}"}],"api":"anthropic","provider":"anthropic","model":"claude-sonnet-4","usage":{"input":6,"output":3,"cacheRead":1,"cacheWrite":0,"totalTokens":10,"cost":{"input":0.0006,"output":0.0006,"cacheRead":0,"cacheWrite":0,"total":0.002}},"stopReason":"stop","timestamp":1733234403000}}
+{"type":"turn_end","message":{"role":"assistant","content":[{"type":"text","text":"{\"ok\":true}"}],"stopReason":"stop","timestamp":1733234403000},"toolResults":[]}
+{"type":"agent_end","messages":[],"willRetry":false}
+{"type":"agent_settled","aborted":false}

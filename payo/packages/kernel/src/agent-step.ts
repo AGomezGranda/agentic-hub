@@ -1,9 +1,13 @@
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
 	AgentEvent,
 	AgentSpec,
 	type ArtifactRef,
 	type AttemptOutcome,
 	type OutputValidator,
+	type RunEventBody,
 	type StepOutcome,
 	type UsageRecord,
 } from "@payo/contracts";
@@ -20,6 +24,9 @@ const UNKNOWN_USAGE: UsageRecord = {
 	tokensOut: "unknown",
 	cost: "unknown",
 };
+
+// One commit per 32 streamed rows instead of one per row.
+const ATTEMPT_EVENT_BATCH = 32;
 
 export interface AgentDeps {
 	store: RunStore;
@@ -150,6 +157,7 @@ async function executeAttempt(
 ): Promise<AttemptRun> {
 	if (input.signal.aborted) return { outcome: "cancelled" };
 	const watch = watchAttempt(input.signal, spec.timeoutMs);
+	let dir: string | undefined;
 	try {
 		await deps.log.write([
 			{
@@ -163,19 +171,81 @@ async function executeAttempt(
 				inputArtifacts: spec.inputs.map((i) => i.ref.sha256),
 			},
 		]);
-		const run = await streamAttempt(deps, input, attemptId, spec, watch);
-		await deps.log.write([
-			{
-				type: "attempt.finished",
+		let rawLogPath: string | undefined;
+		try {
+			dir = await mkdtemp(join(tmpdir(), "payo-attempt-"));
+			rawLogPath = join(dir, "events.jsonl");
+		} catch {
+			// Best effort: raw capture never blocks the attempt.
+		}
+		// The outer finally removes the directory, so a parse failure cannot leak it.
+		const runnerSpec = AgentSpec.parse({
+			...spec,
+			correlation: {
+				runId: deps.log.current().runId,
+				stepId: input.stepId,
 				attemptId,
-				outcome: run.outcome,
-				usage: watch.usage ?? UNKNOWN_USAGE,
-				error: run.error,
 			},
-		]);
-		return run;
+			rawLogPath,
+		});
+		try {
+			const run = await streamAttempt(
+				deps,
+				input,
+				attemptId,
+				runnerSpec,
+				watch,
+			);
+			await captureRawLog(deps, rawLogPath, attemptId);
+			await deps.log.write([
+				{
+					type: "attempt.finished",
+					attemptId,
+					outcome: run.outcome,
+					usage: watch.usage ?? UNKNOWN_USAGE,
+					error: run.error,
+				},
+			]);
+			return run;
+		} catch (error) {
+			await captureRawLog(deps, rawLogPath, attemptId);
+			// Best effort: preserve the original error over a failed write.
+			await deps.log
+				.write([
+					{
+						type: "attempt.finished",
+						attemptId,
+						outcome: "failed",
+						usage: watch.usage ?? UNKNOWN_USAGE,
+						error: describeReason(error),
+					},
+				])
+				.catch(() => {});
+			throw error;
+		}
 	} finally {
 		watch.dispose();
+		if (dir !== undefined) await rm(dir, { recursive: true, force: true });
+	}
+}
+
+// shortcut: the raw log is unbounded; cap it when a real attempt produces a log large enough to matter.
+async function captureRawLog(
+	deps: AgentDeps,
+	rawLogPath: string | undefined,
+	attemptId: string,
+): Promise<void> {
+	if (rawLogPath === undefined) return;
+	try {
+		const bytes = await readFile(rawLogPath);
+		if (bytes.byteLength === 0) return;
+		const artifact = await deps.store.putArtifact(bytes, {
+			kind: "agent-raw-log",
+			mediaType: "application/x-ndjson",
+		});
+		await deps.log.write([{ type: "artifact.recorded", artifact, attemptId }]);
+	} catch {
+		// Best effort: a missing raw artifact does not fail the attempt.
 	}
 }
 
@@ -186,6 +256,12 @@ async function streamAttempt(
 	spec: AgentSpec,
 	watch: Watch,
 ): Promise<AttemptRun> {
+	const pending: RunEventBody[] = [];
+	const flush = async () => {
+		if (pending.length === 0) return;
+		const batch = pending.splice(0);
+		await deps.log.write(batch);
+	};
 	try {
 		if (watch.terminal === undefined) {
 			const iterator = input.runner
@@ -207,28 +283,32 @@ async function streamAttempt(
 						if (event.type === "error")
 							watch.terminal = { kind: "error", message: event.message };
 					}
-					await deps.log.write([{ type: "attempt.event", attemptId, event }]);
+					pending.push({ type: "attempt.event", attemptId, event });
+					if (
+						watch.terminal !== undefined ||
+						pending.length >= ATTEMPT_EVENT_BATCH
+					)
+						await flush();
 					// Yield so the deadline timer can fire when a runner emits without awaiting I/O.
 					await new Promise((resolve) => setImmediate(resolve));
 				}
 			} finally {
-				// Not awaited: a runner that ignores the abort must not hold the attempt open.
-				iterator.return?.().catch(() => {});
+				// shortcut: awaiting runner cleanup for up to 1 s; upgrade if a real adapter needs longer.
+				await Promise.race([
+					Promise.resolve()
+						.then(() => iterator.return?.())
+						.then(() => undefined)
+						.catch(() => {}),
+					new Promise<void>((resolve) => {
+						setTimeout(resolve, 1000).unref();
+					}),
+				]);
 			}
 		}
+		await flush();
 		return classify(watch.terminal, spec, input.validate);
 	} catch (error) {
-		await deps.log
-			.write([
-				{
-					type: "attempt.finished",
-					attemptId,
-					outcome: "failed",
-					usage: watch.usage ?? UNKNOWN_USAGE,
-					error: describeReason(error),
-				},
-			])
-			.catch(() => {});
+		await flush().catch(() => {});
 		throw error;
 	}
 }

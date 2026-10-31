@@ -10,7 +10,7 @@ export interface FakeRunner extends AgentRunner {
 	readonly calls: readonly AgentSpec[];
 }
 
-/** Session N (1-based) plays scripts[N - 1]. Adapter tests and step 5 wiring tests only; modules never import it. */
+/** Session N (1-based) plays scripts[N - 1]. Adapter and step 4–5 wiring tests only; modules never import it. */
 export function createFakeRunner(
 	scripts: readonly FakeStep[][],
 	id = "fake",

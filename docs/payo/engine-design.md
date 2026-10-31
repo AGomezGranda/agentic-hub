@@ -1,6 +1,6 @@
 # Payo engine design
 
-Status: agreed design, not implemented. It turns the [agentic factory](agentic-factory.md) flow into an engine and interfaces, as the first workflow module of the [local agent workbench](high-level-architecture.md). Where this document and the architecture document differ on near-term choices, this one wins; the architecture document still describes the long-term shape.
+Status: agreed design, partially implemented: real adapters exist behind the ports and the server defaults to them; the web UI does not exist yet. It turns the [agentic factory](agentic-factory.md) flow into an engine and interfaces, as the first workflow module of the [local agent workbench](high-level-architecture.md). Where this document and the architecture document differ on near-term choices, this one wins; the architecture document still describes the long-term shape.
 
 ## Decisions
 
@@ -104,7 +104,7 @@ interface RunStore {
 }
 ```
 
-`AgentEvent` is a normalised union: `started`, `message`, `tool_call`, `tool_result`, `usage`, `result`, `error`. Each adapter also keeps its native log as an artifact. The Pi adapter spawns `pi --mode json` with `--tools`, `--model` and a per-attempt `--session-dir`, and reads stdout as strict LF-split JSONL. It passes `--no-context-files --no-extensions --no-skills --no-prompt-templates --no-mcp` so the developer's global Pi setup (AGENTS.md, subagents) never leaks into a step, and loads only what the role needs with `--skill`. The model provider is Enterprise Claude through Pi's built-in `anthropic` OAuth login, which works with these flags. Pi reports tokens and an API-equivalent cost; the engine records that cost as an estimate, not as billing.
+`AgentEvent` is a normalised union: `started`, `message`, `tool_call`, `tool_result`, `usage`, `result`, `error`. Each adapter also keeps its native log as an artifact. The Pi adapter spawns `pi --mode json` with `--tools`, `--model` and a per-attempt `--session-dir`, and reads stdout as strict LF-split JSONL. It passes `--no-context-files --no-extensions --no-skills --no-prompt-templates --no-mcp` so the developer's global Pi setup (AGENTS.md, subagents) never leaks into a step. The role text is passed as the prompt from the factory's snapshot; `--skill` is intentionally not used so a run cannot drift from the recorded skill SHA. The child runs with `cwd` set to the run worktree and stdin ignored, so it inspects the right tree and does not wait for input. Raw JSONL is stored as an `agent-raw-log` artifact. The model provider is Enterprise Claude through Pi's built-in `anthropic` OAuth login, which works with these flags. Pi reports tokens and an API-equivalent cost; the engine records that cost as an estimate, not as billing.
 
 ## Role specs
 
@@ -172,4 +172,4 @@ Later slices add implementation, checks and implementation review per PR, then d
 - Whether parallel Pi runners sharing one OAuth login race when the token refreshes.
 - Later, not v1: Ollama Cloud as a model provider through Pi's `models.json`. Open: whether its models follow the final JSON envelope reliably, and whether it reports usage and cost (otherwise `unknown`).
 - Whether Biome's restricted-import rules are enough to enforce the dependency rules, or if a dependency checker is needed.
-- How the web UI authenticates to the loopback server (origin checks plus a local token are the expected baseline).
+- The web UI's token prompt and client implementation. The server and CLI already implement the baseline: per-install bearer token, loopback-only binding, exact Origin allowlist, `payo token` handoff, session-memory token storage, and authenticated fetch-based SSE rather than token-bearing URLs or native `EventSource`.

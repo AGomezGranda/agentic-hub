@@ -338,6 +338,35 @@ export function runStoreContract(
 			await store.close();
 		});
 
+		it("lists each run ID once in deterministic order", async () => {
+			const store = await harness.open();
+			expect(await store.listRunIds()).toEqual([]);
+			await store.append("r2", [body.runCreated("r2")], 0);
+			await store.append("r1", [body.runCreated("r1")], 0);
+			await store.append("r1", [body.stepStarted("s1")], 1);
+
+			expect(await store.listRunIds()).toEqual(["r1", "r2"]);
+			await store.close();
+		});
+
+		it("writes no part of an initial batch when a later event is invalid", async () => {
+			const store = await harness.open();
+			const invalid = {
+				...body.artifactRecorded("a".repeat(63)),
+			} as RunEventBody;
+
+			await expect(
+				store.append(
+					"r1",
+					[body.runCreated("r1"), body.stepStarted("s1"), invalid],
+					0,
+				),
+			).rejects.toThrow();
+			expect(await store.read("r1")).toEqual([]);
+			expect(await store.listRunIds()).toEqual([]);
+			await store.close();
+		});
+
 		it.each(["../x", "A".repeat(64), "a".repeat(63)])(
 			"rejects artifact name %j before reading anything",
 			async (name) => {

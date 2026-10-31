@@ -11,7 +11,7 @@ The operator authorizes delegation, without being asked, in exactly these cases.
 | Independent read-only sub-questions | One `runs.all` of read-only children |
 
 Swarm call (async, then yield; completion wakes you):
-`subagent({ workflow: "/Users/alvaro.gomez/code/agentic-hub/pi/workflows/swarm.js", args: { scope: "diff vs main" | "<path>", round: 1 }, async: true })`
+`subagent({ workflow: "./pi/workflows/swarm.js", args: { scope: "diff vs main" | "<path>", round: 1 }, async: true })`
 Optional `lenses`: correctness, architecture, quality, tests, simplicity, security. Narrow them for small changes.
 
 ## Rules

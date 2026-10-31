@@ -2,14 +2,14 @@ import { type Json, RunConfig, RunEventBody } from "@payo/contracts";
 import { fold, type RunState, reduce } from "./state.ts";
 import type { RunStore } from "./store.ts";
 
-type GateRaise = Omit<Extract<RunEventBody, { type: "gate.raised" }>, "type">;
-
 /** Recursive merge of plain objects; arrays and scalars in `overrides` replace the defaults. */
 export function resolveRunConfig(
 	defaults: RunConfig,
 	overrides: RunConfig = {},
 ): RunConfig {
-	return RunConfig.parse(mergeObjects(defaults, overrides));
+	const merged = mergeObjects(defaults, overrides);
+	rejectProtoKey(merged);
+	return RunConfig.parse(merged);
 }
 
 function mergeObjects(
@@ -41,40 +41,6 @@ function rejectProtoKey(value: unknown): void {
 			throw new Error('config key "__proto__" is not allowed');
 		for (const item of Object.values(value)) rejectProtoKey(item);
 	}
-}
-
-// Kernel policy only; the reducer enforces the rest (ended run, unknown or duplicate id) at commit.
-export function decideGateRaise(
-	state: RunState,
-	gate: GateRaise,
-): RunEventBody[] {
-	const step = state.steps.get(gate.stepId);
-	if (step?.status !== "running")
-		throw new Error(`step ${gate.stepId} is not running`);
-	return [{ type: "gate.raised", ...gate }];
-}
-
-export function decideGateResolve(
-	state: RunState,
-	input: { gateId: string; command: string; note: string | null },
-): RunEventBody[] {
-	const gate = state.gates.get(input.gateId);
-	if (gate === undefined) throw new Error(`unknown gate ${input.gateId}`);
-	if (gate.status !== "open")
-		throw new Error(`gate ${input.gateId} is not open`);
-	if (!gate.allowedCommands.includes(input.command)) {
-		throw new Error(
-			`command "${input.command}" is not allowed on gate ${input.gateId}`,
-		);
-	}
-	return [
-		{
-			type: "gate.resolved",
-			gateId: input.gateId,
-			command: input.command,
-			note: input.note,
-		},
-	];
 }
 
 /**

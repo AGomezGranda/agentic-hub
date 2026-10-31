@@ -3,6 +3,7 @@ import { AgentEvent } from "./agent.ts";
 import {
 	ArtifactRef,
 	Id,
+	ModelId,
 	RunConfig,
 	Sha256,
 	UsageRecord,
@@ -45,7 +46,7 @@ export const RunEventBody = z.discriminatedUnion("type", [
 		stepId: Id,
 		role: Id,
 		runner: Id,
-		model: z.string().min(1).nullable(),
+		model: ModelId.nullable(),
 		roleSpecSha: z.string().min(1).nullable(),
 		inputArtifacts: z.array(Sha256),
 	}),
@@ -84,6 +85,9 @@ export const RunEventBody = z.discriminatedUnion("type", [
 export type RunEventBody = z.infer<typeof RunEventBody>;
 
 // Written by the store, never by callers.
+export const RunEventSchema = RunEventBody.and(
+	z.object({ seq: z.int().positive(), at: z.string().min(1) }),
+);
 export type RunEvent = RunEventBody & { seq: number; at: string };
 
 export const StepRecord = z.object({
@@ -98,7 +102,7 @@ export const AttemptRecord = z.object({
 	stepId: Id,
 	role: Id,
 	runner: Id,
-	model: z.string().min(1).nullable(),
+	model: ModelId.nullable(),
 	roleSpecSha: z.string().min(1).nullable(),
 	inputArtifacts: z.array(Sha256),
 	status: z.union([z.literal("running"), AttemptOutcome]),

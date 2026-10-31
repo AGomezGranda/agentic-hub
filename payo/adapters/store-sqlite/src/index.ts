@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import {
+	chmodSync,
 	closeSync,
 	existsSync,
 	fsyncSync,
@@ -47,10 +48,16 @@ export async function createSqliteRunStore(options: {
 	dataDir: string;
 }): Promise<RunStore> {
 	const artifactsDir = join(options.dataDir, "artifacts");
+	mkdirSync(options.dataDir, { recursive: true, mode: 0o700 });
 	mkdirSync(artifactsDir, { recursive: true, mode: 0o700 });
+	if (process.platform !== "win32") {
+		chmodSync(options.dataDir, 0o700);
+		chmodSync(artifactsDir, 0o700);
+	}
 	const dbPath = join(options.dataDir, "payo.db");
-	// Create the db owner-only before SQLite opens it; an existing file keeps its mode.
+	// Create the db owner-only before SQLite opens it, and correct an existing file's mode.
 	closeSync(openSync(dbPath, "a", 0o600));
+	if (process.platform !== "win32") chmodSync(dbPath, 0o600);
 	// Wait for a writer in another process; without this a contended write fails at once with SQLITE_BUSY, not StaleSeqError.
 	const db = new DatabaseSync(dbPath, {
 		timeout: 5000,
@@ -118,6 +125,13 @@ export async function createSqliteRunStore(options: {
 			}
 		},
 
+		async listRunIds() {
+			const rows = db
+				.prepare("SELECT DISTINCT run_id FROM events ORDER BY run_id")
+				.all() as { run_id: string }[];
+			return rows.map((row) => row.run_id);
+		},
+
 		async read(runId, fromSeq = 1) {
 			const rows = db
 				.prepare(
@@ -162,12 +176,12 @@ export async function createSqliteRunStore(options: {
 					rmSync(tmp, { force: true });
 					throw error;
 				}
-			}
-			const dirFd = openSync(artifactsDir, "r");
-			try {
-				fsyncSync(dirFd);
-			} finally {
-				closeSync(dirFd);
+				const dirFd = openSync(artifactsDir, "r");
+				try {
+					fsyncSync(dirFd);
+				} finally {
+					closeSync(dirFd);
+				}
 			}
 			return ref;
 		},

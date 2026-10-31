@@ -72,15 +72,15 @@ Step 6 can run in parallel with steps 4–5 once step 3 has fixed the `AgentRunn
 - `TicketSource` and `Workspace` ports with fakes.
 - State machine: FetchTicket → Plan → PlanReview ⇄ Revise → Approval → Approved, with Escalated after round 3 and `resume`.
 - Role specs and output contracts for planner (plan markdown, PR strategy, `openQuestions[]`), plan-review lenses, verifier, and reviser. Agents are read-only and return content in the envelope; the engine writes the artifacts.
-- Lenses come from `skills/review-plan/references/lenses.md`. The fan-out → verifier shape and the verifier's classification rules come from `pi/workflows/swarm.js`, whose lenses are diff lenses and do not apply to a plan.
-- Convergence: stop when no verified P0/P1 remains; escalate at round 3. Decided from structured output only. A failed lens blocks convergence: an unchecked lens is not a clean one.
+- Fixed lenses are architecture, security, test coverage, code quality, correctness, simplicity and compatibility, from `skills/review-plan/references/lenses.md`. The fan-out → verifier shape and the verifier's classification rules come from `pi/workflows/swarm.js`, whose lenses are diff lenses and do not apply to a plan.
+- Convergence: stop when no verified P0/P1 blocker remains; escalate at round 3. Explicit resume or request-changes starts a new cycle at round 1. Decided from structured output only. A failed lens blocks convergence: an unchecked lens is not a clean one.
 - Escalation also when the reviser reports findings it cannot reconcile (the factory's "contradicting findings" case), not only at round 3.
 - Plan versions: each agent version is an immutable artifact. The file you edit is a working copy under `~/.payo/runs/<run>/plan.md`; `approve` and `request-changes` snapshot it as a new version.
-- Approval gate: `approve` is rejected while any open question lacks an answer; answers are written back into the plan; the agent-to-approved diff is recorded as a metric. `request-changes` snapshots your edits and returns to PlanReview.
+- Approval gate: `approve` is rejected while any open question lacks an answer; answers are written back into the plan; the agent-to-approved diff is recorded as a metric. `request-changes` snapshots the edited file and returns to PlanReview without a separate feedback message.
 - Commands as plain library functions (`start`, `answer`, `approve`, `requestChanges`, `resume`) so step 5 only wraps them.
 
 **Done when:** tests drive each transition in the design's state diagram with fakes, including approval blocked by an open question, a failed lens blocking convergence, and both escalation paths.
-**Settles:** the exact JSON envelopes for each role; how lenses are selected (fixed set vs a selector step, as `review-plan` picks lenses by what the plan touches).
+**Settles:** the exact JSON envelopes for each role; a fixed set of lenses is used in this slice.
 
 ### 5. Server and CLI
 
@@ -98,9 +98,9 @@ Step 6 can run in parallel with steps 4–5 once step 3 has fixed the `AgentRunn
 
 **Goal:** real harness, tickets and worktrees behind the ports.
 
-- `runner-pi`: spawn `pi --mode json` with `--tools`, `--model`, per-attempt `--session-dir`, the `--no-*` isolation flags and `--skill`. Strict LF-split JSONL parsing, mapping to `AgentEvent`, raw log kept as an artifact, token and cost recorded as an estimate.
+- `runner-pi`: spawn `pi --mode json` with `--tools`, `--model`, per-attempt `--session-dir` and the `--no-*` isolation flags. The snapshotted role text is passed as the prompt; `--skill` is intentionally not used. Strict LF-split JSONL parsing, mapping to `AgentEvent`, raw log kept as an artifact, token and cost recorded as an estimate.
 - `jira-acli`: `acli jira workitem view` to a `Ticket` snapshot artifact. Read-only.
-- `git`: `Workspace` as worktrees in `~/.payo/worktrees/<run>/` at the base branch. Removed when the run ends, unless a later slice still needs it.
+- `git`: `Workspace` as worktrees in `~/.payo/worktrees/<run>/` detached at the resolved base commit. Removed on approve and retained while a run is resumable; escalated, cancelled and abandoned worktrees are a known cleanup gap deferred to a later slice.
 - Run, step and attempt IDs passed to every adapter and kept in their logs.
 - `payo doctor`: checks `pi`, `acli`, `git` and their logins, so an expired login fails fast instead of mid-run.
 - Adapter tests against recorded fixtures (pi JSONL, acli JSON), plus opt-in live smoke tests that do not run in `pnpm check`.
@@ -112,7 +112,7 @@ Step 6 can run in parallel with steps 4–5 once step 3 has fixed the `AgentRunn
 
 **Goal:** slice 1 works on real tickets, and the role specs are good enough to keep.
 
-- Wire the real adapters in `apps/server` as the default.
+- Tune the real adapters now that they are the default.
 - Run 3–5 real tickets from ticket to approval. Tune role spec overrides from what goes wrong; fork a skill only if overrides fight it.
 - Check the records answer the factory's metrics: plan edits at approval, review rounds, cost per ticket.
 - Keep each ticket's snapshot, plan versions and approved plan as a small labelled corpus. It is the baseline for later evaluation, so role-spec changes are compared, not judged by feel.
@@ -139,7 +139,6 @@ Outline only. Each is planned when its predecessor is done, using what slice 1 t
 ## Open for review
 
 - **Other repositories.** The factory's planner researches "other repositories when defined or needed"; the design's Run has one repo. Proposal: one repo in slice 1, read-only extra repos later.
-- **`request-changes` feedback.** As written it only re-reviews your edited plan. If you also want to leave instructions for the reviser, the command needs a message.
 - **Architecture document.** That document's first slice was the PR reviewer, with a baseline comparison. The engine design moves the factory first, and its section on precedence says the engine design wins. The PR reviewer stays a later module.
 
 ## Not in this roadmap

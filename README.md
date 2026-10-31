@@ -42,7 +42,7 @@ configure, migrate, or manage these definitions or overrides. Add it to
 ```json
 "subagents": {
   "maxThinking": "high",
-  "agentScanDirs": ["~/code/agentic-hub/agents"],
+  "agentScanDirs": ["~/code/python/agentic-hub/agents"],
   "agentOverrides": {
     "scout":            { "model": "claude-haiku-4-5" },
     "evidence-auditor": { "model": "claude-haiku-4-5" }
@@ -187,13 +187,74 @@ uv run ruff check .
 uv run pyrefly check
 ```
 
-Payo, the TypeScript workspace in `payo/`:
+### Payo
+
+Payo turns a Jira ticket into an approved implementation plan. The current slice
+stops at approval; it does not write code or open a PR yet. The full walkthrough,
+including gates, recovery, and fake-mode scenarios, is in
+[docs/payo/usage.md](docs/payo/usage.md).
+
+The TypeScript workspace in `payo/` requires Node 24 and pnpm (the workspace pins
+pnpm 10.9). `pnpm check` runs Biome, `tsc --noEmit`, and Vitest, and also enforces
+package dependency rules.
 
 ```
 cd payo
 pnpm install
-pnpm check    # Biome, tsc --noEmit, Vitest; also enforces package dependency rules
+pnpm check
 ```
+
+Real ticket (`acli`), workspace (`git`) and runner (`pi`) adapters are the
+default. Real mode needs a Jira login for `acli`, a Pi login for the configured
+provider, and a repo containing `skills/` at the base branch.
+
+```
+export PAYO_MODEL=<model>            # required in real mode
+export PAYO_PI_PROVIDER=anthropic    # default
+pnpm payo serve
+```
+
+`PAYO_PI_BIN`, `PAYO_ACLI_BIN` and `PAYO_GIT_BIN` override the binaries
+(defaults `pi`, `acli`, `git`). Startup runs the same checks as `payo doctor`
+and exits non-zero before listening when one fails. If that happens, run
+`pnpm payo serve --dev-fakes` in one terminal and `pnpm -C payo payo doctor` in
+another: the fake server still serves the real doctor report.
+
+`--dev-fakes` selects the offline fake adapters and is the only mode that
+accepts `PAYO_SCENARIO`.
+
+```
+pnpm payo serve --dev-fakes
+```
+
+The server binds only to `127.0.0.1:7331`. In another terminal, run commands from
+`payo/`; `start` prints the run ID that every other command requires.
+
+```
+pnpm payo start ABC-123 [--repo /path/to/repo] [--base main]
+pnpm payo status <run-id>
+pnpm payo logs <run-id> [-f]
+pnpm payo edit <run-id>
+pnpm payo answer <run-id> <question-id> <answer...>
+pnpm payo approve <run-id>
+pnpm payo request-changes <run-id>
+pnpm payo resume <run-id>
+pnpm payo doctor
+```
+
+`payo doctor` reports `pi`, `acli`, `git` and `skills` as one line per check and
+exits non-zero when any check fails.
+
+The server defaults `PAYO_REPO` to the directory where `payo serve` started and
+`PAYO_BASE_BRANCH` to `main`; `--repo` and `--base` override them per run. Server
+and CLI share `PAYO_DATA_DIR` (default `~/.payo`) for the SQLite database, plans,
+and the per-install bearer token. Run `pnpm payo token` only when a client needs
+the token, and never share it. A stopped or crashed server never resumes work on
+its own: restart it, inspect the gate, and run `pnpm payo resume <run-id>`.
+
+The live Pi smoke test is opt-in and needs a ready Pi login plus a real repo at
+the base branch. From the repository root, run `pnpm -C payo smoke`.
+`pnpm --filter @payo/cli smoke` is not the command.
 
 CI runs these same checks for both. Behavioural spot-checks are manual; there is no evals
 harness. Changes follow the test-first loop in `implement-plan`: one focused test,
@@ -212,7 +273,7 @@ spliced in at install time, so common prose carries no host-specific commands.
 - `src/agentic_hub/tui.py`: Textual grid
 - `tests/`: pytest suite
 - `meta/`: plans and reviews
-- `payo/`: TypeScript workspace for the Payo engine (scaffold only; see `docs/payo/engine-design.md`)
+- `payo/`: TypeScript workspace for the Payo engine (real-adapter-by-default server and CLI; see `docs/payo/engine-design.md`)
 
 ## Tools
 
@@ -224,4 +285,5 @@ spliced in at install time, so common prose carries no host-specific commands.
 - [docs/behavior-modes.md](docs/behavior-modes.md): mode contracts, plus instruction files, status, and recovery
 - [docs/behavior-modes-acceptance.md](docs/behavior-modes-acceptance.md): behavior-mode acceptance record
 - [docs/pi-extension-recommendations.txt](docs/pi-extension-recommendations.txt): Pi extension recommendations and adoption order
-- [docs/payo/](docs/payo/): proposed local agent workbench design and research (workspace scaffold in `payo/`; engine not implemented)
+- [docs/payo/usage.md](docs/payo/usage.md): how to install, run, review, approve, and recover Payo runs
+- [docs/payo/](docs/payo/): proposed local agent workbench design and research (engine and CLI in `payo/`)

@@ -8,7 +8,9 @@
 	},
 	"scripts": {
 		"check": "biome check . && tsc && vitest run",
-		"fix": "biome check --write ."
+		"fix": "biome check --write .",
+		"payo": "node apps/cli/src/index.ts",
+		"smoke": "PAYO_LIVE=1 vitest run apps/server/src/live.test.ts"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.6.4",

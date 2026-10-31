@@ -189,9 +189,11 @@ describe("createSqliteRunStore", () => {
 
 			expect((await store.read("r1")).map((e) => e.seq)).toEqual([1, 2]);
 			expect((await store.read("r2")).map((e) => e.seq)).toEqual([1]);
+			expect(await store.listRunIds()).toEqual(["r1", "r2"]);
 
 			await store.append("r2", [body.stepStarted("s2")], 1);
 			expect((await store.read("r2")).map((e) => e.seq)).toEqual([1, 2]);
+			expect(await store.listRunIds()).toEqual(["r1", "r2"]);
 			await store.close();
 		} finally {
 			rmSync(dataDir, { recursive: true, force: true });

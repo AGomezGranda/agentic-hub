@@ -1,14 +1,6 @@
 import type { RunEventBody } from "@payo/contracts";
 import { describe, expect, it } from "vitest";
-import {
-	commit,
-	decideGateRaise,
-	decideGateResolve,
-	openRun,
-	recover,
-	resolveRunConfig,
-	startRun,
-} from "./run.ts";
+import { commit, openRun, recover, resolveRunConfig, startRun } from "./run.ts";
 import { fold } from "./state.ts";
 import {
 	createMemoryRunStore,
@@ -50,66 +42,11 @@ describe("resolveRunConfig", () => {
 			resolveRunConfig({}, JSON.parse('{"__proto__": {"x": 1}}')),
 		).toThrow(/__proto__/);
 	});
-});
 
-describe("decideGateRaise", () => {
-	const gate = {
-		gateId: "g1",
-		stepId: "s1",
-		kind: "review",
-		allowedCommands: ["approve"],
-		reason: "needs a human",
-	};
-
-	it("rejects a step that is not running, naming it", () => {
-		const state = fold(
-			seqd([
-				body.runCreated(),
-				body.stepStarted("s1"),
-				body.stepFinished("s1"),
-			]),
-		);
-		expect(() => decideGateRaise(state, gate)).toThrow(/s1/);
-	});
-
-	it("returns one gate.raised body for a running step", () => {
-		const state = fold(seqd([body.runCreated(), body.stepStarted("s1")]));
-		expect(decideGateRaise(state, gate)).toEqual([
-			{ type: "gate.raised", ...gate },
-		]);
-	});
-});
-
-describe("decideGateResolve", () => {
-	it("rejects a command that is not in allowedCommands", () => {
-		const state = fold(
-			seqd([
-				body.runCreated(),
-				body.stepStarted("s1"),
-				body.gateRaised("g1", "s1"),
-			]),
-		);
-		expect(() =>
-			decideGateResolve(state, { gateId: "g1", command: "delete", note: null }),
-		).toThrow(/delete/);
-	});
-
-	it("rejects a gate that is already resolved", () => {
-		const state = fold(
-			seqd([
-				body.runCreated(),
-				body.stepStarted("s1"),
-				body.gateRaised("g1", "s1"),
-				body.gateResolved("g1"),
-			]),
-		);
-		expect(() =>
-			decideGateResolve(state, {
-				gateId: "g1",
-				command: "approve",
-				note: null,
-			}),
-		).toThrow(/not open/);
+	it("throws on a __proto__ key inside an array in defaults or overrides", () => {
+		const nested = [JSON.parse('{"__proto__": {"x": 1}}')];
+		expect(() => resolveRunConfig({}, { list: nested })).toThrow(/__proto__/);
+		expect(() => resolveRunConfig({ list: nested }, {})).toThrow(/__proto__/);
 	});
 });
 

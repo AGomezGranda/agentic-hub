@@ -6,3 +6,4 @@ export * from "./run.ts";
 export * from "./run-log.ts";
 export * from "./state.ts";
 export * from "./store.ts";
+export * from "./workspace.ts";

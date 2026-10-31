@@ -32,7 +32,7 @@ Pick lenses by what the diff touches (skip `security` for docs/refactors).
 `plan-conformance` is already covered by step 2, so leave it out unless you
 want an independent second view.
 
-`subagent({ workflow: "/Users/alvaro.gomez/code/agentic-hub/pi/workflows/swarm.js", args: { scope: "uncommitted changes (git diff HEAD plus untracked files)", plan: "<plan path>, phase <N>", lenses: [...], round: 1 }, async: true })`
+`subagent({ workflow: "./pi/workflows/swarm.js", args: { scope: "uncommitted changes (git diff HEAD plus untracked files)", plan: "<plan path>, phase <N>", lenses: [...], round: 1 }, async: true })`
 
 ## 4. Triage and report
 

@@ -5,13 +5,12 @@
 	"type": "module",
 	"dependencies": {
 		"@payo/contracts": "workspace:*",
-		"@payo/kernel": "workspace:*",
 		"@payo/factory": "workspace:*",
+		"@payo/git": "workspace:*",
+		"@payo/jira-acli": "workspace:*",
+		"@payo/kernel": "workspace:*",
 		"@payo/runner-fake": "workspace:*",
 		"@payo/runner-pi": "workspace:*",
-		"@payo/jira-acli": "workspace:*",
-		"@payo/git": "workspace:*",
-		"@payo/store-sqlite": "workspace:*",
-		"@payo/cli": "workspace:*"
+		"@payo/store-sqlite": "workspace:*"
 	}
 }

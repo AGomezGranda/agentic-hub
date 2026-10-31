@@ -203,6 +203,19 @@ describe("fold", () => {
 		).toThrow(/nope/);
 	});
 
+	it("refuses a gate on a finished step, naming it", () => {
+		expect(() =>
+			fold(
+				seqd([
+					body.runCreated(),
+					body.stepStarted("s1"),
+					body.stepFinished("s1"),
+					body.gateRaised("g1", "s1"),
+				]),
+			),
+		).toThrow(/s1 is not running/);
+	});
+
 	it("refuses a gate id reserved for recovery, naming it", () => {
 		expect(() =>
 			fold(

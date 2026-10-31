@@ -1,0 +1,3 @@
+{"type":"session","version":3,"id":"session-split","timestamp":"2026-10-31T00:00:00.000Z","cwd":"/tmp/work"}
+{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"split fixture"}],"api":"anthropic","provider":"anthropic","model":"claude-sonnet-4","usage":{"input":1,"output":1,"cacheRead":0,"cacheWrite":0,"totalTokens":2,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0.001}},"stopReason":"stop","timestamp":1733234402000}}
+{"type":"agent_settled","aborted":false}

@@ -1,3 +1,4 @@
+import { appendFile, writeFile } from "node:fs/promises";
 import {
 	type AgentEvent,
 	type AgentSpec,
@@ -483,6 +484,78 @@ describe("runAgentStep", () => {
 		expect(attempt?.usage).toEqual(usage(2));
 	});
 
+	it("batches attempt events, keeping every message in order", async () => {
+		const base = createMemoryRunStore();
+		let eventWrites = 0;
+		const store: RunStore = {
+			...base,
+			async append(runId, events, seq) {
+				if (events.some((event) => event.type === "attempt.event"))
+					eventWrites++;
+				return base.append(runId, events, seq);
+			},
+		};
+		const { deps } = await setup({ store });
+		const messageTexts = Array.from({ length: 70 }, (_, i) => `m${i}`);
+		const messages: AgentEvent[] = messageTexts.map((text) => ({
+			type: "message",
+			text,
+		}));
+		const runner = scripted(emits(...messages, valid));
+
+		await runAgentStep(deps, stepOf(runner));
+
+		const texts = (await store.read("r1")).flatMap((event) =>
+			event.type === "attempt.event" && event.event.type === "message"
+				? [event.event.text]
+				: [],
+		);
+		expect(texts).toEqual(messageTexts);
+		expect(eventWrites).toBeLessThanOrEqual(4);
+	});
+
+	it("flushes buffered events when the attempt times out", async () => {
+		const { store, deps } = await setup();
+		const runner = scripted(async function* (signal) {
+			for (let i = 0; i < 5; i++) yield { type: "message", text: `m${i}` };
+			yield* hangs()(signal);
+		});
+
+		await runAgentStep(
+			deps,
+			stepOf(runner, { spec: specFor({ timeoutMs: 20 }) }),
+		);
+
+		const state = await stateOf(store);
+		expect(state.attempts.get("a1")?.status).toBe("timed_out");
+		const texts = (await store.read("r1")).flatMap((event) =>
+			event.type === "attempt.event" && event.event.type === "message"
+				? [event.event.text]
+				: [],
+		);
+		expect(texts).toEqual(["m0", "m1", "m2", "m3", "m4"]);
+	});
+
+	it("flushes buffered events when the runner throws", async () => {
+		const { store, deps } = await setup();
+		const runner = scripted(async function* () {
+			for (let i = 0; i < 3; i++) yield { type: "message", text: `m${i}` };
+			throw new Error("boom");
+		});
+
+		await expect(runAgentStep(deps, stepOf(runner))).rejects.toThrow("boom");
+
+		const state = await stateOf(store);
+		expect(state.attempts.get("a1")?.status).toBe("failed");
+		expect(state.steps.get("s1")?.status).toBe("failed");
+		const texts = (await store.read("r1")).flatMap((event) =>
+			event.type === "attempt.event" && event.event.type === "message"
+				? [event.event.text]
+				: [],
+		);
+		expect(texts).toEqual(["m0", "m1", "m2"]);
+	});
+
 	it("does not strand the attempt or step when a runner emits schema-invalid usage", async () => {
 		const { store, deps } = await setup();
 		const bad: AgentEvent = {
@@ -555,5 +628,111 @@ describe("runAgentStep", () => {
 		);
 
 		expect((await stateOf(store)).attempts.get("a1")?.status).toBe("timed_out");
+	});
+
+	it("captures the runner's raw log before attempt.finished", async () => {
+		const { store, deps } = await setup();
+		const raw = '{"type":"message_end"}\n{"type":"agent_settled"}\n';
+		const runner = scripted(async function* () {
+			const spec = runner.calls[0];
+			if (spec?.rawLogPath === undefined) throw new Error("no raw log path");
+			await writeFile(spec.rawLogPath, raw);
+			yield valid;
+		});
+
+		const result = await runAgentStep(deps, stepOf(runner));
+
+		expect(result.outcome).toBe("succeeded");
+		expect(runner.calls[0]?.correlation).toEqual({
+			runId: "r1",
+			stepId: "s1",
+			attemptId: "a1",
+		});
+		const events = await store.read("r1");
+		const artifactIndex = events.findIndex(
+			(event) => event.type === "artifact.recorded",
+		);
+		const finishedIndex = events.findIndex(
+			(event) => event.type === "attempt.finished",
+		);
+		expect(artifactIndex).toBeGreaterThan(-1);
+		expect(artifactIndex).toBeLessThan(finishedIndex);
+		const recorded = events[artifactIndex];
+		if (recorded?.type !== "artifact.recorded") throw new Error("no artifact");
+		expect(recorded.artifact.kind).toBe("agent-raw-log");
+		expect(
+			new TextDecoder().decode(
+				await store.readArtifact(recorded.artifact.sha256),
+			),
+		).toBe(raw);
+	});
+
+	it("records the raw log when the runner throws, before the failed attempt row", async () => {
+		const { store, deps } = await setup();
+		const raw = '{"partial":true}\n';
+		const runner = scripted(async function* () {
+			const spec = runner.calls[0];
+			if (spec?.rawLogPath === undefined) throw new Error("no raw log path");
+			await writeFile(spec.rawLogPath, raw);
+			yield { type: "message", text: "partial" };
+			throw new Error("boom");
+		});
+
+		await expect(runAgentStep(deps, stepOf(runner))).rejects.toThrow("boom");
+
+		const events = await store.read("r1");
+		const artifactIndex = events.findIndex(
+			(event) => event.type === "artifact.recorded",
+		);
+		const finishedIndex = events.findIndex(
+			(event) => event.type === "attempt.finished",
+		);
+		expect(artifactIndex).toBeGreaterThan(-1);
+		expect(artifactIndex).toBeLessThan(finishedIndex);
+		expect(events[finishedIndex]).toMatchObject({
+			type: "attempt.finished",
+			outcome: "failed",
+		});
+	});
+
+	it("waits for a runner that writes during cleanup", async () => {
+		const { store, deps } = await setup();
+		const runner = scripted(async function* () {
+			const spec = runner.calls[0];
+			if (spec?.rawLogPath === undefined) throw new Error("no raw log path");
+			await writeFile(spec.rawLogPath, "early\n");
+			try {
+				yield valid;
+				await new Promise<never>(() => {});
+			} finally {
+				await tick(25);
+				await appendFile(spec.rawLogPath, "late\n");
+			}
+		});
+
+		await runAgentStep(deps, stepOf(runner));
+
+		const recorded = (await store.read("r1")).find(
+			(event) => event.type === "artifact.recorded",
+		);
+		if (recorded?.type !== "artifact.recorded") throw new Error("no artifact");
+		expect(
+			new TextDecoder().decode(
+				await store.readArtifact(recorded.artifact.sha256),
+			),
+		).toBe("early\nlate\n");
+	});
+
+	it("records no raw artifact when the runner ignores rawLogPath", async () => {
+		const { store, deps } = await setup();
+
+		await runAgentStep(deps, stepOf(scripted(emits(valid))));
+
+		const rawArtifacts = (await store.read("r1")).filter(
+			(event) =>
+				event.type === "artifact.recorded" &&
+				event.artifact.kind === "agent-raw-log",
+		);
+		expect(rawArtifacts).toHaveLength(0);
 	});
 });
