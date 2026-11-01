@@ -1,0 +1,81 @@
+import { API_BASE_URL } from "@web/shared/api/client.ts";
+import { afterEach, expect, it, vi } from "vitest";
+import {
+	answerQuestion,
+	approveRun,
+	getRunReview,
+	requestChanges,
+	resumeRun,
+} from "./api.ts";
+
+const token = "memory-only-token";
+const runId = "6f1f1b1e-2b4c-4f7a-9d3e-2f4a5b6c7d8e";
+const review = {
+	plan: { available: false as const, reason: "not_available" as const },
+	answers: {},
+	review: { available: false as const, reason: "not_available" as const },
+};
+const summary = {
+	runId,
+	repo: "/repo",
+	baseBranch: "main",
+	status: "active",
+	outcome: null,
+	stage: "Approval",
+	workItem: null,
+	startedAt: "2026-10-30T00:00:00.000Z",
+	updatedAt: "2026-10-30T00:01:00.000Z",
+	openGates: [],
+};
+
+function response(body: unknown, status = 200) {
+	return new Response(JSON.stringify(body), {
+		status,
+		headers: { "Content-Type": "application/json" },
+	});
+}
+
+afterEach(() => vi.unstubAllGlobals());
+
+it("loads the validated review projection using the selected run URL", async () => {
+	const fetchMock = vi.fn(async () => response(review));
+	vi.stubGlobal("fetch", fetchMock);
+
+	expect(await getRunReview(token, runId)).toEqual(review);
+	expect(fetchMock).toHaveBeenCalledWith(
+		`${API_BASE_URL}/runs/${runId}/review`,
+		expect.objectContaining({
+			method: "GET",
+			headers: expect.objectContaining({ Authorization: `Bearer ${token}` }),
+		}),
+	);
+});
+
+it("sends answers and only the gate-specific commands", async () => {
+	const fetchMock = vi.fn(
+		async (_url: RequestInfo | URL, init?: RequestInit) => {
+			if (init?.method === "POST" && String(_url).endsWith("/answer"))
+				return response(summary);
+			if (init?.method === "POST" && String(_url).endsWith("/approve"))
+				return response(summary);
+			return response({ runId });
+		},
+	);
+	vi.stubGlobal("fetch", fetchMock);
+
+	await answerQuestion(token, runId, "q1", "Because");
+	await approveRun(token, runId);
+	await requestChanges(token, runId);
+	await resumeRun(token, runId);
+
+	expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
+		`${API_BASE_URL}/runs/${runId}/answer`,
+		`${API_BASE_URL}/runs/${runId}/approve`,
+		`${API_BASE_URL}/runs/${runId}/request-changes`,
+		`${API_BASE_URL}/runs/${runId}/resume`,
+	]);
+	expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+		method: "POST",
+		body: JSON.stringify({ questionId: "q1", text: "Because" }),
+	});
+});

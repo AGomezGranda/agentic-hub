@@ -1,5 +1,6 @@
 {
 	"$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+	"files": { "includes": ["**", "!apps/web/dist"] },
 	"linter": {
 		"enabled": true
 	},
@@ -183,6 +184,36 @@
 											"!@payo/contracts"
 										],
 										"message": "cli is a thin HTTP client: it imports only @payo/contracts."
+									},
+									{
+										"group": [
+											"**/packages/**",
+											"**/modules/**",
+											"**/adapters/**",
+											"**/apps/**",
+											"../../*/**"
+										],
+										"message": "Import another Payo package by its @payo name, not a relative path."
+									}
+								]
+							}
+						}
+					}
+				}
+			}
+		},
+		{
+			"includes": ["apps/web/**"],
+			"linter": {
+				"rules": {
+					"style": {
+						"noRestrictedImports": {
+							"level": "error",
+							"options": {
+								"patterns": [
+									{
+										"group": ["@payo/*", "!@payo/contracts"],
+										"message": "web imports only @payo/contracts."
 									},
 									{
 										"group": [

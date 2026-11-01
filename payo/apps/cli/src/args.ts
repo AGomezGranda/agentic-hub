@@ -1,3 +1,5 @@
+import type { WorkItemRequest } from "@payo/contracts";
+
 export class UsageError extends Error {
 	constructor(message: string) {
 		super(message);
@@ -7,7 +9,12 @@ export class UsageError extends Error {
 
 export type Command =
 	| { command: "serve"; args: string[] }
-	| { command: "start"; ticketKey: string; repo?: string; baseBranch?: string }
+	| {
+			command: "start";
+			workItemRequest: WorkItemRequest;
+			repo?: string;
+			baseBranch?: string;
+	  }
 	| { command: "status"; runId: string }
 	| { command: "logs"; runId: string; follow: boolean }
 	| { command: "answer"; runId: string; questionId: string; text: string }
@@ -34,6 +41,65 @@ function valueAfter(
 	return value;
 }
 
+function parseStart(
+	args: readonly string[],
+): Extract<Command, { command: "start" }> {
+	let ticketKey: string | undefined;
+	let promptSeen = false;
+	let promptParts: string[] = [];
+	let repo: string | undefined;
+	let baseBranch: string | undefined;
+
+	for (let index = 0; index < args.length; index++) {
+		const arg = args[index];
+		if (arg === undefined) continue;
+		if (arg === "--") {
+			if (!promptSeen)
+				throw new UsageError("-- is only supported after --prompt");
+			promptParts = [...promptParts, ...args.slice(index + 1)];
+			break;
+		}
+		if (arg === "--prompt") {
+			if (promptSeen) throw new UsageError("--prompt may be used only once");
+			promptSeen = true;
+		} else if (arg === "--repo") {
+			repo = valueAfter(args, index, arg);
+			index++;
+		} else if (arg === "--base") {
+			baseBranch = valueAfter(args, index, arg);
+			index++;
+		} else if (arg.startsWith("-")) {
+			throw new UsageError(`unknown option ${arg}`);
+		} else if (promptSeen) {
+			promptParts.push(arg);
+		} else if (ticketKey === undefined) {
+			ticketKey = arg;
+		} else {
+			throw new UsageError("only one ticket key is allowed");
+		}
+	}
+
+	if (promptSeen) {
+		if (ticketKey !== undefined)
+			throw new UsageError("prompt cannot be combined with a Jira ticket key");
+		const text = promptParts.join(" ");
+		if (!text.trim()) throw new UsageError("prompt text required");
+		return {
+			command: "start",
+			workItemRequest: { source: "prompt", text },
+			repo,
+			baseBranch,
+		};
+	}
+	if (!ticketKey) throw new UsageError("ticket key required");
+	return {
+		command: "start",
+		workItemRequest: { source: "jira", key: ticketKey },
+		repo,
+		baseBranch,
+	};
+}
+
 export function parseArgs(argv: readonly string[]): Command {
 	const [command, ...rest] = argv;
 	if (!command) throw new UsageError("usage: payo <command> [options]");
@@ -41,30 +107,8 @@ export function parseArgs(argv: readonly string[]): Command {
 	switch (command) {
 		case "serve":
 			return { command: "serve", args: [...rest] };
-		case "start": {
-			let ticketKey: string | undefined;
-			let repo: string | undefined;
-			let baseBranch: string | undefined;
-			for (let index = 0; index < rest.length; index++) {
-				const arg = rest[index];
-				if (arg === undefined) continue;
-				if (arg === "--repo") {
-					repo = valueAfter(rest, index, arg);
-					index++;
-				} else if (arg === "--base") {
-					baseBranch = valueAfter(rest, index, arg);
-					index++;
-				} else if (arg.startsWith("-")) {
-					throw new UsageError(`unknown option ${arg}`);
-				} else if (ticketKey === undefined) {
-					ticketKey = arg;
-				} else {
-					throw new UsageError("only one ticket key is allowed");
-				}
-			}
-			if (!ticketKey) throw new UsageError("ticket key required");
-			return { command: "start", ticketKey, repo, baseBranch };
-		}
+		case "start":
+			return parseStart(rest);
 		case "status":
 			if (rest.length !== 1)
 				throw new UsageError("usage: payo status <run-id>");

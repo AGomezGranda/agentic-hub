@@ -11,7 +11,7 @@ it("parses serve with forwarded arguments", () => {
 it("parses start with repo and base overrides", () => {
 	expect(parseArgs(["start", "ABC-123"])).toEqual({
 		command: "start",
-		ticketKey: "ABC-123",
+		workItemRequest: { source: "jira", key: "ABC-123" },
 		repo: undefined,
 		baseBranch: undefined,
 	});
@@ -19,10 +19,67 @@ it("parses start with repo and base overrides", () => {
 		parseArgs(["start", "ABC-123", "--repo", "/repo", "--base", "develop"]),
 	).toEqual({
 		command: "start",
-		ticketKey: "ABC-123",
+		workItemRequest: { source: "jira", key: "ABC-123" },
 		repo: "/repo",
 		baseBranch: "develop",
 	});
+});
+
+it("parses variadic prompt text and source-conflicting options", () => {
+	expect(
+		parseArgs([
+			"start",
+			"--prompt",
+			"create",
+			"a",
+			"simple",
+			"FastAPI",
+			"todo",
+			"app",
+			"with",
+			"strict",
+			"typing",
+		]),
+	).toEqual({
+		command: "start",
+		workItemRequest: {
+			source: "prompt",
+			text: "create a simple FastAPI todo app with strict typing",
+		},
+		repo: undefined,
+		baseBranch: undefined,
+	});
+	expect(
+		parseArgs([
+			"start",
+			"--repo",
+			"/repo",
+			"--prompt",
+			"Build",
+			"it",
+			"--base",
+			"main",
+		]),
+	).toMatchObject({
+		workItemRequest: { source: "prompt", text: "Build it" },
+		repo: "/repo",
+		baseBranch: "main",
+	});
+	expect(parseArgs(["start", "--prompt", "--", "--repo"])).toMatchObject({
+		workItemRequest: { source: "prompt", text: "--repo" },
+	});
+	expect(parseArgs(["start", "--prompt", 'Build "the" app'])).toMatchObject({
+		workItemRequest: { source: "prompt", text: 'Build "the" app' },
+	});
+	for (const args of [
+		["start", "--prompt"],
+		["start", "--prompt", "  "],
+		["start", "ABC-123", "--prompt", "Build"],
+		["start", "--prompt", "Build", "--prompt", "again"],
+		["start", "--prompt", "Build", "--unknown"],
+		["start", "--", "ABC-123"],
+	])
+		expect(() => parseArgs(args)).toThrow(UsageError);
 });
 
 it("requires run IDs and flag values", () => {

@@ -14,7 +14,7 @@ import type { ServerConfig } from "./config.ts";
 import {
 	createFakeRunner,
 	envelope,
-	fakeTickets,
+	fakeWorkItems,
 	fakeWorkspace,
 } from "./factory-fixtures.ts";
 
@@ -75,8 +75,12 @@ function injected(
 ): AdapterSet {
 	return {
 		runner,
-		tickets: fakeTickets([
-			{ key: "T", title: "Ticket", description: "", url: null },
+		workItems: fakeWorkItems([
+			{
+				origin: { source: "jira", key: "T", url: null },
+				title: "Ticket",
+				description: "",
+			},
 		]),
 		workspace: fakeWorkspace("/workspaces"),
 		roleSources,
@@ -95,8 +99,12 @@ async function seed(
 			store,
 			runner: createFakeRunner([], "fake"),
 			limiter: createLimiter(1),
-			tickets: fakeTickets([
-				{ key: "T", title: "Ticket", description: "", url: null },
+			workItems: fakeWorkItems([
+				{
+					origin: { source: "jira", key: "T", url: null },
+					title: "Ticket",
+					description: "",
+				},
 			]),
 			workspace: fakeWorkspace("/workspace"),
 			dataDir,
@@ -104,7 +112,7 @@ async function seed(
 		},
 		{
 			runId,
-			ticketKey: "T",
+			workItemRequest: { source: "jira", key: "T" },
 			repo: "/repo",
 			baseBranch: "main",
 			roles,
@@ -135,7 +143,7 @@ it("caps new runs by active run settings and ignores ended runs", async () => {
 	const composition = await createComposition({ config: config(), store });
 
 	const runId = await composition.start({
-		ticketKey: "T",
+		workItemRequest: { source: "jira", key: "T" },
 		repo: "/repo",
 		baseBranch: "main",
 	});
@@ -155,7 +163,7 @@ it("uses the configured value when every run has ended", async () => {
 		store,
 	});
 	const runId = await composition.start({
-		ticketKey: "T",
+		workItemRequest: { source: "jira", key: "T" },
 		repo: "/repo",
 		baseBranch: "main",
 	});
@@ -219,9 +227,23 @@ it("uses an injected adapter set in real mode", async () => {
 		adapters: injected(() => createFakeRunner(cleanScript())),
 	});
 	const runId = await composition.start({
-		ticketKey: "T",
+		workItemRequest: { source: "jira", key: "T" },
 		repo: "/repo",
 		baseBranch: "main",
+	});
+	const [created] = await store.read(runId);
+	expect(created).toMatchObject({
+		type: "run.created",
+		config: {
+			factory: {
+				roles: {
+					planner: { timeoutMs: 300_000 },
+					reviewer: { timeoutMs: 300_000 },
+					verifier: { timeoutMs: 300_000 },
+					reviser: { timeoutMs: 300_000 },
+				},
+			},
+		},
 	});
 	await composition.waitForIdle();
 	expect(await composition.summary(runId)).toMatchObject({
@@ -244,7 +266,7 @@ it("builds a fresh fake runner for every run", async () => {
 	});
 	for (let index = 0; index < 2; index++) {
 		await composition.start({
-			ticketKey: "T",
+			workItemRequest: { source: "jira", key: "T" },
 			repo: "/repo",
 			baseBranch: "main",
 		});

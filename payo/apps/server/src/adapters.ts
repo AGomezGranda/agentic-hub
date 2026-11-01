@@ -1,16 +1,21 @@
 import { join } from "node:path";
-import type { Ticket } from "@payo/contracts";
+import type { WorkItem, WorkItemRequest } from "@payo/contracts";
 import type { RoleSource } from "@payo/factory";
 import { createGitExec, createGitWorkspace } from "@payo/git";
 import { createAcliTicketSource } from "@payo/jira-acli";
-import type { AgentRunner, TicketSource, Workspace } from "@payo/kernel";
+import type {
+	AgentRunner,
+	RunStore,
+	WorkItemSource,
+	Workspace,
+} from "@payo/kernel";
 import type { FakeStep } from "@payo/runner-fake";
 import { createPiRunner } from "@payo/runner-pi";
 import type { ServerConfig } from "./config.ts";
 import {
 	createFakeRunner,
 	envelope,
-	fakeTickets,
+	fakeWorkItems,
 	fakeWorkspace,
 } from "./factory-fixtures.ts";
 import { loadRoleSources } from "./role-sources.ts";
@@ -20,7 +25,7 @@ const SCENARIOS = new Set<Scenario>(["clean", "hang-planner", "clean-twice"]);
 
 export interface AdapterSet {
 	runner: () => AgentRunner;
-	tickets: TicketSource;
+	workItems: WorkItemSource;
 	workspace: Workspace;
 	roleSources: Record<
 		"planner" | "reviewer" | "verifier" | "reviser",
@@ -28,11 +33,10 @@ export interface AdapterSet {
 	>;
 }
 
-const ticket: Ticket = {
-	key: "ABC-123",
+const workItem: WorkItem = {
+	origin: { source: "jira", key: "ABC-123", url: null },
 	title: "Synthetic dev ticket",
 	description: "Fake ticket used by the dev server.",
-	url: null,
 };
 
 const plan = {
@@ -81,14 +85,33 @@ function scenarioOf(config: ServerConfig): Scenario {
 	return name;
 }
 
+type JiraWorkItemRequest = Extract<WorkItemRequest, { source: "jira" }>;
+
+export function createWorkItemSource(
+	jira: WorkItemSource<JiraWorkItemRequest>,
+): WorkItemSource {
+	return {
+		resolve(request: WorkItemRequest) {
+			if (request.source === "prompt")
+				return Promise.resolve({
+					origin: { source: "prompt" },
+					title: "Direct prompt",
+					description: request.text,
+				});
+			return jira.resolve(request);
+		},
+	};
+}
+
 export async function createAdapterSet(
 	config: ServerConfig,
+	store: Pick<RunStore, "readArtifact">,
 ): Promise<AdapterSet> {
 	if (config.devFakes) {
 		const scenario = scenarioOf(config);
 		return {
 			runner: () => createFakeRunner(scriptsFor(scenario)),
-			tickets: fakeTickets([ticket]),
+			workItems: createWorkItemSource(fakeWorkItems([workItem])),
 			workspace: fakeWorkspace(join(config.dataDir, "workspaces")),
 			roleSources: fakeRoleSources,
 		};
@@ -100,10 +123,13 @@ export async function createAdapterSet(
 		bin: config.piBin,
 		provider: config.piProvider,
 		sessionRoot: join(config.dataDir, "sessions"),
+		readArtifact: (sha256) => store.readArtifact(sha256),
 	});
 	return {
 		runner: () => pi,
-		tickets: createAcliTicketSource({ bin: config.acliBin }),
+		workItems: createWorkItemSource(
+			createAcliTicketSource({ bin: config.acliBin }),
+		),
 		workspace: createGitWorkspace({
 			root: join(config.dataDir, "worktrees"),
 			bin: config.gitBin,

@@ -23,14 +23,14 @@ payo/
     kernel/        runs, steps, attempts, event log, gates, artifacts, fan-out, ports
     contracts/     zod schemas: API, events, agent output contracts
   modules/
-    factory/       ticket → PRs: state machine, role specs, convergence rules
+    factory/       work item → PRs: state machine, role specs, convergence rules
     (later)        pr-review/, incident/, evaluation/
   adapters/
     runner-pi/  runner-fake/  (later runner-claude/, runner-codex/)
     jira-acli/  git/  gh/  store-sqlite/
   apps/
     server/        the only composition root; HTTP + SSE; `payo serve`
-    cli/           thin client: `payo start ABC-123`, `payo approve`, …
+    cli/           thin client: `payo start ABC-123`, `payo start --prompt …`, `payo approve`, …
     web/           React SPA, shared across modules
 ```
 
@@ -62,7 +62,7 @@ flowchart TB
     Roles["Role specs and output contracts"]
   end
   Engine --> Runner["AgentRunner: pi, fake, later claude/codex"]
-  Engine --> Tickets["TicketSource: acli"]
+  Engine --> WorkItems["WorkItemSource: Jira or prompt"]
   Engine --> WS["Workspace: git worktrees"]
   Engine --> Host["CodeHost: gh"]
   Engine --> Checks["Checks: test, lint, types"]
@@ -93,7 +93,15 @@ interface AgentSpec {
   outputSchema: string;         // contract id the final JSON envelope must satisfy
 }
 
-interface TicketSource { get(key: string): Promise<Ticket>; }
+type WorkItemRequest =
+  | { source: "jira"; key: string }
+  | { source: "prompt"; text: string };
+interface WorkItemSource { resolve(request: WorkItemRequest): Promise<WorkItem>; }
+interface WorkItem {
+  origin: { source: "jira"; key: string; url: string | null } | { source: "prompt" };
+  title: string;
+  description: string;
+}
 interface Workspace   { create(runId: string, repo: string, base: string): Promise<string>; remove(path: string): Promise<void>; }
 interface CodeHost    { openDraftPr(input: PrInput): Promise<PrRef>; findPr(branch: string): Promise<PrRef | null>; }
 interface Checks      { run(cwd: string): Promise<CheckResult[]>; }
@@ -124,14 +132,14 @@ Invalid output is retried once with the validation error, then escalated.
 
 | Record | Purpose |
 |---|---|
-| Run | One ticket: repo, base branch, effective configuration, current state |
+| Run | One work item: repo, base branch, effective configuration, current state |
 | Step | A named stage: `plan`, `plan-review` round N, `approval` gate, … |
 | Attempt | One execution of a step: runner, model, role spec and skill SHA, input artifact hashes, usage, outcome |
 | Event | Append-only, ordered per run. The source of truth |
-| Artifact | Immutable, content-hashed: ticket snapshot, plan versions, reviews, verified findings, diffs, raw harness logs |
+| Artifact | Immutable, content-hashed: work-item snapshot, prompt request, plan versions, reviews, verified findings, diffs, raw harness logs |
 | Gate | A pending human decision: kind, what it blocks, allowed commands |
 
-Data lives in `~/.payo/`: `payo.db` and `artifacts/`. Plans live there, not in the target repo; only lasting outputs such as docs and ADRs are committed. Worktrees live in `~/.payo/worktrees/<run>/`.
+Data lives in `~/.payo/`: `payo.db` and `artifacts/`. Prompt request text is stored as a `factory-work-item-request-v1` artifact under `PAYO_DATA_DIR`; `run.created.config` contains only its reference, not the original plaintext. Agents may echo the prompt in attempt events, which authenticated event consumers can read, so this is not a confidentiality boundary. Plans live there, not in the target repo; only lasting outputs such as docs and ADRs are committed. Worktrees live in `~/.payo/worktrees/<run>/`.
 
 Usage and cost stay `unknown` when a harness does not report them, never `0`.
 
@@ -146,8 +154,9 @@ Usage and cost stay `unknown` when a harness does not report them, never `0`.
 
 ```mermaid
 stateDiagram-v2
-  [*] --> FetchTicket
-  FetchTicket --> Plan
+  [*] --> ResolveWorkItem
+  ResolveWorkItem --> Plan
+  FetchTicket --> Plan: legacy checkpoint
   Plan --> PlanReview
   PlanReview --> Revise: P0/P1 findings and round < 3
   Revise --> PlanReview
@@ -165,6 +174,11 @@ stateDiagram-v2
 - **Approval:** you edit the plan file in your editor, then `approve`. Approval is rejected while any open question lacks an answer. Answers are written back into the plan. The diff between the agent's last plan version and the approved version is recorded as a quality metric.
 
 Later slices add implementation, checks and implementation review per PR, then draft PRs and the human PR review gate, then the web UI.
+
+Jira requests are resolved by the Jira adapter; prompt requests resolve in the
+server without invoking `acli`. A Jira login is required for Jira runs, not for
+prompt-only server startup. `payo doctor` continues to report Jira readiness.
+Linear is future work; there is no source registry or auto-detection.
 
 ## Not decided yet
 

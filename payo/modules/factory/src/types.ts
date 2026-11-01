@@ -1,11 +1,15 @@
-import type { ArtifactRef, FactoryCheckpoint } from "@payo/contracts";
+import type {
+	ArtifactRef,
+	FactoryCheckpoint,
+	WorkItemRequest,
+} from "@payo/contracts";
 import type {
 	AgentRunner,
 	Limiter,
 	RunLog,
 	RunState,
 	RunStore,
-	TicketSource,
+	WorkItemSource,
 	Workspace,
 } from "@payo/kernel";
 
@@ -24,7 +28,7 @@ export interface FactoryDeps {
 	store: RunStore;
 	runner: AgentRunner;
 	limiter: Limiter;
-	tickets: TicketSource;
+	workItems: WorkItemSource;
 	workspace: Workspace;
 	dataDir: string;
 	roleSources: Record<
@@ -34,7 +38,7 @@ export interface FactoryDeps {
 }
 export interface StartInput {
 	runId: string;
-	ticketKey: string;
+	workItemRequest: WorkItemRequest;
 	repo: string;
 	baseBranch: string;
 	roles: Record<

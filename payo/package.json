@@ -7,8 +7,10 @@
 		"node": ">=24"
 	},
 	"scripts": {
-		"check": "biome check . && tsc && vitest run",
+		"check": "biome check . && tsc -p tsconfig.json && tsc -p apps/web/tsconfig.json && vitest run",
 		"fix": "biome check --write .",
+		"web:build": "pnpm --dir apps/web build",
+		"web:dev": "pnpm --dir apps/web dev",
 		"payo": "node apps/cli/src/index.ts",
 		"smoke": "PAYO_LIVE=1 vitest run apps/server/src/live.test.ts"
 	},

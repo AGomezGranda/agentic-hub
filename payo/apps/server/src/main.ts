@@ -3,7 +3,7 @@ import type { AddressInfo } from "node:net";
 import { ensureServerToken } from "./auth.ts";
 import { type Composition, createComposition } from "./composition.ts";
 import { loadConfig, type ServerConfig } from "./config.ts";
-import { runDoctor } from "./doctor.ts";
+import { runDoctor, startupBlockingFailures } from "./doctor.ts";
 import { createHandler } from "./http.ts";
 
 async function main(): Promise<void> {
@@ -19,11 +19,10 @@ async function main(): Promise<void> {
 			fail(new Error("PAYO_MODEL is required in real mode"));
 			return;
 		}
-		const report = await runDoctor(config);
-		if (!report.ok) {
-			for (const check of report.checks)
-				if (!check.ok)
-					console.error(`payo doctor: FAIL ${check.name}: ${check.detail}`);
+		const failures = startupBlockingFailures(await runDoctor(config));
+		if (failures.length > 0) {
+			for (const check of failures)
+				console.error(`payo doctor: FAIL ${check.name}: ${check.detail}`);
 			process.exitCode = 1;
 			return;
 		}

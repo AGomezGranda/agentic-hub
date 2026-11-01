@@ -1,7 +1,11 @@
 import type { DoctorCheck } from "@payo/contracts";
 import { expect, it } from "vitest";
 import type { ServerConfig } from "./config.ts";
-import { type DoctorProbes, runDoctor } from "./doctor.ts";
+import {
+	type DoctorProbes,
+	runDoctor,
+	startupBlockingFailures,
+} from "./doctor.ts";
 
 function config(overrides: Partial<ServerConfig> = {}): ServerConfig {
 	return {
@@ -69,6 +73,46 @@ it("is not ok when a single check fails", async () => {
 		ok: false,
 		detail: "not logged in",
 	});
+});
+
+it("ignores only failed acli checks for startup readiness", async () => {
+	const jiraUnavailable = await runDoctor(config(), {
+		...probes(),
+		acli: async () => ({ name: "acli", ok: false, detail: "missing" }),
+	});
+	expect(jiraUnavailable.ok).toBe(false);
+	expect(startupBlockingFailures(jiraUnavailable)).toEqual([]);
+
+	for (const name of ["pi", "git", "skills"]) {
+		const report = await runDoctor(config(), {
+			...probes(),
+			[name === "skills" ? "roleSources" : name]: async () => ({
+				name,
+				ok: false,
+				detail: "unavailable",
+			}),
+		});
+		expect(startupBlockingFailures(report)).toEqual([
+			{ name, ok: false, detail: "unavailable" },
+		]);
+	}
+
+	const everyFailure = await runDoctor(config(), {
+		pi: async () => ({ name: "pi", ok: false, detail: "pi" }),
+		acli: async () => ({ name: "acli", ok: false, detail: "acli" }),
+		git: async () => ({ name: "git", ok: false, detail: "git" }),
+		roleSources: async () => ({ name: "skills", ok: false, detail: "skills" }),
+	});
+	expect(
+		startupBlockingFailures(everyFailure).map((check) => check.name),
+	).toEqual(["pi", "git", "skills"]);
+	const reported = await runDoctor(config(), probes());
+	expect(reported.checks.map((check) => check.name)).toEqual([
+		"pi",
+		"acli",
+		"git",
+		"skills",
+	]);
 });
 
 it("turns a rejecting probe into a failed check", async () => {

@@ -7,6 +7,7 @@ import {
 	EventsResponse,
 	RunId,
 	RunIdResponse,
+	RunReview,
 	RunSummary,
 	RunSummaryList,
 	StartRunRequest,
@@ -35,8 +36,11 @@ export function createHandler(
 	options: HandlerOptions,
 ): (req: IncomingMessage, res: ServerResponse) => void {
 	return (req, res) => {
-		void handle(req, res, options).catch((error) => {
-			respondFailure(res, error);
+		let validatedCors: Record<string, string> = {};
+		void handle(req, res, options, (headers) => {
+			validatedCors = headers;
+		}).catch((error) => {
+			respondFailure(res, error, validatedCors);
 		});
 	};
 }
@@ -45,6 +49,7 @@ async function handle(
 	req: IncomingMessage,
 	res: ServerResponse,
 	options: HandlerOptions,
+	setValidatedCors: (headers: Record<string, string>) => void,
 ): Promise<void> {
 	const port = options.getPort();
 	const origin = header(req, "origin");
@@ -54,6 +59,7 @@ async function handle(
 		throw new ApiFailure(403, "forbidden", "unexpected Host header");
 	if (!isOriginAllowed(origin, port, options.webOrigins))
 		throw new ApiFailure(403, "forbidden", "origin not allowed");
+	setValidatedCors(cors);
 
 	if (req.method === "OPTIONS") {
 		if (origin === undefined)
@@ -100,7 +106,7 @@ async function handle(
 			if (!isAbsolute(repo))
 				throw new ApiFailure(400, "invalid_request", "repo must be absolute");
 			const runId = await services.start({
-				ticketKey: input.data.ticketKey,
+				workItemRequest: input.data.workItemRequest,
 				repo,
 				baseBranch,
 			});
@@ -117,6 +123,13 @@ async function handle(
 
 	if (segments.length === 4 && req.method === "GET") {
 		json(res, 200, RunSummary.parse(await services.summary(runId)), cors);
+		return;
+	}
+
+	if (segments.length === 5 && segments[4] === "review") {
+		if (req.method !== "GET")
+			throw new ApiFailure(405, "method_not_allowed", "method not allowed");
+		json(res, 200, RunReview.parse(await services.review(runId)), cors);
 		return;
 	}
 
@@ -230,19 +243,23 @@ function json(
 	res.end(text);
 }
 
-function respondFailure(res: ServerResponse, error: unknown): void {
+function respondFailure(
+	res: ServerResponse,
+	error: unknown,
+	cors: Record<string, string>,
+): void {
 	if (res.headersSent) {
 		res.end();
 		return;
 	}
 	if (error instanceof ApiFailure || error instanceof CommandError) {
 		const body: ApiError = { code: error.code, message: error.message };
-		json(res, error.status, body, {});
+		json(res, error.status, body, cors);
 		return;
 	}
 	const message = error instanceof Error ? error.message : String(error);
 	console.error(`payo: request failed: ${message}`);
-	json(res, 500, { code: "internal", message: "internal server error" }, {});
+	json(res, 500, { code: "internal", message: "internal server error" }, cors);
 }
 
 async function stream(

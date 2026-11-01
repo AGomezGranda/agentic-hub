@@ -17,7 +17,7 @@ import { expect, it } from "vitest";
 import {
 	createFakeRunner,
 	envelope,
-	fakeTickets,
+	fakeWorkItems,
 	fakeWorkspace,
 } from "./factory-fixtures.ts";
 
@@ -205,8 +205,12 @@ async function setup(scripts: FakeStep[][]) {
 		store: createMemoryRunStore(),
 		runner,
 		limiter: createLimiter(1),
-		tickets: fakeTickets([
-			{ key: "T", title: "Ticket", description: "", url: null },
+		workItems: fakeWorkItems([
+			{
+				origin: { source: "jira", key: "T", url: null },
+				title: "Ticket",
+				description: "",
+			},
 		]),
 		workspace: fakeWorkspace("/workspace"),
 		dataDir: await mkdtemp(join(tmpdir(), "factory-")),
@@ -214,7 +218,7 @@ async function setup(scripts: FakeStep[][]) {
 	};
 	const input = {
 		runId: "run",
-		ticketKey: "T",
+		workItemRequest: { source: "jira" as const, key: "T" },
 		repo: "repo",
 		baseBranch: "main",
 		roles,
@@ -223,11 +227,53 @@ async function setup(scripts: FakeStep[][]) {
 	};
 	return { deps, input, runner };
 }
-it("begins at FetchTicket without runner calls and executes the same handle to approval", async () => {
+it("resolves the Jira request and checkpoints the work item before planner input", async () => {
+	const { deps, input, runner } = await setup([envelope(plan), ...clean()]);
+	const requests: unknown[] = [];
+	const resolve = deps.workItems.resolve;
+	deps.workItems.resolve = async (request) => {
+		requests.push(request);
+		return resolve(request);
+	};
+	const handle = await start(deps, input);
+
+	expect(requests).toEqual([{ source: "jira", key: "T" }]);
+	expect(handle.checkpoint.workItem).toEqual({
+		origin: { source: "jira", key: "T", url: null },
+		title: "Ticket",
+		description: "",
+	});
+	const planner = runner.calls[0];
+	expect(planner?.inputs.map((item) => item.name)).toContain("work-item");
+	const workItemInput = planner?.inputs.find(
+		(item) => item.name === "work-item",
+	);
+	if (!workItemInput) throw new Error("missing work-item planner input");
+	expect(
+		JSON.parse(
+			new TextDecoder().decode(
+				await deps.store.readArtifact(workItemInput.ref.sha256),
+			),
+		),
+	).toEqual(handle.checkpoint.workItem);
+	const events = await deps.store.read(input.runId);
+	const itemEvent = events.findIndex(
+		(event) =>
+			event.type === "artifact.recorded" &&
+			event.artifact.kind === "factory-work-item-v1",
+	);
+	const plannerEvent = events.findIndex(
+		(event) => event.type === "attempt.started" && event.role === "planner",
+	);
+	expect(itemEvent).toBeGreaterThanOrEqual(0);
+	expect(itemEvent).toBeLessThan(plannerEvent);
+});
+
+it("begins at ResolveWorkItem without runner calls and executes the same handle to approval", async () => {
 	const { deps, input, runner } = await setup([envelope(plan), ...clean()]);
 	const { signal, ...startInput } = input;
 	const handle = await beginFactory(deps, startInput);
-	expect(handle.checkpoint.stage).toBe("FetchTicket");
+	expect(handle.checkpoint.stage).toBe("ResolveWorkItem");
 	expect(runner.calls).toHaveLength(0);
 	expect(await deps.store.listRunIds()).toEqual(["run"]);
 
@@ -631,9 +677,9 @@ it("gates a run that crashed after a transition before the next marker", async (
 	);
 });
 
-it("escalates a ticket fetch failure and resumes the same stage", async () => {
+it("escalates a work-item resolution failure and resumes the same stage", async () => {
 	const { deps, input } = await setup([envelope(plan), ...clean()]);
-	deps.tickets.get = async () => {
+	deps.workItems.resolve = async () => {
 		throw new Error("ticket unavailable");
 	};
 	const handle = await start(deps, input);
@@ -645,8 +691,12 @@ it("escalates a ticket fetch failure and resumes the same stage", async () => {
 		kind: "factory-escalation",
 		reason: "run run: ticket unavailable",
 	});
-	deps.tickets = fakeTickets([
-		{ key: "T", title: "Ticket", description: "", url: null },
+	deps.workItems = fakeWorkItems([
+		{
+			origin: { source: "jira", key: "T", url: null },
+			title: "Ticket",
+			description: "",
+		},
 	]);
 	await resume(handle, { signal: input.signal });
 	expect(handle.checkpoint.stage).toBe("Approval");

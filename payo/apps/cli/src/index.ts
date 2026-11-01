@@ -51,7 +51,7 @@ export async function runCli(
 		switch (command.command) {
 			case "start": {
 				const runId = await client.start({
-					ticketKey: command.ticketKey,
+					workItemRequest: command.workItemRequest,
 					repo: command.repo,
 					baseBranch: command.baseBranch,
 				});

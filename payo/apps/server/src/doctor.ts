@@ -5,6 +5,10 @@ import { checkPi } from "@payo/runner-pi";
 import type { ServerConfig } from "./config.ts";
 import { checkRoleSources } from "./role-sources.ts";
 
+export function startupBlockingFailures(report: DoctorReport): DoctorCheck[] {
+	return report.checks.filter((check) => !check.ok && check.name !== "acli");
+}
+
 export interface DoctorProbes {
 	pi: typeof checkPi;
 	acli: typeof checkAcli;

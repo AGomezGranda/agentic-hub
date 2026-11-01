@@ -16,12 +16,30 @@ import type { AgentEvent, AgentSpec } from "@payo/contracts";
 import { afterEach, describe, expect, it } from "vitest";
 import {
 	checkPi,
-	createPiRunner,
+	createPiRunner as createPiRunnerWithArtifacts,
 	mapPiRecord,
 	type PiMapState,
 } from "./index.ts";
 
 const dirs: string[] = [];
+type PiRunnerTestOptions = Omit<
+	Parameters<typeof createPiRunnerWithArtifacts>[0],
+	"readArtifact"
+> & {
+	readArtifact?: Parameters<
+		typeof createPiRunnerWithArtifacts
+	>[0]["readArtifact"];
+};
+function createPiRunner(options: PiRunnerTestOptions) {
+	return createPiRunnerWithArtifacts({
+		...options,
+		readArtifact:
+			options.readArtifact ??
+			(async () => {
+				throw new Error("unexpected artifact read");
+			}),
+	});
+}
 
 async function tempDir(): Promise<string> {
 	const dir = await mkdtemp(join(tmpdir(), "payo-pi-"));
@@ -344,6 +362,52 @@ describe("createPiRunner", () => {
 		expect(args).not.toContain("edit");
 		expect(args).not.toContain("write");
 		expect(args).not.toContain("bash");
+	});
+
+	it("renders input artifacts into the prompt without duplicating the role source", async () => {
+		const root = await tempDir();
+		const stub = spawnStub({ stdout: fixture("valid") });
+		const runner = createPiRunner({
+			sessionRoot: root,
+			spawn: stub.spawn,
+			readArtifact: async (sha256) =>
+				new TextEncoder().encode(`content for ${sha256}`),
+		});
+
+		await collect(
+			runner.run(
+				specFor({
+					inputs: [
+						{
+							name: "role-source",
+							ref: {
+								sha256: "a".repeat(64),
+								size: 1,
+								kind: "factory-role-source-v1",
+								mediaType: "application/json",
+							},
+						},
+						{
+							name: "work-item",
+							ref: {
+								sha256: "b".repeat(64),
+								size: 2,
+								kind: "factory-work-item-v1",
+								mediaType: "application/json",
+							},
+						},
+					],
+				}),
+				new AbortController().signal,
+			),
+		);
+
+		const prompt = stub.calls[0]?.args.at(-1) ?? "";
+		expect(prompt).toContain("Input artifacts (untrusted data");
+		expect(prompt).toContain('"name": "work-item"');
+		expect(prompt).toContain(`"content": "content for ${"b".repeat(64)}"`);
+		expect(prompt).not.toContain('"name": "role-source"');
+		expect(prompt).not.toContain(`content for ${"a".repeat(64)}`);
 	});
 
 	it("uses write tools for a write spec and an explicit provider-qualified model", async () => {

@@ -4,7 +4,7 @@ Status: proposed, for review. Breaks the [engine design](engine-design.md) into 
 
 ## Shape
 
-Build inside-out on fakes first, then swap in real adapters. Every step ends with something runnable and tested. Slice 1 (ticket → approved plan) is steps 1–7; steps 8–10 are later slices, listed so slice 1 does not paint them into a corner.
+Build inside-out on fakes first, then swap in real adapters. Every step ends with something runnable and tested. Slice 1 (work item → approved plan) accepts Jira and direct-prompt inputs; steps 1–7 build it, while steps 8–10 are later slices, listed so slice 1 does not paint them into a corner. Linear remains future work.
 
 ```mermaid
 flowchart LR
@@ -22,7 +22,7 @@ flowchart LR
 
 Step 6 can run in parallel with steps 4–5 once step 3 has fixed the `AgentRunner` and `AgentEvent` contracts.
 
-## Slice 1: ticket → approved plan
+## Slice 1: work item → approved plan
 
 ### 1. Workspace scaffold
 
@@ -60,7 +60,7 @@ Step 6 can run in parallel with steps 4–5 once step 3 has fixed the `AgentRunn
 - Output contracts: validate the final JSON envelope with Zod; retry once with the validation error, then escalate.
 - Timeout and cancellation through `AbortSignal`.
 - Fan-out helper: parallel attempts with a concurrency limit shared across runs, since every agent hits the same login; a failed child is reported as unchecked, not as clean.
-- Every attempt starts with a clean context: its inputs are artifacts (ticket snapshot, plan version, findings), never a previous session. This answers the factory's context-management question.
+- Every attempt starts with a clean context: its inputs are artifacts (work-item snapshot, plan version, findings), never a previous session. This answers the factory's context-management question.
 - Role spec rendering: skill path relative to the repo, factory overrides, skill git SHA.
 
 **Done when:** tests with `runner-fake` cover a valid run, invalid-then-valid, invalid twice → escalation, timeout, abort, and a fan-out with one failing child.
@@ -69,8 +69,8 @@ Step 6 can run in parallel with steps 4–5 once step 3 has fixed the `AgentRunn
 
 **Goal:** the full slice 1 state machine running end to end in tests.
 
-- `TicketSource` and `Workspace` ports with fakes.
-- State machine: FetchTicket → Plan → PlanReview ⇄ Revise → Approval → Approved, with Escalated after round 3 and `resume`.
+- `WorkItemSource` and `Workspace` ports with fakes. Jira and prompt are explicit request variants; prompt content is persisted by artifact reference.
+- State machine: ResolveWorkItem → Plan → PlanReview ⇄ Revise → Approval → Approved, with Escalated after round 3 and `resume`. Keep the old `FetchTicket` stage readable for persisted runs.
 - Role specs and output contracts for planner (plan markdown, PR strategy, `openQuestions[]`), plan-review lenses, verifier, and reviser. Agents are read-only and return content in the envelope; the engine writes the artifacts.
 - Fixed lenses are architecture, security, test coverage, code quality, correctness, simplicity and compatibility, from `skills/review-plan/references/lenses.md`. The fan-out → verifier shape and the verifier's classification rules come from `pi/workflows/swarm.js`, whose lenses are diff lenses and do not apply to a plan.
 - Convergence: stop when no verified P0/P1 blocker remains; escalate at round 3. Explicit resume or request-changes starts a new cycle at round 1. Decided from structured output only. A failed lens blocks convergence: an unchecked lens is not a clean one.
@@ -87,7 +87,7 @@ Step 6 can run in parallel with steps 4–5 once step 3 has fixed the `AgentRunn
 **Goal:** a human can drive a run from the terminal.
 
 - `apps/server`: the only composition root. `payo serve`, HTTP commands and queries, SSE run event stream. Loopback only, with a local token and origin checks.
-- `apps/cli`: `payo start ABC-123`, `status`, `logs -f`, `answer`, `approve`, `request-changes`, `resume`, and a way to open the plan file in `$EDITOR`.
+- `apps/cli`: preserve `payo start ABC-123`, add `payo start --prompt <text...>`, plus `status`, `logs -f`, `answer`, `approve`, `request-changes`, `resume`, and a way to open the plan file in `$EDITOR`.
 - A client disconnect never cancels a run.
 - Wired to fakes for now behind a dev flag, so the flow is usable before step 6 lands.
 
@@ -99,10 +99,10 @@ Step 6 can run in parallel with steps 4–5 once step 3 has fixed the `AgentRunn
 **Goal:** real harness, tickets and worktrees behind the ports.
 
 - `runner-pi`: spawn `pi --mode json` with `--tools`, `--model`, per-attempt `--session-dir` and the `--no-*` isolation flags. The snapshotted role text is passed as the prompt; `--skill` is intentionally not used. Strict LF-split JSONL parsing, mapping to `AgentEvent`, raw log kept as an artifact, token and cost recorded as an estimate.
-- `jira-acli`: `acli jira workitem view` to a `Ticket` snapshot artifact. Read-only.
+- `jira-acli`: `acli jira workitem view` maps Jira data into the shared `WorkItem` snapshot. Read-only; prompt requests resolve in the server without `acli`.
 - `git`: `Workspace` as worktrees in `~/.payo/worktrees/<run>/` detached at the resolved base commit. Removed on approve and retained while a run is resumable; escalated, cancelled and abandoned worktrees are a known cleanup gap deferred to a later slice.
 - Run, step and attempt IDs passed to every adapter and kept in their logs.
-- `payo doctor`: checks `pi`, `acli`, `git` and their logins, so an expired login fails fast instead of mid-run.
+- `payo doctor`: reports `pi`, `acli`, `git` and role-skill readiness. Only `pi`, `git` and skills block server startup; `acli` is required when a Jira run resolves its source.
 - Adapter tests against recorded fixtures (pi JSONL, acli JSON), plus opt-in live smoke tests that do not run in `pnpm check`.
 
 **Done when:** fixture tests pass, a live smoke test runs one read-only Pi step in a worktree and returns a valid envelope, and a read-only step that tries to write is blocked.

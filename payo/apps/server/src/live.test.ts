@@ -80,6 +80,9 @@ describe.runIf(process.env.PAYO_LIVE === "1")("live Pi smoke", () => {
 			bin: process.env.PAYO_PI_BIN?.trim() || "pi",
 			provider: process.env.PAYO_PI_PROVIDER?.trim() || "anthropic",
 			sessionRoot: join(dataDir, "sessions"),
+			readArtifact: async () => {
+				throw new Error("unexpected artifact read");
+			},
 		});
 		try {
 			const read = await attempt(

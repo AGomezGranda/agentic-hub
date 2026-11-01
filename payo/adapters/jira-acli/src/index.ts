@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
-import type { DoctorCheck, Ticket } from "@payo/contracts";
-import { Ticket as TicketSchema } from "@payo/contracts";
-import type { TicketSource } from "@payo/kernel";
+import type { DoctorCheck, WorkItem, WorkItemRequest } from "@payo/contracts";
+import { WorkItem as WorkItemSchema } from "@payo/contracts";
+import type { WorkItemSource } from "@payo/kernel";
 
 export type AcliExec = (
 	args: string[],
@@ -20,13 +20,13 @@ const JIRA_KEY = /^[A-Z][A-Z0-9_]*-\d+$/;
 
 export function createAcliTicketSource(
 	options: AcliTicketSourceOptions,
-): TicketSource {
+): WorkItemSource<Extract<WorkItemRequest, { source: "jira" }>> {
 	const bin = options.bin ?? "acli";
 	const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 	const exec = options.exec ?? createAcliExec(bin);
 
 	return {
-		async get(key) {
+		async resolve({ key }) {
 			if (!JIRA_KEY.test(key)) throw new Error(`invalid Jira key: ${key}`);
 			const result = await exec(["jira", "workitem", "view", key, "--json"], {
 				timeoutMs,
@@ -47,7 +47,7 @@ export function createAcliTicketSource(
 	};
 }
 
-export function parseAcliTicket(raw: unknown): Ticket {
+export function parseAcliTicket(raw: unknown): WorkItem {
 	const value = asRecord(raw);
 	if (value === null) throw new Error("acli ticket is not an object");
 	const fields = asRecord(value.fields);
@@ -65,11 +65,14 @@ export function parseAcliTicket(raw: unknown): Ticket {
 			: description == null
 				? ""
 				: adfToText(description);
-	return TicketSchema.parse({
-		key,
+	return WorkItemSchema.parse({
+		origin: {
+			source: "jira",
+			key,
+			url: ticketUrl(asString(value.self), key),
+		},
 		title: summary,
 		description: text,
-		url: ticketUrl(asString(value.self), key),
 	});
 }
 

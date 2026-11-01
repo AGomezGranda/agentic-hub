@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document describes my vision for an agentic software factory: an end-to-end flow that takes a Jira ticket as input and produces one or more pull requests as output.
+This document describes my vision for an agentic software factory: an end-to-end flow that takes a work item as input and produces one or more pull requests as output. The current Payo slice accepts either a Jira ticket or a direct prompt; Jira and prompt are explicit source variants, not auto-detected. Linear is future work.
 
 **Out of scope for now:**
 
@@ -15,9 +15,9 @@ This document describes my vision for an agentic software factory: an end-to-end
 - Maximise the quality of the solution, with a strong emphasis on technical excellence.
 - Minimise cost.
 
-## Ticket completion flow (v1)
+## Work-item completion flow (v1)
 
-The Jira ticket is the unit of work. The factory takes a ticket as input and produces one or more PRs as output.
+The work item is the unit of work. The factory accepts either a source-resolved Jira ticket or an exact direct prompt and produces one or more PRs as output.
 
 The existing agentic-hub skills define how agents behave at each step: `create-plan`, `review-plan`, `implement-plan` and `review-implementation` (which runs the audit swarm). The factory orchestrates them; it does not redefine them.
 

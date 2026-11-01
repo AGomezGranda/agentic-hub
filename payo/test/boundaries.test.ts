@@ -23,6 +23,7 @@ const MODULES = "Modules import only @payo/kernel and @payo/contracts.";
 const ADAPTERS =
 	"Adapters import only @payo/kernel and @payo/contracts; only apps/server wires adapters.";
 const CLI = "cli is a thin HTTP client: it imports only @payo/contracts.";
+const WEB = "web imports only @payo/contracts.";
 const CONTRACTS = "contracts imports no other @payo package.";
 
 type BoundaryCase = readonly [
@@ -84,6 +85,9 @@ const cases: BoundaryCase[] = [
 	["apps/cli/src/a.ts", `import "@payo/kernel";`, CLI],
 	["apps/cli/src/a.ts", `import "@payo/contracts";`, undefined],
 	["apps/cli/src/a.ts", `import "@payo/kernel/testing";`, CLI],
+	["apps/web/src/a.ts", `import "@payo/contracts";`, undefined],
+	["apps/web/src/a.ts", `import "@payo/factory";`, WEB],
+	["apps/web/src/a.ts", `import "../../server/src/main.ts";`, RELATIVE_ESCAPE],
 	[
 		"apps/server/src/a.ts",
 		`import "@payo/git"; import "@payo/factory";`,

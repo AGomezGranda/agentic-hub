@@ -4,11 +4,18 @@ import type { AddressInfo } from "node:net";
 import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { RunSummary } from "@payo/contracts";
+import type { RunSummary, WorkItem, WorkItemRequest } from "@payo/contracts";
+import type { FakeStep } from "@payo/runner-fake";
 import { afterEach, expect, it } from "vitest";
+import type { AdapterSet } from "./adapters.ts";
 import { ensureServerToken } from "./auth.ts";
 import { type Composition, createComposition } from "./composition.ts";
 import { loadConfig, type ServerConfig } from "./config.ts";
+import {
+	createFakeRunner,
+	envelope,
+	fakeWorkspace,
+} from "./factory-fixtures.ts";
 import { createHandler } from "./http.ts";
 
 interface Harness {
@@ -21,7 +28,10 @@ interface Harness {
 
 const harnesses: Harness[] = [];
 
-async function setup(env: NodeJS.ProcessEnv = {}): Promise<Harness> {
+async function setup(
+	env: NodeJS.ProcessEnv = {},
+	adapters?: AdapterSet,
+): Promise<Harness> {
 	const dataDir = await mkdtemp(join(tmpdir(), "payo-http-"));
 	const config: ServerConfig = loadConfig(
 		{
@@ -37,6 +47,7 @@ async function setup(env: NodeJS.ProcessEnv = {}): Promise<Harness> {
 	const token = await ensureServerToken(dataDir);
 	const composition = await createComposition({
 		config,
+		...(adapters ? { adapters } : {}),
 		doctor: async () => ({
 			ok: true,
 			checks: [{ name: "pi", ok: true, detail: "ready" }],
@@ -105,7 +116,7 @@ function raw(
 		headers?: Record<string, string>;
 		body?: string;
 	},
-): Promise<{ status: number; body: string }> {
+): Promise<{ status: number; headers: string; body: string }> {
 	return new Promise((resolve, reject) => {
 		const socket = connect(harness.port, "127.0.0.1");
 		let data = "";
@@ -129,7 +140,7 @@ function raw(
 		socket.on("end", () => {
 			const [head, ...rest] = data.split("\r\n\r\n");
 			const status = Number(head?.split(" ")[1]);
-			resolve({ status, body: rest.join("\r\n\r\n") });
+			resolve({ status, headers: head ?? "", body: rest.join("\r\n\r\n") });
 		});
 		socket.on("error", reject);
 	});
@@ -254,6 +265,56 @@ it("rejects unauthorized, hostile Host and hostile Origin requests", async () =>
 	).toBe(403);
 });
 
+it("preserves CORS for allowed-origin failures, but not rejected host or origin", async () => {
+	const origin = "http://127.0.0.1:5173";
+	const harness = await setup({ PAYO_WEB_ORIGINS: origin });
+	const unauthorized = await api(harness, "/api/v1/runs", {
+		token: null,
+		headers: { Origin: origin },
+	});
+	expect(unauthorized.status).toBe(401);
+	expect(unauthorized.headers.get("access-control-allow-origin")).toBe(origin);
+
+	const invalid = await api(harness, "/api/v1/runs", {
+		method: "POST",
+		body: {},
+		headers: { Origin: origin },
+	});
+	expect(invalid.status).toBe(400);
+	expect(invalid.headers.get("access-control-allow-origin")).toBe(origin);
+
+	const runId = await startRun(harness);
+	await waitFor(
+		async () => (await summary(harness, runId)).stage === "Approval",
+	);
+	const conflict = await api(harness, `/api/v1/runs/${runId}/resume`, {
+		method: "POST",
+		headers: { Origin: origin },
+	});
+	expect(conflict.status).toBe(409);
+	expect(conflict.headers.get("access-control-allow-origin")).toBe(origin);
+
+	const hostileOrigin = await api(harness, "/api/v1/runs", {
+		headers: { Origin: "http://evil.example" },
+	});
+	expect(hostileOrigin.status).toBe(403);
+	expect(hostileOrigin.headers.get("access-control-allow-origin")).toBeNull();
+
+	const hostileHost = await raw(harness, {
+		method: "GET",
+		path: "/api/v1/runs",
+		headers: {
+			Host: "evil.example",
+			Origin: origin,
+			Authorization: `Bearer ${harness.token}`,
+		},
+	});
+	expect(hostileHost.status).toBe(403);
+	expect(hostileHost.headers.toLowerCase()).not.toContain(
+		"access-control-allow-origin",
+	);
+});
+
 it("allows an exact-origin preflight without a token, then requires the token", async () => {
 	const harness = await setup({
 		PAYO_WEB_ORIGINS: "http://localhost:5173",
@@ -322,6 +383,147 @@ it("validates bodies, run IDs and unknown runs", async () => {
 	).toBe(405);
 });
 
+it("reports a null work item until the factory resolves it", async () => {
+	let resolveWorkItem!: (item: WorkItem) => void;
+	const pendingWorkItem = new Promise<WorkItem>((resolve) => {
+		resolveWorkItem = resolve;
+	});
+	const roleSource = {
+		path: "synthetic/role.md",
+		sha: "synthetic-sha",
+		content: "synthetic role",
+		resources: {},
+	};
+	const adapters: AdapterSet = {
+		runner: () => createFakeRunner([]),
+		workItems: { resolve: () => pendingWorkItem },
+		workspace: fakeWorkspace("/workspace"),
+		roleSources: {
+			planner: roleSource,
+			reviewer: roleSource,
+			verifier: roleSource,
+			reviser: roleSource,
+		},
+	};
+	const harness = await setup({}, adapters);
+	const runId = await startRun(harness);
+	expect((await summary(harness, runId)).workItem).toBeNull();
+
+	resolveWorkItem({
+		origin: { source: "jira", key: "ABC-123", url: null },
+		title: "Resolved work item",
+		description: "Private work-item details.",
+	});
+	await waitFor(
+		async () =>
+			(await summary(harness, runId)).workItem?.title === "Resolved work item",
+	);
+	expect(JSON.stringify(await summary(harness, runId))).not.toContain(
+		"Private work-item details.",
+	);
+});
+
+it("serves authenticated run review data and current answers", async () => {
+	const harness = await setup();
+	const runId = await startRun(harness);
+	await waitFor(
+		async () => (await summary(harness, runId)).stage === "Approval",
+	);
+
+	const unauthorized = await api(harness, `/api/v1/runs/${runId}/review`, {
+		token: null,
+	});
+	expect(unauthorized.status).toBe(401);
+	const before = await api(harness, `/api/v1/runs/${runId}/review`);
+	expect(before.status).toBe(200);
+	expect(before.body).toMatchObject({
+		plan: {
+			available: true,
+			markdown: "# Plan\n\nOne open question.\n",
+			questions: [{ id: "q1", question: "Why this approach?" }],
+		},
+		answers: {},
+		review: {
+			available: true,
+			findings: [],
+			uncheckedLenses: [],
+			verdicts: [],
+			provenance: "unknown",
+		},
+	});
+	expect(before.body.plan.editorPath).toBe(
+		join(harness.dataDir, "runs", runId, "plan.md"),
+	);
+
+	const answer = await api(harness, `/api/v1/runs/${runId}/answer`, {
+		method: "POST",
+		body: { questionId: "q1", text: "Because." },
+	});
+	expect(answer.status).toBe(200);
+	const after = await api(harness, `/api/v1/runs/${runId}/review`);
+	expect(after.body.answers).toEqual({ q1: "Because." });
+
+	const isolated = await api(
+		harness,
+		"/api/v1/runs/7f1f1b1e-2b4c-4f7a-9d3e-2f4a5b6c7d8e/review",
+	);
+	expect(isolated.status).toBe(404);
+	expect(
+		(
+			await api(harness, `/api/v1/runs/${runId}/review`, {
+				method: "POST",
+			})
+		).status,
+	).toBe(405);
+
+	await approveRun(harness, runId);
+	const conflict = await api(harness, `/api/v1/runs/${runId}/request-changes`, {
+		method: "POST",
+	});
+	expect(conflict.status).toBe(409);
+});
+
+it("reports plan data unavailable before a plan artifact exists", async () => {
+	const roleSource = {
+		path: "synthetic/role.md",
+		sha: "synthetic-sha",
+		content: "synthetic role",
+		resources: {},
+	};
+	const adapters: AdapterSet = {
+		runner: () => createFakeRunner([[{ kind: "hang" }]]),
+		workItems: {
+			async resolve() {
+				return {
+					origin: { source: "jira", key: "ABC-123", url: null },
+					title: "Ticket",
+					description: "",
+				};
+			},
+		},
+		workspace: fakeWorkspace("/workspace"),
+		roleSources: {
+			planner: roleSource,
+			reviewer: roleSource,
+			verifier: roleSource,
+			reviser: roleSource,
+		},
+	};
+	const harness = await setup({}, adapters);
+	const runId = await startRun(harness);
+	await waitFor(async () => (await summary(harness, runId)).stage === "Plan");
+	const response = await api(harness, `/api/v1/runs/${runId}/review`);
+	expect(response.status).toBe(200);
+	expect(response.body.plan).toEqual({
+		available: false,
+		reason: "not_available",
+	});
+	expect(response.body.review).toEqual({
+		available: false,
+		reason: "not_available",
+	});
+});
+
 it("starts promptly, lists and reports JSON summaries, and reaches approval", async () => {
 	const harness = await setup();
 	const runId = await startRun(harness);
@@ -337,11 +539,25 @@ it("starts promptly, lists and reports JSON summaries, and reaches approval", as
 		status: "active",
 		repo: harness.dataDir,
 		baseBranch: "main",
+		workItem: {
+			source: "jira",
+			title: "Synthetic dev ticket",
+			key: "ABC-123",
+		},
 	});
 
 	const initial = await summary(harness, runId);
 	expect(initial.stage).toBeDefined();
 	expect(initial.openGates).toEqual([]);
+	const created = (await harness.composition.store.read(runId)).find(
+		(event) => event.type === "run.created",
+	);
+	expect(created).toMatchObject({
+		type: "run.created",
+		config: {
+			factory: { workItemRequest: { source: "jira", key: "ABC-123" } },
+		},
+	});
 
 	await waitFor(
 		async () => (await summary(harness, runId)).stage === "Approval",
@@ -351,6 +567,80 @@ it("starts promptly, lists and reports JSON summaries, and reaches approval", as
 	expect(approval.openGates).toHaveLength(1);
 	expect(approval.openGates[0]).toMatchObject({ kind: "approval" });
 	expect(JSON.parse(JSON.stringify(approval))).toEqual(approval);
+});
+
+it("starts a prompt run, keeps raw text out of config, and exposes possible agent echoes", async () => {
+	const text = "Build exactly this prompt. Keep it verbatim.";
+	const scripts: FakeStep[][] = [
+		[
+			{ kind: "emit", event: { type: "message", text } },
+			...envelope({
+				markdown: "# Prompt plan\\n",
+				prStrategy: [{ id: "pr", title: "One", phases: [] }],
+				openQuestions: [],
+			}),
+		],
+		...Array.from({ length: 7 }, () => envelope({ findings: [] })),
+		envelope({ verdicts: [] }),
+	];
+	const roleSource = {
+		path: "synthetic/role.md",
+		sha: "synthetic-sha",
+		content: "synthetic role",
+		resources: {},
+	};
+	const adapters: AdapterSet = {
+		runner: () => createFakeRunner(scripts),
+		workItems: {
+			async resolve(request: WorkItemRequest) {
+				if (request.source !== "prompt") throw new Error("expected prompt");
+				return {
+					origin: { source: "prompt" },
+					title: "Direct prompt",
+					description: request.text,
+				};
+			},
+		},
+		workspace: fakeWorkspace("/workspace"),
+		roleSources: {
+			planner: roleSource,
+			reviewer: roleSource,
+			verifier: roleSource,
+			reviser: roleSource,
+		},
+	};
+	const harness = await setup({}, adapters);
+	const response = await api(harness, "/api/v1/runs", {
+		method: "POST",
+		body: { workItemRequest: { source: "prompt", text } },
+	});
+	expect(response.status).toBe(202);
+	const runId = response.body.runId as string;
+	await waitFor(
+		async () => (await summary(harness, runId)).stage === "Approval",
+	);
+	expect(await summary(harness, runId)).toMatchObject({
+		stage: "Approval",
+		openGates: [{ kind: "approval" }],
+		workItem: { source: "prompt", title: "Direct prompt", key: null },
+	});
+	expect(JSON.stringify(await summary(harness, runId))).not.toContain(text);
+	const events = await api(harness, `/api/v1/runs/${runId}/events`);
+	const created = events.body.events.find(
+		(event: { type: string }) => event.type === "run.created",
+	);
+	expect(JSON.stringify(created.config)).not.toContain(text);
+	expect(created.config.factory.workItemRequest).toMatchObject({
+		source: "prompt",
+		artifact: { kind: "factory-work-item-request-v1", mediaType: "text/plain" },
+	});
+	const echoed = events.body.events.find(
+		(event: { type: string; event?: { type: string; text?: string } }) =>
+			event.type === "attempt.event" &&
+			event.event?.type === "message" &&
+			event.event.text === text,
+	);
+	expect(echoed?.event).toMatchObject({ type: "message", text });
 });
 
 it("returns events from fromSeq and streams ordered IDs until run.ended", async () => {

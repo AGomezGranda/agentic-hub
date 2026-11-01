@@ -189,8 +189,8 @@ uv run pyrefly check
 
 ### Payo
 
-Payo turns a Jira ticket into an approved implementation plan. The current slice
-stops at approval; it does not write code or open a PR yet. The full walkthrough,
+Payo turns a Jira ticket or direct prompt into an approved implementation plan.
+The current slice stops at approval; it does not write code or open a PR yet. The full walkthrough,
 including gates, recovery, and fake-mode scenarios, is in
 [docs/payo/usage.md](docs/payo/usage.md).
 
@@ -204,9 +204,10 @@ pnpm install
 pnpm check
 ```
 
-Real ticket (`acli`), workspace (`git`) and runner (`pi`) adapters are the
-default. Real mode needs a Jira login for `acli`, a Pi login for the configured
-provider, and a repo containing `skills/` at the base branch.
+Real Jira (`acli`), workspace (`git`) and runner (`pi`) adapters are the
+default. Real mode needs a Pi login for the configured provider and a repo
+containing `skills/` at the base branch. A Jira login is needed only for Jira
+runs; prompt-only starts do not require `acli`.
 
 ```
 export PAYO_MODEL=<model>            # required in real mode
@@ -215,8 +216,9 @@ pnpm payo serve
 ```
 
 `PAYO_PI_BIN`, `PAYO_ACLI_BIN` and `PAYO_GIT_BIN` override the binaries
-(defaults `pi`, `acli`, `git`). Startup runs the same checks as `payo doctor`
-and exits non-zero before listening when one fails. If that happens, run
+(defaults `pi`, `acli`, `git`). Startup requires `pi`, `git` and role skills;
+a failed `acli` check is reported by `payo doctor` but does not prevent prompt-only
+server startup. If another startup requirement fails, run
 `pnpm payo serve --dev-fakes` in one terminal and `pnpm -C payo payo doctor` in
 another: the fake server still serves the real doctor report.
 
@@ -232,6 +234,9 @@ The server binds only to `127.0.0.1:7331`. In another terminal, run commands fro
 
 ```
 pnpm payo start ABC-123 [--repo /path/to/repo] [--base main]
+pnpm payo start --prompt "create a simple FastAPI todo app with strict typing"
+pnpm payo start --prompt create a simple FastAPI todo app with strict typing
+pnpm payo start --prompt -- --repo
 pnpm payo status <run-id>
 pnpm payo logs <run-id> [-f]
 pnpm payo edit <run-id>
@@ -243,12 +248,19 @@ pnpm payo doctor
 ```
 
 `payo doctor` reports `pi`, `acli`, `git` and `skills` as one line per check and
-exits non-zero when any check fails.
+exits non-zero when any check fails. Jira shorthand `payo start ABC-123` remains
+supported. `--prompt` joins trailing arguments with spaces; use `--` when a
+literal prompt token looks like an option, as in `payo start --prompt -- --repo`.
+The source-neutral request supports Jira and prompts; Linear is future work.
 
 The server defaults `PAYO_REPO` to the directory where `payo serve` started and
 `PAYO_BASE_BRANCH` to `main`; `--repo` and `--base` override them per run. Server
-and CLI share `PAYO_DATA_DIR` (default `~/.payo`) for the SQLite database, plans,
-and the per-install bearer token. Run `pnpm payo token` only when a client needs
+and CLI share `PAYO_DATA_DIR` (default `~/.payo`) for the SQLite database,
+artifacts (including the original prompt text), plans, and the per-install bearer
+token. Prompt contents are stored as an artifact and are not copied directly into
+`run.created.config`, which contains only its reference. Agent-generated event
+text may echo a prompt and is visible to authenticated event consumers; do not use
+prompts whose contents must be hidden from them. Run `pnpm payo token` only when a client needs
 the token, and never share it. A stopped or crashed server never resumes work on
 its own: restart it, inspect the gate, and run `pnpm payo resume <run-id>`.
 

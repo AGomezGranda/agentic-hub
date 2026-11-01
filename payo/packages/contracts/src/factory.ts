@@ -6,13 +6,41 @@ const unique = <T extends { id: string }>(items: T[]) =>
 const text = z
 	.string()
 	.refine((value) => value.trim().length > 0, "must not be blank");
-export const Ticket = z.object({
+export const LegacyTicket = z.object({
 	key: Id,
 	title: text,
 	description: z.string(),
 	url: z.string().nullable(),
 });
-export type Ticket = z.infer<typeof Ticket>;
+export type LegacyTicket = z.infer<typeof LegacyTicket>;
+export const Ticket = LegacyTicket;
+export type Ticket = LegacyTicket;
+
+export const WorkItemRequest = z.discriminatedUnion("source", [
+	z.object({ source: z.literal("jira"), key: text }),
+	z.object({ source: z.literal("prompt"), text }),
+]);
+export type WorkItemRequest = z.infer<typeof WorkItemRequest>;
+export const PersistedWorkItemRequest = z.discriminatedUnion("source", [
+	z.object({ source: z.literal("jira"), key: text }),
+	z.object({ source: z.literal("prompt"), artifact: ArtifactRef }),
+]);
+export type PersistedWorkItemRequest = z.infer<typeof PersistedWorkItemRequest>;
+export const WorkItemOrigin = z.discriminatedUnion("source", [
+	z.object({
+		source: z.literal("jira"),
+		key: text,
+		url: z.string().nullable(),
+	}),
+	z.object({ source: z.literal("prompt") }),
+]);
+export type WorkItemOrigin = z.infer<typeof WorkItemOrigin>;
+export const WorkItem = z.object({
+	origin: WorkItemOrigin,
+	title: text,
+	description: z.string(),
+});
+export type WorkItem = z.infer<typeof WorkItem>;
 export const OpenQuestion = z.object({ id: Id, question: text });
 export type OpenQuestion = z.infer<typeof OpenQuestion>;
 export const PlanOutput = z.object({
@@ -65,6 +93,7 @@ export const RevisionOutput = z.object({
 export type RevisionOutput = z.infer<typeof RevisionOutput>;
 export const FactoryStage = z.enum([
 	"FetchTicket",
+	"ResolveWorkItem",
 	"Plan",
 	"PlanReview",
 	"Revise",
@@ -73,12 +102,12 @@ export const FactoryStage = z.enum([
 	"Escalated",
 ]);
 export type FactoryStage = z.infer<typeof FactoryStage>;
-export const FactoryCheckpoint = z.object({
+const FactoryCheckpointSchema = z.object({
 	revision: z.int().nonnegative(),
 	stage: FactoryStage,
 	cycle: z.int().nonnegative(),
 	round: z.int().nonnegative(),
-	ticket: Ticket.nullable(),
+	workItem: WorkItem.nullable(),
 	workspace: z.string().nullable(),
 	plan: ArtifactRef.nullable(),
 	lastAgentPlan: ArtifactRef.nullable(),
@@ -89,7 +118,26 @@ export const FactoryCheckpoint = z.object({
 		.object({ stage: FactoryStage, stepIds: z.array(Id).min(1) })
 		.nullable(),
 });
-export type FactoryCheckpoint = z.infer<typeof FactoryCheckpoint>;
+export const FactoryCheckpoint = z.preprocess((input) => {
+	if (typeof input !== "object" || input === null || Array.isArray(input))
+		return input;
+	const value = input as Record<string, unknown>;
+	if (value.workItem !== undefined || value.ticket === undefined) return input;
+	const ticket = value.ticket;
+	if (ticket === null) return { ...value, workItem: null };
+	if (typeof ticket !== "object" || ticket === null || Array.isArray(ticket))
+		return input;
+	const legacy = ticket as Record<string, unknown>;
+	return {
+		...value,
+		workItem: {
+			origin: { source: "jira", key: legacy.key, url: legacy.url },
+			title: legacy.title,
+			description: legacy.description,
+		},
+	};
+}, FactoryCheckpointSchema);
+export type FactoryCheckpoint = z.infer<typeof FactoryCheckpointSchema>;
 export const PlanVersion = z.object({
 	number: z.int().positive(),
 	source: z.enum(["agent", "human", "answer"]),
@@ -107,8 +155,8 @@ const RoleSources = z.object({
 	path: text,
 	sha: text,
 });
-export const FactoryRunConfig = z.object({
-	ticketKey: Id,
+const FactoryRunConfigSchema = z.object({
+	workItemRequest: PersistedWorkItemRequest,
 	roles: z.object({
 		planner: RoleSettings,
 		reviewer: RoleSettings,
@@ -133,4 +181,18 @@ export const FactoryRunConfig = z.object({
 		reviser: RoleSources,
 	}),
 });
-export type FactoryRunConfig = z.infer<typeof FactoryRunConfig>;
+export const FactoryRunConfig = z.preprocess((input) => {
+	if (typeof input !== "object" || input === null || Array.isArray(input))
+		return input;
+	const value = input as Record<string, unknown>;
+	if (
+		value.workItemRequest !== undefined ||
+		typeof value.ticketKey !== "string"
+	)
+		return input;
+	return {
+		...value,
+		workItemRequest: { source: "jira", key: value.ticketKey },
+	};
+}, FactoryRunConfigSchema);
+export type FactoryRunConfig = z.infer<typeof FactoryRunConfigSchema>;

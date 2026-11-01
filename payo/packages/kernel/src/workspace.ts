@@ -1,7 +1,7 @@
-import type { Ticket } from "@payo/contracts";
+import type { WorkItem, WorkItemRequest } from "@payo/contracts";
 
-export interface TicketSource {
-	get(key: string): Promise<Ticket>;
+export interface WorkItemSource<T extends WorkItemRequest = WorkItemRequest> {
+	resolve(request: T): Promise<WorkItem>;
 }
 export interface Workspace {
 	create(runId: string, repo: string, base: string): Promise<string>;

@@ -9,7 +9,8 @@ import {
 	PlanVersion,
 	RevisionOutput,
 	type RunEventBody,
-	Ticket,
+	WorkItem,
+	WorkItemRequest,
 } from "@payo/contracts";
 import { commit, openRun, openRunLog, runAgentStep } from "@payo/kernel";
 import { readArtifact, savePlanVersion, storeCheckpoint } from "./artifacts.ts";
@@ -77,6 +78,16 @@ async function artifact(
 		{ kind, mediaType: "application/json" },
 	);
 }
+async function resolveRequest(
+	handle: MutableFactoryHandle,
+): Promise<WorkItemRequest> {
+	const request = configOf(handle).workItemRequest;
+	if (request.source === "jira") return request;
+	const text = new TextDecoder().decode(
+		await readArtifact(handle.deps.store, request.artifact),
+	);
+	return WorkItemRequest.parse({ source: "prompt", text });
+}
 async function version(handle: MutableFactoryHandle): Promise<PlanVersion> {
 	if (!handle.checkpoint.plan) throw new Error("missing plan");
 	return PlanVersion.parse(
@@ -142,27 +153,41 @@ async function run(handle: MutableFactoryHandle, signal: AbortSignal) {
 	const config = configOf(handle);
 	while (true) {
 		const stage = handle.checkpoint.stage;
-		if (stage === "FetchTicket") {
+		if (stage === "ResolveWorkItem" || stage === "FetchTicket") {
 			const stepId = id();
 			await marker(handle, stage, [stepId]);
 			await log.write([
-				{ type: "step.started", stepId, name: "fetch ticket and workspace" },
+				{
+					type: "step.started",
+					stepId,
+					name: "resolve work item and workspace",
+				},
 			]);
 			try {
 				if (signal.aborted) throw new Error("cancelled");
-				const ticket = Ticket.parse(await deps.tickets.get(config.ticketKey));
+				const workItem = WorkItem.parse(
+					await deps.workItems.resolve(await resolveRequest(handle)),
+				);
 				const workspace = await deps.workspace.create(
 					log.current().runId,
 					log.current().repo,
 					log.current().baseBranch,
 				);
 				if (signal.aborted) throw new Error("cancelled");
-				const ticketRef = await artifact(handle, ticket, "factory-ticket-v1");
+				const workItemRef = await artifact(
+					handle,
+					workItem,
+					"factory-work-item-v1",
+				);
 				await checkpoint(
 					handle,
-					{ stage: "Plan", ticket, workspace, inFlight: null },
+					{ stage: "Plan", workItem, workspace, inFlight: null },
 					[
-						{ type: "artifact.recorded", artifact: ticketRef, attemptId: null },
+						{
+							type: "artifact.recorded",
+							artifact: workItemRef,
+							attemptId: null,
+						},
 						{ type: "step.finished", stepId, outcome: "succeeded" },
 					],
 				);
@@ -180,12 +205,12 @@ async function run(handle: MutableFactoryHandle, signal: AbortSignal) {
 			const stepId = id();
 			await marker(handle, stage, [stepId]);
 			const role = stage === "Plan" ? "planner" : "reviser";
-			const ticket = await artifact(
+			const workItem = await artifact(
 				handle,
-				handle.checkpoint.ticket,
-				"factory-ticket-v1",
+				handle.checkpoint.workItem,
+				"factory-work-item-v1",
 			);
-			const inputs: AgentInput[] = [{ name: "ticket", ref: ticket }];
+			const inputs: AgentInput[] = [{ name: "work-item", ref: workItem }];
 			if (handle.checkpoint.plan)
 				inputs.push({ name: "plan", ref: handle.checkpoint.plan });
 			if (handle.checkpoint.review)
@@ -276,16 +301,16 @@ async function run(handle: MutableFactoryHandle, signal: AbortSignal) {
 		if (stage === "PlanReview") {
 			const ids = Array.from({ length: Object.keys(lenses).length + 1 }, id);
 			await marker(handle, stage, ids);
-			const ticket = await artifact(
+			const workItem = await artifact(
 				handle,
-				handle.checkpoint.ticket,
-				"factory-ticket-v1",
+				handle.checkpoint.workItem,
+				"factory-work-item-v1",
 			);
 			const result = await review(
 				handle,
 				ids,
 				[
-					{ name: "ticket", ref: ticket },
+					{ name: "work-item", ref: workItem },
 					{ name: "plan", ref: required(handle.checkpoint.plan, "plan") },
 				],
 				signal,
@@ -340,8 +365,23 @@ export async function beginFactory(
 	const roleArtifacts: Record<string, ArtifactRef> = {};
 	for (const [role, source] of Object.entries(deps.roleSources))
 		roleArtifacts[role] = await snapshotRole(deps.store, source);
+	const request = WorkItemRequest.parse(input.workItemRequest);
+	const promptArtifact =
+		request.source === "prompt"
+			? await deps.store.putArtifact(new TextEncoder().encode(request.text), {
+					kind: "factory-work-item-request-v1",
+					mediaType: "text/plain",
+				})
+			: null;
+	const workItemRequest =
+		request.source === "prompt"
+			? {
+					source: "prompt" as const,
+					artifact: required(promptArtifact, "prompt artifact"),
+				}
+			: request;
 	const config = FactoryRunConfig.parse({
-		ticketKey: input.ticketKey,
+		workItemRequest,
 		roles: input.roles,
 		maxConcurrentAgents: input.maxConcurrentAgents,
 		roleArtifacts,
@@ -355,10 +395,10 @@ export async function beginFactory(
 	});
 	const checkpoint: FactoryCheckpoint = {
 		revision: 0,
-		stage: "FetchTicket",
+		stage: "ResolveWorkItem",
 		cycle: 1,
 		round: 0,
-		ticket: null,
+		workItem: null,
 		workspace: null,
 		plan: null,
 		lastAgentPlan: null,
@@ -380,6 +420,15 @@ export async function beginFactory(
 			artifact,
 			attemptId: null,
 		})),
+		...(promptArtifact
+			? [
+					{
+						type: "artifact.recorded" as const,
+						artifact: promptArtifact,
+						attemptId: null,
+					},
+				]
+			: []),
 		await storeCheckpoint(deps.store, checkpoint),
 	]);
 	return createFactoryHandle({

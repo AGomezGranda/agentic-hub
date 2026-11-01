@@ -1,5 +1,10 @@
 import { z } from "zod";
-import { FactoryStage } from "./factory.ts";
+import {
+	Finding,
+	OpenQuestion,
+	VerifiedOutput,
+	WorkItemRequest,
+} from "./factory.ts";
 import { Id } from "./primitives.ts";
 import { GateRecord, RunEventSchema } from "./run.ts";
 
@@ -9,11 +14,35 @@ const nonBlank = z
 
 export const RunId = z.uuid();
 
-export const StartRunRequest = z.object({
-	ticketKey: nonBlank,
-	repo: nonBlank.optional(),
-	baseBranch: nonBlank.optional(),
-});
+export const StartRunRequest = z
+	.object({
+		workItemRequest: WorkItemRequest.optional(),
+		ticketKey: nonBlank.optional(),
+		repo: nonBlank.optional(),
+		baseBranch: nonBlank.optional(),
+	})
+	.superRefine((value, context) => {
+		if (value.workItemRequest && value.ticketKey) {
+			context.addIssue({
+				code: "custom",
+				path: ["workItemRequest"],
+				message: "provide only one work-item input",
+			});
+		} else if (!value.workItemRequest && !value.ticketKey) {
+			context.addIssue({
+				code: "custom",
+				path: ["workItemRequest"],
+				message: "work-item input required",
+			});
+		}
+	})
+	.transform(({ workItemRequest, ticketKey, ...overrides }) => ({
+		...overrides,
+		workItemRequest: workItemRequest ?? {
+			source: "jira" as const,
+			key: ticketKey as string,
+		},
+	}));
 export type StartRunRequest = z.infer<typeof StartRunRequest>;
 
 export const AnswerRequest = z.object({
@@ -53,12 +82,53 @@ export const RunSummary = z.object({
 	baseBranch: z.string().min(1),
 	status: z.enum(["active", "ended"]),
 	outcome: z.string().nullable(),
-	stage: FactoryStage.nullable(),
+	stage: nonBlank.nullable(),
+	workItem: z
+		.object({
+			source: z.enum(["jira", "prompt"]),
+			title: nonBlank,
+			key: nonBlank.nullable(),
+		})
+		.nullable(),
 	startedAt: z.string().min(1),
 	updatedAt: z.string().min(1),
 	openGates: z.array(OpenGateSummary),
 });
 export type RunSummary = z.infer<typeof RunSummary>;
+
+const UnavailableReason = z.enum([
+	"not_available",
+	"missing",
+	"unsafe",
+	"invalid",
+]);
+const Unavailable = z.object({
+	available: z.literal(false),
+	reason: UnavailableReason,
+});
+export const RunReview = z.object({
+	plan: z.discriminatedUnion("available", [
+		Unavailable,
+		z.object({
+			available: z.literal(true),
+			markdown: z.string(),
+			editorPath: nonBlank.nullable(),
+			questions: z.array(OpenQuestion),
+		}),
+	]),
+	answers: z.record(z.string(), z.string()),
+	review: z.discriminatedUnion("available", [
+		Unavailable,
+		z.object({
+			available: z.literal(true),
+			findings: z.array(Finding),
+			uncheckedLenses: z.array(nonBlank),
+			verdicts: VerifiedOutput.shape.verdicts.nullable(),
+			provenance: z.literal("unknown"),
+		}),
+	]),
+});
+export type RunReview = z.infer<typeof RunReview>;
 
 export const RunSummaryList = z.object({ runs: z.array(RunSummary) });
 export type RunSummaryList = z.infer<typeof RunSummaryList>;

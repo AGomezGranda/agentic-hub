@@ -1,13 +1,19 @@
-import type { Ticket } from "@payo/contracts";
-import type { TicketSource, Workspace } from "@payo/kernel";
+import type { WorkItem, WorkItemRequest } from "@payo/contracts";
+import type { WorkItemSource, Workspace } from "@payo/kernel";
 import { createFakeRunner, type FakeStep } from "@payo/runner-fake";
 
-export function fakeTickets(tickets: Ticket[]): TicketSource {
+export function fakeWorkItems(items: WorkItem[]): WorkItemSource {
 	return {
-		async get(key) {
-			const ticket = tickets.find((item) => item.key === key);
-			if (!ticket) throw new Error(`ticket ${key} not found`);
-			return structuredClone(ticket);
+		async resolve(request: WorkItemRequest) {
+			if (request.source !== "jira")
+				throw new Error(`unsupported fixture source ${request.source}`);
+			const item = items.find(
+				(candidate) =>
+					candidate.origin.source === "jira" &&
+					candidate.origin.key === request.key,
+			);
+			if (!item) throw new Error(`work item ${request.key} not found`);
+			return structuredClone(item);
 		},
 	};
 }

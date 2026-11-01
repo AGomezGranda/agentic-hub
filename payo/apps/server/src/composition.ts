@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
 import type {
 	DoctorReport,
-	FactoryStage,
 	RunEvent,
+	RunReview,
 	RunSummary,
+	WorkItemRequest,
 } from "@payo/contracts";
 import {
 	answer as answerRun,
@@ -15,6 +16,7 @@ import {
 	type FactoryDeps,
 	type FactoryHandle,
 	openFactory,
+	readRunReview,
 	requestChanges as requestChangesRun,
 	resume as resumeRun,
 } from "@payo/factory";
@@ -36,12 +38,13 @@ export interface Composition {
 	readonly config: ServerConfig;
 	readonly store: RunStore;
 	summary(runId: string): Promise<RunSummary>;
+	review(runId: string): Promise<RunReview>;
 	listRuns(): Promise<RunSummary[]>;
 	readEvents(runId: string, fromSeq?: number): Promise<RunEvent[]>;
 	hasRun(runId: string): boolean;
 	isActive(runId: string): boolean;
 	start(input: {
-		ticketKey: string;
+		workItemRequest: WorkItemRequest;
 		repo: string;
 		baseBranch: string;
 	}): Promise<string>;
@@ -86,22 +89,31 @@ export interface CompositionOptions {
 	doctor?: () => Promise<DoctorReport>;
 }
 
+const DEFAULT_ROLE_TIMEOUT_MS = 300_000;
+const EXTENDED_ROLE_TIMEOUT_MS = 300_000;
+
 export async function createComposition(
 	options: CompositionOptions,
 ): Promise<Composition> {
 	const { config } = options;
 	if (config.scenario !== null && !config.devFakes)
 		throw new Error("fake scenarios require --dev-fakes");
-	const adapters = options.adapters ?? (await createAdapterSet(config));
-	const doctor = options.doctor ?? (() => runDoctor(config));
-	const roles = {
-		planner: { model: config.model, timeoutMs: 120_000 },
-		reviewer: { model: config.model, timeoutMs: 120_000 },
-		verifier: { model: config.model, timeoutMs: 120_000 },
-		reviser: { model: config.model, timeoutMs: 120_000 },
-	};
 	const store =
 		options.store ?? (await createSqliteRunStore({ dataDir: config.dataDir }));
+	let adapters: AdapterSet;
+	try {
+		adapters = options.adapters ?? (await createAdapterSet(config, store));
+	} catch (error) {
+		await store.close().catch(() => {});
+		throw error;
+	}
+	const doctor = options.doctor ?? (() => runDoctor(config));
+	const roles = {
+		planner: { model: config.model, timeoutMs: DEFAULT_ROLE_TIMEOUT_MS },
+		reviewer: { model: config.model, timeoutMs: DEFAULT_ROLE_TIMEOUT_MS },
+		verifier: { model: config.model, timeoutMs: EXTENDED_ROLE_TIMEOUT_MS },
+		reviser: { model: config.model, timeoutMs: EXTENDED_ROLE_TIMEOUT_MS },
+	};
 	const handles = new Map<string, FactoryHandle>();
 	const tasks = new Set<Promise<unknown>>();
 	const controllers = new Set<AbortController>();
@@ -126,7 +138,7 @@ export async function createComposition(
 		store,
 		runner: adapters.runner(),
 		limiter,
-		tickets: adapters.tickets,
+		workItems: adapters.workItems,
 		workspace: adapters.workspace,
 		dataDir: config.dataDir,
 		roleSources: adapters.roleSources,
@@ -184,7 +196,17 @@ export async function createComposition(
 			baseBranch: state.baseBranch,
 			status: state.status,
 			outcome: state.outcome,
-			stage: handle.checkpoint.stage as FactoryStage,
+			stage: handle.checkpoint.stage,
+			workItem: handle.checkpoint.workItem
+				? {
+						source: handle.checkpoint.workItem.origin.source,
+						title: handle.checkpoint.workItem.title,
+						key:
+							handle.checkpoint.workItem.origin.source === "jira"
+								? handle.checkpoint.workItem.origin.key
+								: null,
+					}
+				: null,
 			startedAt: first,
 			updatedAt: last,
 			openGates: [...state.gates.values()]
@@ -211,6 +233,10 @@ export async function createComposition(
 
 		async summary(runId) {
 			return summaryOf(runId);
+		},
+
+		async review(runId) {
+			return readRunReview(handleOf(runId));
 		},
 
 		async listRuns() {
@@ -244,7 +270,7 @@ export async function createComposition(
 			const runId = randomUUID();
 			const handle = await beginFactory(depsForRun(), {
 				runId,
-				ticketKey: input.ticketKey,
+				workItemRequest: input.workItemRequest,
 				repo: input.repo,
 				baseBranch: input.baseBranch,
 				roles,

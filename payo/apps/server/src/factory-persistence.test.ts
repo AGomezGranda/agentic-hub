@@ -8,7 +8,7 @@ import { expect, it } from "vitest";
 import {
 	createFakeRunner,
 	envelope,
-	fakeTickets,
+	fakeWorkItems,
 	fakeWorkspace,
 } from "./factory-fixtures.ts";
 
@@ -39,7 +39,7 @@ async function setup(scripts = [envelope(plan), ...clean()]) {
 	const config = { model: null, timeoutMs: 1000 };
 	const input = {
 		runId: "run",
-		ticketKey: "T",
+		workItemRequest: { source: "jira" as const, key: "T" },
 		repo: "repo",
 		baseBranch: "main",
 		roles: {
@@ -55,8 +55,12 @@ async function setup(scripts = [envelope(plan), ...clean()]) {
 		store,
 		runner: createFakeRunner(scripts),
 		limiter: createLimiter(1),
-		tickets: fakeTickets([
-			{ key: "T", title: "Ticket", description: "", url: null },
+		workItems: fakeWorkItems([
+			{
+				origin: { source: "jira", key: "T", url: null },
+				title: "Ticket",
+				description: "",
+			},
 		]),
 		workspace: fakeWorkspace("/workspace"),
 		dataDir,
@@ -64,6 +68,137 @@ async function setup(scripts = [envelope(plan), ...clean()]) {
 	};
 	return { deps, input, path: join(dataDir, "runs", "run", "plan.md") };
 }
+
+it("reopens and resumes a legacy Jira config and FetchTicket checkpoint", async () => {
+	const { deps, input } = await setup();
+	const role = { model: null, timeoutMs: 1_000 };
+	const roleSource = {
+		path: "skills/plan/SKILL.md",
+		sha: "123456",
+		content: "skill",
+		resources: {},
+	};
+	const roleArtifact = await deps.store.putArtifact(
+		new TextEncoder().encode(JSON.stringify(roleSource)),
+		{ kind: "factory-role-source-v1", mediaType: "application/json" },
+	);
+	const roles = {
+		planner: role,
+		reviewer: role,
+		verifier: role,
+		reviser: role,
+	};
+	const roleArtifacts = {
+		planner: roleArtifact,
+		reviewer: roleArtifact,
+		verifier: roleArtifact,
+		reviser: roleArtifact,
+	};
+	const roleProvenance = {
+		planner: { path: roleSource.path, sha: roleSource.sha },
+		reviewer: { path: roleSource.path, sha: roleSource.sha },
+		verifier: { path: roleSource.path, sha: roleSource.sha },
+		reviser: { path: roleSource.path, sha: roleSource.sha },
+	};
+	const legacyCheckpoint = {
+		revision: 1,
+		stage: "FetchTicket",
+		cycle: 1,
+		round: 0,
+		ticket: null,
+		workspace: null,
+		plan: null,
+		lastAgentPlan: null,
+		answers: {},
+		review: null,
+		approvalMetric: null,
+		inFlight: null,
+	};
+	const checkpointArtifact = await deps.store.putArtifact(
+		new TextEncoder().encode(JSON.stringify(legacyCheckpoint)),
+		{ kind: "factory-checkpoint-v1", mediaType: "application/json" },
+	);
+	await deps.store.append(
+		input.runId,
+		[
+			{
+				type: "run.created",
+				runId: input.runId,
+				repo: input.repo,
+				baseBranch: input.baseBranch,
+				config: {
+					factory: {
+						ticketKey: "T",
+						roles,
+						maxConcurrentAgents: 1,
+						roleArtifacts,
+						lenses: ["architecture"],
+						roleProvenance,
+					},
+				},
+			},
+			...Object.values(roleArtifacts).map((artifact) => ({
+				type: "artifact.recorded" as const,
+				artifact,
+				attemptId: null,
+			})),
+			{
+				type: "artifact.recorded",
+				artifact: checkpointArtifact,
+				attemptId: null,
+			},
+		],
+		0,
+	);
+	await deps.store.close();
+	deps.store = await createSqliteRunStore({ dataDir: deps.dataDir });
+	const reopened = await openFactory(deps, input.runId);
+	expect(reopened.checkpoint.stage).toBe("Escalated");
+	await resume(reopened, { signal: input.signal });
+	expect(reopened.checkpoint).toMatchObject({
+		stage: "Approval",
+		workItem: {
+			origin: { source: "jira", key: "T", url: null },
+			title: "Ticket",
+		},
+	});
+	await deps.store.close();
+});
+
+it("persists prompt requests by artifact reference across SQLite reopen", async () => {
+	const { deps, input } = await setup();
+	const text = "  Build a strict todo service.\nKeep this exact.  ";
+	deps.workItems = {
+		async resolve(request) {
+			if (request.source !== "prompt") throw new Error("expected prompt");
+			return {
+				origin: { source: "prompt" },
+				title: "Direct prompt",
+				description: request.text,
+			};
+		},
+	};
+	await start(deps, {
+		...input,
+		workItemRequest: { source: "prompt", text },
+	});
+	const created = (await deps.store.read("run")).find(
+		(event) => event.type === "run.created",
+	);
+	if (created?.type !== "run.created") throw new Error("missing run.created");
+	const config = created.config.factory as {
+		workItemRequest: { source: "prompt"; artifact: { sha256: string } };
+	};
+	expect(config.workItemRequest.source).toBe("prompt");
+	expect(JSON.stringify(created.config)).not.toContain(text);
+	await deps.store.close();
+	deps.store = await createSqliteRunStore({ dataDir: deps.dataDir });
+	const recovered = new TextDecoder().decode(
+		await deps.store.readArtifact(config.workItemRequest.artifact.sha256),
+	);
+	expect(recovered).toBe(text);
+	await deps.store.close();
+});
 
 it("reopens edited approval and retains its original and final artifacts", async () => {
 	const { deps, input, path } = await setup();

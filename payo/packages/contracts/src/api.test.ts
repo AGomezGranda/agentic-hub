@@ -5,6 +5,7 @@ import {
 	DoctorCheck,
 	DoctorReport,
 	RunId,
+	RunReview,
 	RunSummary,
 	StartRunRequest,
 } from "./api.ts";
@@ -17,6 +18,7 @@ const summary = {
 	status: "active" as const,
 	outcome: null,
 	stage: "Approval" as const,
+	workItem: null,
 	startedAt: "2026-10-30T00:00:00.000Z",
 	updatedAt: "2026-10-30T00:01:00.000Z",
 	openGates: [
@@ -33,7 +35,7 @@ const summary = {
 describe("API contracts", () => {
 	it("accepts a minimal start request and optional repo overrides", () => {
 		expect(StartRunRequest.parse({ ticketKey: "ABC-123" })).toEqual({
-			ticketKey: "ABC-123",
+			workItemRequest: { source: "jira", key: "ABC-123" },
 		});
 		expect(
 			StartRunRequest.parse({
@@ -41,14 +43,49 @@ describe("API contracts", () => {
 				repo: "/repo",
 				baseBranch: "develop",
 			}),
-		).toMatchObject({ repo: "/repo", baseBranch: "develop" });
+		).toMatchObject({
+			workItemRequest: { source: "jira", key: "ABC-123" },
+			repo: "/repo",
+			baseBranch: "develop",
+		});
 	});
 
-	it("rejects missing or blank start fields", () => {
+	it("normalizes legacy Jira input and accepts source-neutral inputs", () => {
+		expect(StartRunRequest.parse({ ticketKey: "ABC-123" })).toEqual({
+			workItemRequest: { source: "jira", key: "ABC-123" },
+		});
+		expect(
+			StartRunRequest.parse({
+				workItemRequest: { source: "prompt", text: "Build" },
+			}),
+		).toEqual({ workItemRequest: { source: "prompt", text: "Build" } });
+	});
+
+	it("rejects missing, conflicting, or blank start fields", () => {
 		expect(StartRunRequest.safeParse({}).success).toBe(false);
 		expect(StartRunRequest.safeParse({ ticketKey: " " }).success).toBe(false);
 		expect(
-			StartRunRequest.safeParse({ ticketKey: "T", repo: "" }).success,
+			StartRunRequest.safeParse({
+				ticketKey: "T",
+				workItemRequest: { source: "prompt", text: "Build" },
+			}).success,
+		).toBe(false);
+		expect(
+			StartRunRequest.safeParse({
+				workItemRequest: { source: "prompt", text: " " },
+			}).success,
+		).toBe(false);
+		expect(
+			StartRunRequest.safeParse({
+				workItemRequest: { source: "jira", key: "T" },
+				repo: "",
+			}).success,
+		).toBe(false);
+		expect(
+			StartRunRequest.safeParse({
+				workItemRequest: { source: "jira", key: "T" },
+				baseBranch: " ",
+			}).success,
 		).toBe(false);
 	});
 
@@ -74,6 +111,55 @@ describe("API contracts", () => {
 		expect(RunSummary.parse({ ...summary, extra: true })).toEqual(parsed);
 		expect(
 			RunSummary.safeParse({ ...summary, runId: "not-a-uuid" }).success,
+		).toBe(false);
+	});
+
+	it("supports unknown nonblank stages and nullable work-item identity", () => {
+		const parsed = RunSummary.parse({
+			...summary,
+			stage: "FutureServerStage",
+			workItem: null,
+		});
+		expect(parsed.stage).toBe("FutureServerStage");
+		expect(parsed.workItem).toBeNull();
+		expect(RunSummary.safeParse({ ...summary, stage: " " }).success).toBe(
+			false,
+		);
+	});
+
+	it("validates available and unavailable run review projections", () => {
+		const review = {
+			plan: {
+				available: true as const,
+				markdown: "# Plan",
+				editorPath: "/tmp/payo/runs/run/plan.md",
+				questions: [{ id: "q1", question: "Why?" }],
+			},
+			answers: { q1: "Because" },
+			review: {
+				available: true as const,
+				findings: [],
+				uncheckedLenses: ["security"],
+				verdicts: null,
+				provenance: "unknown" as const,
+			},
+		};
+		expect(RunReview.parse(review)).toEqual(review);
+		expect(
+			RunReview.parse({
+				plan: { available: false, reason: "unsafe" },
+				answers: {},
+				review: { available: false, reason: "not_available" },
+			}),
+		).toMatchObject({
+			plan: { available: false },
+			review: { available: false },
+		});
+		expect(
+			RunReview.safeParse({
+				...review,
+				review: { ...review.review, findings: [{ title: "bad" }] },
+			}).success,
 		).toBe(false);
 	});
 

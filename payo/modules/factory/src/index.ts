@@ -11,6 +11,7 @@ export {
 	start,
 } from "./commands.ts";
 export { CommandError } from "./errors.ts";
+export { readRunReview } from "./read-model.ts";
 export type {
 	FactoryDeps,
 	FactoryHandle,

@@ -21,6 +21,7 @@ const summary = {
 	status: "active",
 	outcome: null,
 	stage: "Approval",
+	workItem: null,
 	startedAt: "2026-10-30T00:00:00.000Z",
 	updatedAt: "2026-10-30T00:01:00.000Z",
 	openGates: [],
@@ -64,6 +65,66 @@ it("sends a bearer token and no Origin header", async () => {
 	const headers = (init?.headers ?? {}) as Record<string, string>;
 	expect(headers.Authorization).toBe("Bearer secret");
 	expect(headers.Origin).toBeUndefined();
+});
+
+it("posts canonical prompt and Jira start requests and returns the run ID", async () => {
+	const requests: Array<{ url: string; init?: RequestInit }> = [];
+	const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
+		requests.push({ url, init });
+		return new Response(JSON.stringify({ runId }), { status: 202 });
+	}) as unknown as typeof fetch;
+	const client = new CliClient("http://127.0.0.1:7331", "secret", fetchImpl);
+
+	expect(
+		await client.start({
+			workItemRequest: { source: "prompt", text: "Create a todo app" },
+		}),
+	).toBe(runId);
+	expect(JSON.parse(String(requests[0]?.init?.body))).toEqual({
+		workItemRequest: { source: "prompt", text: "Create a todo app" },
+	});
+	expect(
+		await client.start({ workItemRequest: { source: "jira", key: "ABC-123" } }),
+	).toBe(runId);
+	expect(JSON.parse(String(requests[1]?.init?.body))).toEqual({
+		workItemRequest: { source: "jira", key: "ABC-123" },
+	});
+});
+
+it("serializes the legacy-compatible Jira CLI command canonically", async () => {
+	const dir = await dataDir();
+	let body: unknown;
+	const server = createServer((req, res) => {
+		const chunks: Buffer[] = [];
+		req.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+		req.on("end", () => {
+			body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+			res.writeHead(202, { "Content-Type": "application/json" });
+			res.end(JSON.stringify({ runId }));
+		});
+	});
+	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+	const port = (server.address() as AddressInfo).port;
+	try {
+		const output: string[] = [];
+		expect(
+			await runCli(["start", "ABC-123"], {
+				env: {
+					PAYO_DATA_DIR: dir,
+					NODE_ENV: "test",
+					PAYO_TEST_SERVER_URL: `http://127.0.0.1:${port}`,
+				},
+				stdout: (text) => output.push(text),
+				stderr: () => {},
+			}),
+		).toBe(0);
+		expect(body).toEqual({
+			workItemRequest: { source: "jira", key: "ABC-123" },
+		});
+		expect(output).toEqual([`${runId}\n`]);
+	} finally {
+		await new Promise<void>((resolve) => server.close(() => resolve()));
+	}
 });
 
 it("validates responses against the contract", async () => {

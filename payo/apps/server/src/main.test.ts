@@ -1,5 +1,5 @@
-import { spawn } from "node:child_process";
-import { mkdtemp } from "node:fs/promises";
+import { execFileSync, spawn } from "node:child_process";
+import { chmod, mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -55,6 +55,85 @@ it("starts under plain Node, reports readiness, and shuts down on SIGTERM", asyn
 	expect(stderr).toBe("");
 	expect(stdout).toContain("payo server stopping (SIGTERM)");
 }, 20_000);
+
+it("starts in real mode when only the Jira CLI is unavailable", async () => {
+	const main = fileURLToPath(new URL("./main.ts", import.meta.url));
+	const dataDir = await mkdtemp(join(tmpdir(), "payo-main-ready-"));
+	const repo = await mkdtemp(join(tmpdir(), "payo-real-repo-"));
+	await mkdir(join(repo, "skills/create-plan"), { recursive: true });
+	await mkdir(join(repo, "skills/review-plan/references"), { recursive: true });
+	await writeFile(join(repo, "skills/create-plan/SKILL.md"), "# Planner\n");
+	await writeFile(join(repo, "skills/review-plan/SKILL.md"), "# Reviewer\n");
+	await writeFile(
+		join(repo, "skills/review-plan/references/lenses.md"),
+		"# Lenses\n",
+	);
+	execFileSync("git", ["init", "-b", "main", repo]);
+	execFileSync("git", [
+		"-C",
+		repo,
+		"config",
+		"user.email",
+		"payo@example.test",
+	]);
+	execFileSync("git", ["-C", repo, "config", "user.name", "Payo Test"]);
+	execFileSync("git", ["-C", repo, "add", "skills"]);
+	execFileSync("git", ["-C", repo, "commit", "-m", "Add role skills"]);
+	const piBin = join(dataDir, "pi-ready");
+	await writeFile(
+		piBin,
+		"#!/bin/sh\nprintf '%s\\n' '{\"status\":\"ready\"}'\n",
+	);
+	await chmod(piBin, 0o755);
+
+	const child = spawn(process.execPath, ["--no-warnings", main], {
+		env: {
+			...process.env,
+			NODE_ENV: "test",
+			PAYO_TEST_PORT: "0",
+			PAYO_DATA_DIR: dataDir,
+			PAYO_REPO: repo,
+			PAYO_MODEL: "test-model",
+			PAYO_SCENARIO: "",
+			PAYO_PI_BIN: piBin,
+			PAYO_ACLI_BIN: "/nonexistent-payo-acli",
+		},
+		stdio: ["ignore", "pipe", "pipe"],
+	});
+	let stdout = "";
+	let stderr = "";
+	child.stdout.on("data", (chunk) => {
+		stdout += chunk.toString();
+	});
+	child.stderr.on("data", (chunk) => {
+		stderr += chunk.toString();
+	});
+	const ready = new Promise<void>((resolve, reject) => {
+		const timer = setTimeout(
+			() =>
+				reject(new Error(`server did not become ready: ${stdout} ${stderr}`)),
+			20_000,
+		);
+		child.stdout.on("data", () => {
+			if (stdout.includes("payo server ready")) {
+				clearTimeout(timer);
+				resolve();
+			}
+		});
+		child.on("exit", (code) => {
+			clearTimeout(timer);
+			reject(new Error(`server exited early with ${code}: ${stderr}`));
+		});
+	});
+	await ready;
+	expect(stdout).toContain("payo server ready");
+	expect(stderr).not.toContain("FAIL acli");
+	child.kill("SIGTERM");
+	const code = await new Promise<number | null>((resolve) =>
+		child.on("exit", (value) => resolve(value)),
+	);
+	expect(code).toBe(0);
+}, 30_000);
 
 it("refuses to start in real mode when the doctor fails", async () => {
 	const main = fileURLToPath(new URL("./main.ts", import.meta.url));
