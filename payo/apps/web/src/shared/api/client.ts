@@ -1,6 +1,29 @@
 import { ApiError as ApiErrorSchema } from "@payo/contracts";
 
-export const API_BASE_URL = "http://127.0.0.1:7331/api/v1";
+export const DEFAULT_SERVER_PORT = 7331;
+
+const SERVER_PORT_KEY = "payo.server-port";
+
+export function getServerPort(): number {
+	const stored = sessionStorage.getItem(SERVER_PORT_KEY);
+	if (stored === null) return DEFAULT_SERVER_PORT;
+	const port = Number(stored);
+	return isServerPort(port) ? port : DEFAULT_SERVER_PORT;
+}
+
+export function setServerPort(port: number): void {
+	if (!isServerPort(port))
+		throw new Error("Server port must be a whole number between 1 and 65535.");
+	sessionStorage.setItem(SERVER_PORT_KEY, String(port));
+}
+
+export function getApiBaseUrl(): string {
+	return `http://127.0.0.1:${getServerPort()}/api/v1`;
+}
+
+function isServerPort(port: number): boolean {
+	return Number.isInteger(port) && port >= 1 && port <= 65535;
+}
 
 export class PayoApiError extends Error {
 	constructor(
@@ -16,12 +39,12 @@ export class PayoApiError extends Error {
 export async function getJson<T>(
 	path: string,
 	token: string,
-	method: "GET" | "POST",
+	method: "GET" | "POST" | "PUT",
 	parse: (data: unknown) => T,
 	body?: unknown,
 	signal?: AbortSignal,
 ): Promise<T> {
-	const response = await fetch(`${API_BASE_URL}${path}`, {
+	const response = await fetch(`${getApiBaseUrl()}${path}`, {
 		method,
 		headers: {
 			Accept: "application/json",

@@ -10,6 +10,7 @@
 		"payo": "./src/index.ts"
 	},
 	"dependencies": {
+		"@payo/config": "workspace:*",
 		"@payo/contracts": "workspace:*"
 	}
 }

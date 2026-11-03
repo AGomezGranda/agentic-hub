@@ -1,0 +1,27 @@
+# Copy to ~/.config/payo/config.toml. All values are non-secret.
+# Keep provider credentials and endpoints in Pi's own configuration.
+
+[server]
+port = 7331
+web_origins = []
+
+[execution]
+max_concurrent_agents = 4
+# Required when an execution is accepted; optional for planning startup.
+# checks = [
+#   { name = "unit", command = "pnpm", args = ["test"], timeout_ms = 120000 },
+# ]
+
+[tools]
+pi = "pi"
+acli = "acli"
+git = "git"
+
+[model]
+provider = "anthropic"
+id = "claude-sonnet-4-5"
+
+# Optional execution role; planning startup does not require it.
+# [roles.implementer]
+# timeout_ms = 300000
+# model = { provider = "anthropic", id = "claude-sonnet-4-5" }

@@ -1,14 +1,23 @@
 import { readFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import { join } from "node:path";
+import {
+	loadPayoConfig,
+	resolveDataDir as resolveConfiguredDataDir,
+} from "@payo/config";
 import {
 	AnswerRequest,
 	ApiError,
 	DoctorReport,
 	EventsResponse,
+	ImplementRequest,
+	PlanRestoreRequest,
+	PlanUpdateRequest,
+	PlanVersionDetail,
+	PlanVersionList,
 	type RunEvent,
 	RunEventSchema,
 	RunIdResponse,
+	RunReview,
 	RunSummary,
 	RunSummaryList,
 	StartRunRequest,
@@ -28,7 +37,7 @@ export class ClientError extends Error {
 }
 
 export function resolveDataDir(env: NodeJS.ProcessEnv = process.env): string {
-	return env.PAYO_DATA_DIR?.trim() || join(homedir(), ".payo");
+	return resolveConfiguredDataDir(env);
 }
 
 export function serverUrl(env: NodeJS.ProcessEnv = process.env): string {
@@ -36,7 +45,7 @@ export function serverUrl(env: NodeJS.ProcessEnv = process.env): string {
 		const override = env.PAYO_TEST_SERVER_URL?.trim();
 		if (override) return override.replace(/\/$/, "");
 	}
-	return "http://127.0.0.1:7331";
+	return `http://127.0.0.1:${loadPayoConfig(env).port}`;
 }
 
 export async function readToken(dataDir: string): Promise<string> {
@@ -77,6 +86,21 @@ export class CliClient {
 		return response.runId;
 	}
 
+	async implement(
+		sourceRunId: string,
+		input: ImplementRequest,
+	): Promise<string> {
+		const body = ImplementRequest.parse(input);
+		return (
+			await this.request(
+				`/api/v1/runs/${sourceRunId}/implement`,
+				"POST",
+				body,
+				RunIdResponse,
+			)
+		).runId;
+	}
+
 	async list(): Promise<RunSummary[]> {
 		return (
 			await this.request("/api/v1/runs", "GET", undefined, RunSummaryList)
@@ -89,6 +113,53 @@ export class CliClient {
 
 	async summary(runId: string): Promise<RunSummary> {
 		return this.request(`/api/v1/runs/${runId}`, "GET", undefined, RunSummary);
+	}
+
+	async review(runId: string): Promise<RunReview> {
+		return this.request(
+			`/api/v1/runs/${runId}/review`,
+			"GET",
+			undefined,
+			RunReview,
+		);
+	}
+	async planVersions(runId: string): Promise<PlanVersionDetail[]> {
+		return (
+			await this.request(
+				`/api/v1/runs/${runId}/plan-versions`,
+				"GET",
+				undefined,
+				PlanVersionList,
+			)
+		).versions;
+	}
+	async planVersion(
+		runId: string,
+		version: number,
+	): Promise<PlanVersionDetail> {
+		return this.request(
+			`/api/v1/runs/${runId}/plan-versions/${version}`,
+			"GET",
+			undefined,
+			PlanVersionDetail,
+		);
+	}
+	async planUpdate(
+		runId: string,
+		input: PlanUpdateRequest | PlanRestoreRequest,
+	): Promise<string> {
+		const update = "prompt" in input;
+		const body = update
+			? PlanUpdateRequest.parse(input)
+			: PlanRestoreRequest.parse(input);
+		return (
+			await this.request(
+				`/api/v1/runs/${runId}/${update ? "plan-update" : "plan-restore"}`,
+				"POST",
+				body,
+				RunIdResponse,
+			)
+		).runId;
 	}
 
 	async events(runId: string): Promise<RunEvent[]> {

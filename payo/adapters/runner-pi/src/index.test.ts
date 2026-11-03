@@ -423,10 +423,34 @@ describe("createPiRunner", () => {
 		);
 
 		const args = stub.calls[0]?.args ?? [];
+		expect(stub.calls[0]?.options.detached).toBe(true);
 		expect(args).toContain("read,grep,find,ls,edit,write,bash");
 		expect(
 			args.slice(args.indexOf("--model"), args.indexOf("--model") + 2),
 		).toEqual(["--model", "custom/model"]);
+	});
+
+	it("kills and awaits a write process group, including a descendant", async () => {
+		if (process.platform === "win32") return;
+		const root = await tempDir();
+		const marker = join(root, "late-write.txt");
+		const bin = join(root, "fake-pi");
+		const child = `setTimeout(() => require('fs').writeFileSync(${JSON.stringify(marker)}, 'alive'), 650)`;
+		await writeFile(
+			bin,
+			`#!/usr/bin/env node\nconst { spawn } = require('node:child_process');\nspawn(process.execPath, ['-e', ${JSON.stringify(child)}], { stdio: 'ignore' });\nsetTimeout(() => {}, 10000);\n`,
+		);
+		await chmod(bin, 0o700);
+		const runner = createPiRunner({ sessionRoot: join(root, "sessions"), bin });
+		const controller = new AbortController();
+		const collected = collect(
+			runner.run(specFor({ tools: "write" }), controller.signal),
+		);
+		await new Promise((resolve) => setTimeout(resolve, 75));
+		controller.abort();
+		await collected;
+		await new Promise((resolve) => setTimeout(resolve, 750));
+		await expect(readFile(marker, "utf8")).rejects.toThrow();
 	});
 
 	it("spawns in the worktree with ignored stdin, merged env and no shell", async () => {

@@ -4,6 +4,8 @@
 	"private": true,
 	"type": "module",
 	"dependencies": {
+		"@payo/checks-process": "workspace:*",
+		"@payo/config": "workspace:*",
 		"@payo/contracts": "workspace:*",
 		"@payo/factory": "workspace:*",
 		"@payo/git": "workspace:*",

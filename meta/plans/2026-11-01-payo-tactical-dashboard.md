@@ -43,7 +43,7 @@ Use the operations desk for home and a run-focused workspace, with sharp corners
 
 - [ ] Phase 1 — Sharp, light operations direction implemented and approved conceptually. Web tests and build pass; browser host unavailable, so desktop/320px, token, focus and contrast checks remain open.
 - [ ] Phase 2 — Dashboard layout, loaded group counts and session-only compact density implemented. Fake-run and responsive walkthrough remains open. The home view does not invent a cross-run activity stream; live activity belongs to the selected run.
-- [ ] Phase 3 — Split, decision and activity views plus activity filtering implemented and covered by tests. Stream lifecycle remains unchanged. Manual recovery and responsive checks remain open.
+- [ ] Phase 3 — Decision and activity views plus activity filtering implemented and covered by tests. Stream lifecycle remains unchanged. Manual recovery and responsive checks remain open.
 - [ ] Phase 4 — Review and gate surfaces restyled, with existing decision safeguards retained and tested. Manual decision scenarios remain open.
 - [ ] Phase 5 — Usage guide updated; full `payo check` and web build pass. Browser host unavailable, so fake flow, keyboard, responsive, contrast, reduced-motion and external-edit walkthroughs remain unverified.
 

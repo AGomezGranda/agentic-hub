@@ -1,6 +1,64 @@
 import { expect, it } from "vitest";
 import { parseArgs, UsageError } from "./args.ts";
 
+it("parses plan commands and validates prompts and versions", () => {
+	expect(parseArgs(["plan-update", "run", "Improve", "this"])).toEqual({
+		command: "plan-update",
+		runId: "run",
+		prompt: "Improve this",
+	});
+	expect(parseArgs(["plan-diff", "run", "1", "2"])).toEqual({
+		command: "plan-diff",
+		runId: "run",
+		from: 1,
+		to: 2,
+	});
+	expect(parseArgs(["plan-restore", "run", "3"])).toEqual({
+		command: "plan-restore",
+		runId: "run",
+		version: 3,
+	});
+	for (const args of [
+		["plan-update", "run", " "],
+		["plan-show", "run", "0"],
+		["plan-diff", "run", "1", "2x"],
+		["plan-versions"],
+	])
+		expect(() => parseArgs(args)).toThrow(UsageError);
+});
+
+it("parses implement with required PR and optional base", () => {
+	expect(parseArgs(["implement", "approved-run", "--pr", "pr-1"])).toEqual({
+		command: "implement",
+		runId: "approved-run",
+		prId: "pr-1",
+		base: undefined,
+	});
+	expect(
+		parseArgs([
+			"implement",
+			"approved-run",
+			"--base",
+			"payo/pr-1",
+			"--pr",
+			"pr-2",
+		]),
+	).toEqual({
+		command: "implement",
+		runId: "approved-run",
+		prId: "pr-2",
+		base: "payo/pr-1",
+	});
+	for (const args of [
+		["implement", "approved-run"],
+		["implement", "approved-run", "--pr"],
+		["implement", "approved-run", "--pr", "pr-1", "--pr", "pr-2"],
+		["implement", "approved-run", "--pr", "pr-1", "--base"],
+		["implement", "approved-run", "--unknown", "value"],
+	])
+		expect(() => parseArgs(args)).toThrow(UsageError);
+});
+
 it("parses serve with forwarded arguments", () => {
 	expect(parseArgs(["serve", "--dev-fakes"])).toEqual({
 		command: "serve",

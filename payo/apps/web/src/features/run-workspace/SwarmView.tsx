@@ -12,6 +12,9 @@ export function SwarmView({
 }) {
 	const [selected, setSelected] = useState<string | null>(null);
 	const steps = projectSwarm(events);
+	const selectedAttempt = steps
+		.flatMap((step) => step.attempts)
+		.find((attempt) => attempt.id === selected);
 	const columns: (typeof steps)[] = [];
 	for (const step of steps) {
 		const previous = columns.at(-1);
@@ -65,7 +68,7 @@ export function SwarmView({
 											{step.attempts.map((attempt) => (
 												<article
 													key={attempt.id}
-													className="min-w-0 border border-[var(--line)] bg-[#f8faf8] p-4 text-sm"
+													className="min-w-0 border border-[var(--line)] bg-[var(--canvas)] p-4 text-sm"
 												>
 													<button
 														type="button"
@@ -82,13 +85,6 @@ export function SwarmView({
 													<p className="mt-1 text-xs text-[var(--muted)]">
 														{elapsed(attempt.startedAt, attempt.finishedAt)}
 													</p>
-													{selected === attempt.id && (
-														<SwarmAgentDetails
-															attempt={attempt}
-															onClose={() => setSelected(null)}
-															onOpenRun={onOpenWorkspace}
-														/>
-													)}
 												</article>
 											))}
 										</div>
@@ -98,6 +94,13 @@ export function SwarmView({
 						</section>
 					))}
 				</div>
+			)}
+			{selectedAttempt && (
+				<SwarmAgentDetails
+					attempt={selectedAttempt}
+					onClose={() => setSelected(null)}
+					onOpenRun={onOpenWorkspace}
+				/>
 			)}
 		</section>
 	);

@@ -9,11 +9,13 @@ import {
 
 function config(overrides: Partial<ServerConfig> = {}): ServerConfig {
 	return {
+		configFile: "/data/config.toml",
 		dataDir: "/data",
 		repo: "/repo",
 		baseBranch: "main",
 		maxConcurrentAgents: 4,
 		webOrigins: [],
+		checks: [],
 		devFakes: false,
 		scenario: null,
 		port: 0,
@@ -23,6 +25,24 @@ function config(overrides: Partial<ServerConfig> = {}): ServerConfig {
 		gitBin: "git-bin",
 		piProvider: "openai",
 		model: "test-model",
+		roles: {
+			planner: {
+				model: { provider: "openai", id: "planner" },
+				timeoutMs: 300_000,
+			},
+			reviewer: {
+				model: { provider: "openai", id: "reviewer" },
+				timeoutMs: 300_000,
+			},
+			verifier: {
+				model: { provider: "openai", id: "verifier" },
+				timeoutMs: 300_000,
+			},
+			reviser: {
+				model: { provider: "openai", id: "reviser" },
+				timeoutMs: 300_000,
+			},
+		},
 		...overrides,
 	};
 }
@@ -93,7 +113,11 @@ it("ignores only failed acli checks for startup readiness", async () => {
 			}),
 		});
 		expect(startupBlockingFailures(report)).toEqual([
-			{ name, ok: false, detail: "unavailable" },
+			{
+				name,
+				ok: false,
+				detail: name === "pi" ? "openai: unavailable" : "unavailable",
+			},
 		]);
 	}
 
@@ -115,6 +139,92 @@ it("ignores only failed acli checks for startup readiness", async () => {
 	]);
 });
 
+it("checks each distinct configured provider once and returns one aggregate Pi check", async () => {
+	const providers: string[] = [];
+	const report = await runDoctor(
+		config({
+			roles: {
+				planner: { model: { provider: "openai", id: "o3" }, timeoutMs: 1 },
+				reviewer: {
+					model: { provider: "anthropic", id: "claude" },
+					timeoutMs: 1,
+				},
+				verifier: { model: { provider: "openai", id: "o4" }, timeoutMs: 1 },
+				reviser: { model: null, timeoutMs: 1 },
+			},
+		}),
+		{
+			...probes(),
+			pi: async (options) => {
+				providers.push(options.provider ?? "");
+				return ok("pi");
+			},
+		},
+	);
+	expect(providers).toEqual(["openai", "anthropic"]);
+	expect(report.checks.filter((check) => check.name === "pi")).toHaveLength(1);
+	expect(report.checks[0]).toMatchObject({ name: "pi", ok: true });
+});
+
+it("uses the default provider when no role has a selected model", async () => {
+	let provider = "";
+	await runDoctor(
+		config({
+			piProvider: "google",
+			roles: {
+				planner: { model: null, timeoutMs: 1 },
+				reviewer: { model: null, timeoutMs: 1 },
+				verifier: { model: null, timeoutMs: 1 },
+				reviser: { model: null, timeoutMs: 1 },
+			},
+		}),
+		{
+			...probes(),
+			pi: async (options) => {
+				provider = options.provider ?? "";
+				return ok("pi");
+			},
+		},
+	);
+	expect(provider).toBe("google");
+});
+
+it("fails the aggregate Pi check for provider failures and redacts credentials", async () => {
+	const providers: string[] = [];
+	const report = await runDoctor(
+		config({
+			roles: {
+				planner: { model: { provider: "openai", id: "o3" }, timeoutMs: 1 },
+				reviewer: {
+					model: { provider: "anthropic", id: "claude" },
+					timeoutMs: 1,
+				},
+				verifier: { model: { provider: "openai", id: "o4" }, timeoutMs: 1 },
+				reviser: { model: null, timeoutMs: 1 },
+			},
+		}),
+		{
+			...probes(),
+			pi: async (options) => {
+				const provider = options.provider ?? "";
+				providers.push(provider);
+				return {
+					name: "pi",
+					ok: false,
+					detail: provider === "openai" ? "Bearer supersecret" : "sk-secret",
+				};
+			},
+		},
+	);
+	const check = report.checks.find((item) => item.name === "pi");
+	expect(providers).toEqual(["openai", "anthropic"]);
+	expect(check?.ok).toBe(false);
+	expect(check?.detail).toContain("openai");
+	expect(check?.detail).toContain("anthropic");
+	expect(check?.detail).not.toContain("supersecret");
+	expect(check?.detail).not.toContain("sk-secret");
+});
+
 it("turns a rejecting probe into a failed check", async () => {
 	const report = await runDoctor(config(), {
 		...probes(),
@@ -126,7 +236,7 @@ it("turns a rejecting probe into a failed check", async () => {
 	expect(report.checks[0]).toEqual({
 		name: "pi",
 		ok: false,
-		detail: "spawn failed",
+		detail: "openai: spawn failed",
 	});
 });
 

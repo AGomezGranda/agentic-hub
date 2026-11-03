@@ -5,10 +5,9 @@ export async function getRunEvents(
 	token: string,
 	runId: string,
 	signal?: AbortSignal,
-	fromSeq?: number,
 ): Promise<RunEvent[]> {
 	return getJson(
-		`/runs/${encodeURIComponent(runId)}/events${fromSeq === undefined ? "" : `?${new URLSearchParams({ fromSeq: String(fromSeq) })}`}`,
+		`/runs/${encodeURIComponent(runId)}/events`,
 		token,
 		"GET",
 		(data) => EventsResponse.parse(data).events,

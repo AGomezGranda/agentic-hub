@@ -2,16 +2,19 @@ import type { OpenQuestion, RunReview as RunReviewData } from "@payo/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getRun } from "@web/features/runs/api.ts";
 import { Button } from "@web/shared/ui/Button.tsx";
+import { Markdown } from "@web/shared/ui/Markdown.tsx";
 import { type FormEvent, useCallback, useEffect, useState } from "react";
-import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import {
 	answerQuestion,
 	approveRun,
+	getPlanVersions,
 	getRunReview,
 	requestChanges,
 	resumeRun,
+	submitPlanUpdate,
 } from "./api.ts";
 import { GateActions, type GateCommand } from "./GateActions.tsx";
+import { PlanHistory } from "./PlanHistory.tsx";
 
 function isConflict(error: unknown): boolean {
 	return (
@@ -46,43 +49,6 @@ function reviewUnavailableMessage(reason: string): string {
 	}
 }
 
-function safeMarkdownUrl(url: string, key: string): string {
-	const transformed = defaultUrlTransform(url);
-	if (!transformed || key === "src" || url.startsWith("//")) return "";
-	const scheme = /^([a-z][a-z\d+.-]*):/i.exec(url)?.[1]?.toLowerCase();
-	if (scheme && !["http", "https", "mailto"].includes(scheme)) return "";
-	return transformed;
-}
-
-function Markdown({ children }: { children: string }) {
-	return (
-		<div className="plan-markdown">
-			<ReactMarkdown
-				skipHtml
-				urlTransform={safeMarkdownUrl}
-				components={{
-					a: ({ node: _node, href, children: linkChildren, ...props }) =>
-						href ? (
-							<a
-								{...props}
-								href={href}
-								rel="noopener noreferrer"
-								target="_blank"
-							>
-								{linkChildren}
-							</a>
-						) : (
-							<span>{linkChildren}</span>
-						),
-					img: () => null,
-				}}
-			>
-				{children}
-			</ReactMarkdown>
-		</div>
-	);
-}
-
 function refreshError(error: unknown): string {
 	return error instanceof Error
 		? error.message
@@ -112,6 +78,13 @@ export function PlanReview({
 		staleTime: 5_000,
 	});
 	const [drafts, setDrafts] = useState<Record<string, string>>({});
+	const [prompt, setPrompt] = useState("");
+	const [view, setView] = useState<"review" | "history">("review");
+	const [revising, setRevising] = useState(false);
+	const history = useQuery({
+		queryKey: ["plan-versions", token, runId],
+		queryFn: ({ signal }) => getPlanVersions(token, runId, signal),
+	});
 
 	const refreshBeforeCommand = async () => {
 		const [latestRun, latestReview] = await Promise.all([
@@ -135,6 +108,10 @@ export function PlanReview({
 			}),
 			queryClient.invalidateQueries({
 				queryKey: ["runs", token],
+				exact: true,
+			}),
+			queryClient.invalidateQueries({
+				queryKey: ["plan-versions", token, runId],
 				exact: true,
 			}),
 		]);
@@ -207,10 +184,41 @@ export function PlanReview({
 		},
 	});
 
+	const update = useMutation({
+		mutationFn: async (value: { prompt: string } | { version: number }) => {
+			const { latestRun, latestReview } = await refreshBeforeCommand();
+			if (
+				latestRun.stage !== "Approval" ||
+				!latestRun.openGates.some((gate) => gate.kind === "approval") ||
+				!latestReview.plan.available ||
+				!latestReview.plan.version ||
+				!latestReview.plan.workingCopyHash
+			)
+				throw conflict("The approval gate or plan changed.");
+			return submitPlanUpdate(token, runId, {
+				...value,
+				expectedVersion: latestReview.plan.version,
+				expectedWorkingCopyHash: latestReview.plan.workingCopyHash,
+			});
+		},
+		onSuccess: async (_, value) => {
+			if ("prompt" in value) {
+				setPrompt("");
+				setRevising(false);
+			}
+			setView("review");
+			setDrafts({});
+			await invalidateWorkspace();
+		},
+		onError: async (error) => {
+			if (isConflict(error)) await invalidateWorkspace();
+		},
+	});
+
 	if (run.isPending || review.isPending)
 		return (
 			<p
-				className="rounded-sm border border-[var(--line)] bg-white p-4 text-sm"
+				className="rounded-sm border border-[var(--line)] bg-[var(--surface)] p-4 text-sm"
 				role="status"
 			>
 				Loading plan review…
@@ -220,7 +228,7 @@ export function PlanReview({
 		const error = run.error ?? review.error;
 		return (
 			<div
-				className="rounded-sm border border-[#f1c6b3] bg-[#fff5ef] p-4 text-sm text-[#8d421f]"
+				className="rounded-sm border border-[var(--danger-border)] bg-[var(--danger-surface)] p-4 text-sm text-[var(--danger)]"
 				role="alert"
 			>
 				<p>Could not load plan review: {refreshError(error)}</p>
@@ -245,7 +253,10 @@ export function PlanReview({
 			? data.plan.questions
 			: [];
 	const decisionAvailable = data.plan.available && data.review.available;
-	const actionError = command.error ?? answer.error;
+	const actionError = command.error ?? answer.error ?? update.error;
+	const approval =
+		run.data.stage === "Approval" &&
+		run.data.openGates.some((gate) => gate.kind === "approval");
 	const actionMessage = actionError
 		? isConflict(actionError)
 			? "The run state changed. The latest server state has been refreshed; review it before trying again."
@@ -267,210 +278,320 @@ export function PlanReview({
 
 	return (
 		<div className="space-y-5">
-			<section className="border-b border-[var(--line)] pb-6">
-				<div className="flex flex-wrap items-start justify-between gap-3">
-					<div>
-						<p className="text-[10px] font-bold tracking-[0.14em] text-[var(--muted)]">
-							CURRENT DELIVERABLE
-						</p>
-						<h2 className="mt-1 text-xl font-semibold tracking-tight">Plan</h2>
-					</div>
-					<div className="flex flex-col items-end gap-3 text-right text-xs text-[var(--muted)]">
-						{/* biome-ignore lint/a11y/useValidAnchor: Reveal the activity target before navigating to it. */}
-						<a
-							className="rounded underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
-							href="#run-activity"
-							onClick={onViewActivity}
-						>
-							View activity
-						</a>
-						{data.plan.available && data.plan.editorPath ? (
-							<div>
-								<p>Open in your editor</p>
-								<code className="mt-1 block max-w-full break-all">
-									{data.plan.editorPath}
-								</code>
-								<code className="mt-1 block">payo edit {runId}</code>
-							</div>
-						) : null}
-					</div>
-				</div>
-				{data.plan.available ? (
-					<>
-						<div className="mt-5 rounded-sm border border-[var(--line)] bg-[#fbfcfb] p-4 sm:p-6">
-							<Markdown>{data.plan.markdown}</Markdown>
-						</div>
-						{data.plan.editorPath ? (
-							<p className="mt-3 text-xs leading-5 text-[var(--muted)]">
-								Refresh after editing outside this page. The server rereads the
-								file when a command runs, so a concurrent edit can still win.
-							</p>
-						) : null}
-					</>
-				) : (
-					<p
-						className="mt-4 rounded-sm bg-[#f6f8f6] p-4 text-sm text-[var(--muted)]"
-						role="status"
-					>
-						{unavailableMessage(data.plan.reason)}
-					</p>
-				)}
-			</section>
-
-			<section className="border-b border-[var(--line)] pb-6">
-				<div className="flex flex-wrap items-start justify-between gap-3">
-					<div>
-						<p className="text-[10px] font-bold tracking-[0.14em] text-[var(--muted)]">
-							PLAN REVIEW
-						</p>
-						<h2 className="mt-1 text-xl font-semibold tracking-tight">
-							Findings and verification
-						</h2>
-					</div>
-				</div>
-				{data.review.available ? (
-					<>
-						<p className="mt-4 rounded-sm bg-[#fff9e9] px-3 py-2.5 text-sm text-[#765b1d]">
-							Review provenance is unknown; findings may be stale against the
-							displayed plan.
-						</p>
-						{data.review.uncheckedLenses.length ? (
-							<p className="mt-3 text-sm text-[var(--muted)]">
-								Unchecked review lenses:{" "}
-								{data.review.uncheckedLenses.join(", ")}.
-							</p>
-						) : null}
-						{data.review.verdicts === null ? (
-							<p className="mt-3 text-sm text-[var(--muted)]">
-								Verifier verdicts are unavailable.
-							</p>
-						) : (
-							<p className="mt-3 text-sm text-[var(--muted)]">
-								{data.review.verdicts.length} verifier verdict
-								{data.review.verdicts.length === 1 ? "" : "s"} recorded.
-							</p>
-						)}
-						{data.review.findings.length ? (
-							<ul className="mt-4 space-y-3">
-								{data.review.findings.map((finding) => (
-									<li
-										className="rounded-sm border border-[var(--line)] p-4"
-										key={finding.id}
+			<nav
+				aria-label="Plan workspace"
+				className="flex gap-2 border-b border-[var(--line)] pb-3"
+			>
+				<Button
+					variant={view === "review" ? "primary" : "quiet"}
+					aria-pressed={view === "review"}
+					onClick={() => setView("review")}
+				>
+					Review
+				</Button>
+				<Button
+					variant={view === "history" ? "primary" : "quiet"}
+					aria-pressed={view === "history"}
+					onClick={() => setView("history")}
+				>
+					History
+				</Button>
+			</nav>
+			{view === "history" ? (
+				<PlanHistory
+					versions={history.data ?? []}
+					loading={history.isPending}
+					error={history.isError}
+					onRetry={() => void history.refetch()}
+					onBack={() => setView("review")}
+					canRestore={approval}
+					busy={update.isPending || command.isPending || answer.isPending}
+					onRestore={(version) => update.mutate({ version })}
+				/>
+			) : (
+				<>
+					<div className="grid gap-6 min-[1400px]:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]">
+						<section className="border-b border-[var(--line)] pb-6">
+							<div className="flex flex-wrap items-start justify-between gap-3">
+								<div>
+									<p className="text-[10px] font-bold tracking-[0.14em] text-[var(--muted)]">
+										CURRENT DELIVERABLE · {run.data.stage}
+									</p>
+									<h2 className="mt-1 text-xl font-semibold tracking-tight">
+										Plan
+									</h2>
+									{data.plan.available && data.plan.version ? (
+										<p className="console-eyebrow">
+											Working plan · v{data.plan.version}
+										</p>
+									) : null}
+								</div>
+								<div className="flex flex-col items-end gap-3 text-right text-xs text-[var(--muted)]">
+									{/* biome-ignore lint/a11y/useValidAnchor: Reveal the activity target before navigating to it. */}
+									<a
+										className="rounded underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+										href="#run-activity"
+										onClick={onViewActivity}
 									>
-										<div className="flex flex-wrap items-center gap-2">
-											<span className="rounded-sm bg-[#fff1eb] px-2.5 py-1 text-xs font-bold text-[#8d421f]">
-												{finding.severity}
-											</span>
-											<h3 className="font-semibold">{finding.title}</h3>
+										View activity
+									</a>
+									{data.plan.available && data.plan.editorPath ? (
+										<div>
+											<p>Open in your editor</p>
+											<code className="mt-1 block max-w-full break-all">
+												{data.plan.editorPath}
+											</code>
+											<code className="mt-1 block">payo edit {runId}</code>
 										</div>
-										{finding.path ? (
-											<p className="mt-2 text-xs text-[var(--muted)]">
-												{finding.path}
-												{finding.line ? `:${finding.line}` : ""}
+									) : null}
+								</div>
+							</div>
+							{data.plan.available ? (
+								<>
+									<div className="mt-5 rounded-sm border border-[var(--line)] bg-[var(--surface)] p-4 sm:p-6">
+										<Markdown>{data.plan.markdown}</Markdown>
+									</div>
+									{data.plan.editorPath ? (
+										<p className="mt-3 text-xs leading-5 text-[var(--muted)]">
+											Refresh after editing outside this page. The server
+											rereads the file when a command runs, so a concurrent edit
+											can still win.
+										</p>
+									) : null}
+								</>
+							) : (
+								<p
+									className="mt-4 rounded-sm bg-[var(--surface-raised)] p-4 text-sm text-[var(--muted)]"
+									role="status"
+								>
+									{unavailableMessage(data.plan.reason)}
+								</p>
+							)}
+						</section>
+
+						<div className="min-w-0 space-y-5">
+							<section className="border-b border-[var(--line)] pb-6">
+								<div className="flex flex-wrap items-start justify-between gap-3">
+									<div>
+										<p className="text-[10px] font-bold tracking-[0.14em] text-[var(--muted)]">
+											PLAN REVIEW
+										</p>
+										<h2 className="mt-1 text-xl font-semibold tracking-tight">
+											Findings and verification
+										</h2>
+									</div>
+								</div>
+								{data.review.available ? (
+									<>
+										<p className="mt-4 rounded-sm bg-[var(--warning-surface)] px-3 py-2.5 text-sm text-[var(--status-warn)]">
+											Review provenance is unknown; findings may be stale
+											against the displayed plan.
+										</p>
+										{data.review.uncheckedLenses.length ? (
+											<p className="mt-3 text-sm text-[var(--muted)]">
+												Unchecked review lenses:{" "}
+												{data.review.uncheckedLenses.join(", ")}.
 											</p>
 										) : null}
-										<dl className="mt-3 space-y-2 text-sm">
-											<div>
-												<dt className="font-semibold">Evidence</dt>
-												<dd className="text-[var(--muted)]">
-													{finding.evidence}
-												</dd>
-											</div>
-											<div>
-												<dt className="font-semibold">Consequence</dt>
-												<dd className="text-[var(--muted)]">
-													{finding.consequence}
-												</dd>
-											</div>
-											<div>
-												<dt className="font-semibold">Suggested fix</dt>
-												<dd className="text-[var(--muted)]">
-													{finding.suggestedFix}
-												</dd>
-											</div>
-										</dl>
-									</li>
-								))}
-							</ul>
-						) : (
-							<p className="mt-4 rounded-sm bg-[#f6f8f6] p-4 text-sm text-[var(--muted)]">
-								No findings were recorded.
-							</p>
-						)}
-					</>
-				) : (
-					<p
-						className="mt-4 rounded-sm bg-[#f6f8f6] p-4 text-sm text-[var(--muted)]"
-						role="status"
-					>
-						{reviewUnavailableMessage(data.review.reason)}
-					</p>
-				)}
-			</section>
-
-			{questions.length ? (
-				<section className="border-b border-[var(--line)] pb-6">
-					<p className="text-[10px] font-bold tracking-[0.14em] text-[var(--muted)]">
-						OPEN QUESTIONS
-					</p>
-					<h2 className="mt-1 text-xl font-semibold tracking-tight">
-						Decisions needed
-					</h2>
-					<div className="mt-4 space-y-4">
-						{questions.map((question) => (
-							<form
-								className="space-y-2 rounded-sm border border-[var(--line)] p-4"
-								key={question.id}
-								onSubmit={(event) => submitAnswer(event, question)}
-							>
-								<label
-									className="block text-sm font-semibold"
-									htmlFor={`answer-${question.id}`}
-								>
-									{question.question}
-								</label>
-								<textarea
-									className="min-h-24 w-full rounded-sm border border-[var(--line)] bg-white p-3 text-sm outline-none focus:border-[var(--accent)] focus:ring-2 focus:ring-[#176b5720]"
-									id={`answer-${question.id}`}
-									name={`answer-${question.id}`}
-									onChange={(event) => {
-										const value = event.currentTarget.value;
-										setDrafts((current) => ({
-											...current,
-											[question.id]: value,
-										}));
-									}}
-									value={drafts[question.id] ?? data.answers[question.id] ?? ""}
-								/>
-								{data.answers[question.id] ? (
-									<p className="text-xs font-medium text-[var(--status-good)]">
-										Saved answer recorded.
+										{data.review.verdicts === null ? (
+											<p className="mt-3 text-sm text-[var(--muted)]">
+												Verifier verdicts are unavailable.
+											</p>
+										) : (
+											<p className="mt-3 text-sm text-[var(--muted)]">
+												{data.review.verdicts.length} verifier verdict
+												{data.review.verdicts.length === 1 ? "" : "s"} recorded.
+											</p>
+										)}
+										{data.review.findings.length ? (
+											<ul className="mt-4 space-y-3">
+												{data.review.findings.map((finding) => (
+													<li
+														className="rounded-sm border border-[var(--line)] p-4"
+														key={finding.id}
+													>
+														<div className="flex flex-wrap items-center gap-2">
+															<span className="rounded-sm bg-[var(--danger-surface)] px-2.5 py-1 text-xs font-bold text-[var(--danger)]">
+																{finding.severity}
+															</span>
+															<h3 className="font-semibold">{finding.title}</h3>
+														</div>
+														{finding.path ? (
+															<p className="mt-2 text-xs text-[var(--muted)]">
+																{finding.path}
+																{finding.line ? `:${finding.line}` : ""}
+															</p>
+														) : null}
+														<dl className="mt-3 space-y-2 text-sm">
+															<div>
+																<dt className="font-semibold">Evidence</dt>
+																<dd className="text-[var(--muted)]">
+																	{finding.evidence}
+																</dd>
+															</div>
+															<div>
+																<dt className="font-semibold">Consequence</dt>
+																<dd className="text-[var(--muted)]">
+																	{finding.consequence}
+																</dd>
+															</div>
+															<div>
+																<dt className="font-semibold">Suggested fix</dt>
+																<dd className="text-[var(--muted)]">
+																	{finding.suggestedFix}
+																</dd>
+															</div>
+														</dl>
+													</li>
+												))}
+											</ul>
+										) : (
+											<p className="mt-4 rounded-sm bg-[var(--surface-raised)] p-4 text-sm text-[var(--muted)]">
+												No findings were recorded.
+											</p>
+										)}
+									</>
+								) : (
+									<p
+										className="mt-4 rounded-sm bg-[var(--surface-raised)] p-4 text-sm text-[var(--muted)]"
+										role="status"
+									>
+										{reviewUnavailableMessage(data.review.reason)}
 									</p>
-								) : null}
-								<Button
-									disabled={
-										answer.isPending ||
-										!(
-											drafts[question.id] ??
-											data.answers[question.id] ??
-											""
-										).trim()
-									}
-									size="small"
-									type="submit"
-									variant="secondary"
-								>
-									{answer.isPending ? "Saving…" : "Save answer"}
-								</Button>
-							</form>
-						))}
-					</div>
-				</section>
-			) : null}
+								)}
+							</section>
 
+							{questions.length ? (
+								<section className="border-b border-[var(--line)] pb-6">
+									<p className="text-[10px] font-bold tracking-[0.14em] text-[var(--muted)]">
+										OPEN QUESTIONS
+									</p>
+									<h2 className="mt-1 text-xl font-semibold tracking-tight">
+										Decisions needed
+									</h2>
+									<div className="mt-4 space-y-4">
+										{questions.map((question) => (
+											<form
+												className="space-y-2 rounded-sm border border-[var(--line)] p-4"
+												key={question.id}
+												onSubmit={(event) => submitAnswer(event, question)}
+											>
+												<label
+													className="block text-sm font-semibold"
+													htmlFor={`answer-${question.id}`}
+												>
+													{question.question}
+												</label>
+												<textarea
+													className="min-h-24 w-full rounded-sm border border-[var(--line)] bg-[var(--canvas)] p-3 text-sm outline-none focus:border-[var(--accent)] focus:ring-2 focus:ring-[var(--focus-ring)]"
+													id={`answer-${question.id}`}
+													name={`answer-${question.id}`}
+													onChange={(event) => {
+														const value = event.currentTarget.value;
+														setDrafts((current) => ({
+															...current,
+															[question.id]: value,
+														}));
+													}}
+													value={
+														drafts[question.id] ??
+														data.answers[question.id] ??
+														""
+													}
+												/>
+												{drafts[question.id] !== undefined &&
+												drafts[question.id] !==
+													(data.answers[question.id] ?? "") ? (
+													<p className="text-xs">
+														Unsaved draft.{" "}
+														{data.answers[question.id]
+															? `Saved answer: ${data.answers[question.id]}`
+															: "No saved answer."}
+													</p>
+												) : data.answers[question.id] ? (
+													<p className="text-xs font-medium text-[var(--status-good)]">
+														Saved answer recorded.
+													</p>
+												) : null}
+												<Button
+													disabled={
+														answer.isPending ||
+														!(
+															drafts[question.id] ??
+															data.answers[question.id] ??
+															""
+														).trim()
+													}
+													size="small"
+													type="submit"
+													variant="secondary"
+												>
+													{answer.isPending ? "Saving…" : "Save answer"}
+												</Button>
+											</form>
+										))}
+									</div>
+								</section>
+							) : null}
+						</div>
+					</div>
+					{approval ? (
+						<div className="flex flex-wrap items-center gap-3">
+							<Button
+								type="button"
+								variant="secondary"
+								aria-expanded={revising}
+								onClick={() => setRevising(!revising)}
+							>
+								Revise plan
+							</Button>
+							<p className="text-xs text-[var(--muted)]">
+								Ask the agent to update the plan, then run review again.
+							</p>
+						</div>
+					) : null}
+					{approval && revising ? (
+						<form
+							onSubmit={(event) => {
+								event.preventDefault();
+								if (prompt.trim()) update.mutate({ prompt });
+							}}
+							className="space-y-3 border-b border-[var(--line)] pb-6"
+						>
+							<label htmlFor="revision-prompt" className="block font-semibold">
+								What should change?
+							</label>
+							<textarea
+								id="revision-prompt"
+								className="min-h-24 w-full rounded-sm border border-[var(--line)] bg-[var(--canvas)] p-3 outline-none focus:border-[var(--accent)] focus:ring-2 focus:ring-[var(--focus-ring)]"
+								value={prompt}
+								onChange={(event) => setPrompt(event.currentTarget.value)}
+							/>
+							<Button
+								type="submit"
+								disabled={
+									!prompt.trim() ||
+									update.isPending ||
+									command.isPending ||
+									answer.isPending
+								}
+							>
+								{update.isPending ? "Working…" : "Submit revision"}
+							</Button>
+							<Button
+								type="button"
+								variant="quiet"
+								onClick={() => setRevising(false)}
+							>
+								Cancel revision
+							</Button>
+						</form>
+					) : null}
+				</>
+			)}
 			{actionError ? (
 				<div
-					className="rounded-sm border border-[#f1c6b3] bg-[#fff5ef] px-4 py-3 text-sm text-[#8d421f]"
+					className="rounded-sm border border-[var(--danger-border)] bg-[var(--danger-surface)] px-4 py-3 text-sm text-[var(--danger)]"
 					role="alert"
 				>
 					<p>{actionMessage}</p>
@@ -485,14 +606,16 @@ export function PlanReview({
 					</Button>
 				</div>
 			) : null}
-			<GateActions
-				answers={data.answers}
-				busy={command.isPending || answer.isPending}
-				decisionAvailable={decisionAvailable}
-				onCommand={(requested) => command.mutate(requested)}
-				questions={data.plan.available ? data.plan.questions : []}
-				run={run.data}
-			/>
+			{view === "review" ? (
+				<GateActions
+					answers={data.answers}
+					busy={command.isPending || answer.isPending || update.isPending}
+					decisionAvailable={decisionAvailable}
+					onCommand={(requested) => command.mutate(requested)}
+					questions={data.plan.available ? data.plan.questions : []}
+					run={run.data}
+				/>
+			) : null}
 		</div>
 	);
 }

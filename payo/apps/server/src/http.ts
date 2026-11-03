@@ -1,15 +1,23 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { isAbsolute } from "node:path";
+import { ConfigRevisionConflictError } from "@payo/config";
 import {
 	AnswerRequest,
 	type ApiError,
+	ConfigSettingsSnapshot,
 	DoctorReport,
 	EventsResponse,
+	ImplementRequest,
+	PlanRestoreRequest,
+	PlanUpdateRequest,
+	PlanVersionDetail,
+	PlanVersionList,
 	RunId,
 	RunIdResponse,
 	RunReview,
 	RunSummary,
 	RunSummaryList,
+	SaveConfigSettingsRequest,
 	StartRunRequest,
 	StartRunResponse,
 } from "@payo/contracts";
@@ -21,7 +29,8 @@ import {
 	isOriginAllowed,
 } from "./auth.ts";
 import type { Composition } from "./composition.ts";
-import { ApiFailure, notFound } from "./errors.ts";
+import { ApiFailure, conflict, notFound } from "./errors.ts";
+import type { ConfigSettingsService } from "./settings.ts";
 
 const JSON_LIMIT = 64 * 1024;
 
@@ -30,6 +39,7 @@ export interface HandlerOptions {
 	webOrigins: readonly string[];
 	getPort(): number;
 	getServices(): Composition | null;
+	configSettings: ConfigSettingsService;
 }
 
 export function createHandler(
@@ -81,6 +91,45 @@ async function handle(
 	if (segments[0] !== "api" || segments[1] !== "v1")
 		throw notFound("unknown route");
 
+	if (segments[2] === "settings") {
+		if (segments.length !== 4 || segments[3] !== "config")
+			throw notFound("unknown route");
+		if (req.method === "GET") {
+			json(
+				res,
+				200,
+				ConfigSettingsSnapshot.parse(await options.configSettings.snapshot()),
+				cors,
+			);
+			return;
+		}
+		if (req.method === "PUT") {
+			const input = SaveConfigSettingsRequest.safeParse(await readJson(req));
+			if (!input.success)
+				throw new ApiFailure(
+					400,
+					"invalid_request",
+					"invalid settings request",
+				);
+			try {
+				json(
+					res,
+					200,
+					ConfigSettingsSnapshot.parse(
+						await options.configSettings.save(input.data),
+					),
+					cors,
+				);
+			} catch (error) {
+				if (error instanceof ConfigRevisionConflictError)
+					throw conflict("config file changed since it was loaded");
+				throw error;
+			}
+			return;
+		}
+		throw new ApiFailure(405, "method_not_allowed", "method not allowed");
+	}
+
 	if (segments[2] === "doctor") {
 		if (segments.length !== 3) throw notFound("unknown route");
 		if (req.method !== "GET")
@@ -130,6 +179,65 @@ async function handle(
 		if (req.method !== "GET")
 			throw new ApiFailure(405, "method_not_allowed", "method not allowed");
 		json(res, 200, RunReview.parse(await services.review(runId)), cors);
+		return;
+	}
+
+	if (
+		segments[4] === "plan-versions" &&
+		(segments.length === 5 || segments.length === 6)
+	) {
+		if (req.method !== "GET")
+			throw new ApiFailure(405, "method_not_allowed", "method not allowed");
+		if (segments.length === 5)
+			json(
+				res,
+				200,
+				PlanVersionList.parse({ versions: await services.planVersions(runId) }),
+				cors,
+			);
+		else {
+			const number = segments[5] ?? "";
+			if (!/^[1-9]\d*$/.test(number) || !Number.isSafeInteger(Number(number)))
+				throw new ApiFailure(400, "invalid_request", "invalid version");
+			json(
+				res,
+				200,
+				PlanVersionDetail.parse(
+					await services.planVersion(runId, Number(number)),
+				),
+				cors,
+			);
+		}
+		return;
+	}
+	if (
+		segments.length === 5 &&
+		(segments[4] === "plan-update" || segments[4] === "plan-restore")
+	) {
+		if (req.method !== "POST")
+			throw new ApiFailure(405, "method_not_allowed", "method not allowed");
+		const schema =
+			segments[4] === "plan-update" ? PlanUpdateRequest : PlanRestoreRequest;
+		const input = schema.safeParse(await readJson(req));
+		if (!input.success)
+			throw new ApiFailure(
+				400,
+				"invalid_request",
+				"invalid plan update request",
+			);
+		await services.planUpdate(runId, input.data);
+		json(res, 202, RunIdResponse.parse({ runId }), cors);
+		return;
+	}
+
+	if (segments.length === 5 && segments[4] === "implement") {
+		if (req.method !== "POST")
+			throw new ApiFailure(405, "method_not_allowed", "method not allowed");
+		const input = ImplementRequest.safeParse(await readJson(req));
+		if (!input.success)
+			throw new ApiFailure(400, "invalid_request", "invalid implement request");
+		const executionRunId = await services.implement(runId, input.data);
+		json(res, 202, RunIdResponse.parse({ runId: executionRunId }), cors);
 		return;
 	}
 
@@ -322,7 +430,7 @@ async function stream(
 			pollTimer = setTimeout(() => void poll(), 250);
 		} catch {
 			stop();
-			res.end();
+			res.destroy();
 		}
 	};
 

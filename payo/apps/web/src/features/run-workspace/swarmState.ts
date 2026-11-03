@@ -42,6 +42,14 @@ export function activityLabel(
 	}
 }
 
+export function agentEventDetail(
+	event: Extract<RunEvent, { type: "attempt.event" }>["event"],
+): string | null {
+	if (event.type === "message" || event.type === "result") return event.text;
+	if (event.type === "error") return event.message;
+	return null;
+}
+
 export function projectSwarm(events: readonly RunEvent[]): SwarmStep[] {
 	const steps = new Map<string, SwarmStep>();
 	const attempts = new Map<string, SwarmAttempt>();

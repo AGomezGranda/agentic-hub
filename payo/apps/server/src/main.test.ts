@@ -1,8 +1,13 @@
 import { execFileSync, spawn } from "node:child_process";
 import { chmod, mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+	architectureRubricPaths,
+	codeQualityRubricPaths,
+	planLensResourcePaths,
+} from "@payo/factory";
 import { expect, it } from "vitest";
 
 // Runs under plain Node, not Vitest's resolver: proves .ts workspace packages load through pnpm links.
@@ -64,10 +69,14 @@ it("starts in real mode when only the Jira CLI is unavailable", async () => {
 	await mkdir(join(repo, "skills/review-plan/references"), { recursive: true });
 	await writeFile(join(repo, "skills/create-plan/SKILL.md"), "# Planner\n");
 	await writeFile(join(repo, "skills/review-plan/SKILL.md"), "# Reviewer\n");
-	await writeFile(
-		join(repo, "skills/review-plan/references/lenses.md"),
-		"# Lenses\n",
-	);
+	for (const path of [
+		...planLensResourcePaths,
+		...architectureRubricPaths,
+		...codeQualityRubricPaths,
+	]) {
+		await mkdir(dirname(join(repo, path)), { recursive: true });
+		await writeFile(join(repo, path), `# ${path}\n`);
+	}
 	execFileSync("git", ["init", "-b", "main", repo]);
 	execFileSync("git", [
 		"-C",

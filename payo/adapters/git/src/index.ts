@@ -11,9 +11,17 @@ import { basename, isAbsolute, join, resolve, sep } from "node:path";
 import type { DoctorCheck } from "@payo/contracts";
 import type { Workspace } from "@payo/kernel";
 
+export type { ExecutionGitOptions } from "./execution.ts";
+export { createExecutionWorkspace } from "./execution.ts";
+
 export type GitExec = (
 	args: string[],
-	options: { cwd?: string; timeoutMs?: number },
+	options: {
+		cwd?: string;
+		timeoutMs?: number;
+		signal?: AbortSignal;
+		maxBuffer?: number;
+	},
 ) => Promise<{ stdout: string; stderr: string; exitCode: number }>;
 
 export interface GitWorkspaceOptions {
@@ -33,7 +41,7 @@ export function createGitExec(options?: {
 }): GitExec {
 	const bin = options?.bin ?? "git";
 	const defaultTimeout = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-	return (args, { cwd, timeoutMs } = {}) =>
+	return (args, { cwd, timeoutMs, signal, maxBuffer } = {}) =>
 		new Promise((resolvePromise, reject) => {
 			execFile(
 				bin,
@@ -41,8 +49,9 @@ export function createGitExec(options?: {
 				{
 					cwd,
 					timeout: timeoutMs ?? defaultTimeout,
-					maxBuffer: 16 * 1024 * 1024,
+					maxBuffer: maxBuffer ?? 16 * 1024 * 1024,
 					shell: false,
+					signal,
 				},
 				(error, stdout, stderr) => {
 					if (error === null) {
@@ -155,6 +164,7 @@ export async function resolveBaseCommit(
 	repo: string,
 	base: string,
 	exec: GitExec,
+	signal?: AbortSignal,
 ): Promise<string> {
 	for (const ref of [
 		`refs/heads/${base}^{commit}`,
@@ -163,7 +173,7 @@ export async function resolveBaseCommit(
 	]) {
 		const result = await exec(
 			["-C", repo, "rev-parse", "--verify", "--quiet", ref],
-			{},
+			{ signal },
 		);
 		const commit = result.stdout.trim();
 		if (result.exitCode === 0 && commit.length > 0) return commit;

@@ -27,15 +27,32 @@ export async function runDoctor(
 	const git = probes.git ?? checkGit;
 	const roleSources = probes.roleSources ?? checkRoleSources;
 	const gitExec = createGitExec({ bin: config.gitBin });
+	const providers = [
+		...new Set(
+			Object.values(config.roles).flatMap(({ model }) =>
+				model ? [model.provider] : [],
+			),
+		),
+	];
+	if (providers.length === 0) providers.push(config.piProvider);
 
 	const checks = await Promise.all([
-		safeCheck("pi", () =>
-			pi({
-				bin: config.piBin,
-				provider: config.piProvider,
-				model: config.model,
-			}),
-		),
+		safeCheck("pi", async () => {
+			const providerChecks = await Promise.all(
+				providers.map((provider) =>
+					safeCheck("pi", () =>
+						pi({ bin: config.piBin, provider, model: config.model }),
+					),
+				),
+			);
+			return {
+				name: "pi",
+				ok: providerChecks.every((check) => check.ok),
+				detail: providerChecks
+					.map((check, index) => `${providers[index]}: ${check.detail}`)
+					.join("; "),
+			};
+		}),
 		safeCheck("acli", () => acli({ bin: config.acliBin })),
 		safeCheck("git", () =>
 			git({

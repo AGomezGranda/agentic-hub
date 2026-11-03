@@ -1,24 +1,107 @@
 import { isAbsolute } from "node:path";
 import type { DoctorCheck } from "@payo/contracts";
-import type { RoleSource } from "@payo/factory";
+import {
+	architectureRubricPaths,
+	codeQualityRubricPaths,
+	EXECUTION_PREPARER_SOURCE,
+	planLensResourcePaths,
+	type RoleSource,
+} from "@payo/factory";
 import { type GitExec, resolveBaseCommit } from "@payo/git";
 
+const planningResources = [
+	...architectureRubricPaths,
+	...codeQualityRubricPaths,
+];
+const reviewResources = [...planLensResourcePaths, ...planningResources];
+
 export const roleSkillPaths = {
-	planner: { path: "skills/create-plan/SKILL.md", resources: [] },
-	reviser: { path: "skills/create-plan/SKILL.md", resources: [] },
+	planner: {
+		path: "skills/create-plan/SKILL.md",
+		resources: planningResources,
+	},
+	reviser: {
+		path: "skills/create-plan/SKILL.md",
+		resources: planningResources,
+	},
 	reviewer: {
 		path: "skills/review-plan/SKILL.md",
-		resources: ["skills/review-plan/references/lenses.md"],
+		resources: reviewResources,
 	},
 	verifier: {
 		path: "skills/review-plan/SKILL.md",
-		resources: ["skills/review-plan/references/lenses.md"],
+		resources: reviewResources,
 	},
 } as const;
 
 type Role = keyof typeof roleSkillPaths;
 
+const testingResources = [
+	"skills/testing-strategy/references/overview.md",
+	"skills/testing-strategy/references/unit.md",
+	"skills/testing-strategy/references/integration.md",
+	"skills/testing-strategy/references/component.md",
+	"skills/testing-strategy/references/contract.md",
+	"skills/testing-strategy/references/e2e.md",
+	"skills/testing-strategy/references/async.md",
+] as const;
+const implementationReviewResources = [
+	"skills/review-plan/references/lenses.md",
+	"skills/architecture-audit/SKILL.md",
+	...architectureRubricPaths,
+	"skills/code-quality-audit/SKILL.md",
+	...codeQualityRubricPaths,
+	"skills/testing-strategy/SKILL.md",
+	...testingResources,
+] as const;
+
+export const executionRoleSkillPaths = {
+	implementer: {
+		path: "skills/implement-plan/SKILL.md",
+		resources: [
+			...architectureRubricPaths,
+			...codeQualityRubricPaths,
+			...testingResources,
+		],
+	},
+	scout: {
+		path: "skills/review-implementation/SKILL.md",
+		resources: implementationReviewResources,
+	},
+	reviewer: {
+		path: "skills/review-implementation/SKILL.md",
+		resources: implementationReviewResources,
+	},
+	verifier: {
+		path: "skills/review-implementation/SKILL.md",
+		resources: implementationReviewResources,
+	},
+} as const;
+
 const MAX_DETAIL = 512;
+
+export class MissingRoleSourcesError extends Error {
+	readonly repo: string;
+	readonly commit: string;
+	readonly missing: string[];
+	readonly required: string[];
+
+	constructor(
+		repo: string,
+		commit: string,
+		missing: string[],
+		required: string[],
+	) {
+		super(
+			`missing role source files at ${commit} in ${repo}: ${missing.join(", ")}. Add the full role source set: ${required.join(", ")}.`,
+		);
+		this.name = "MissingRoleSourcesError";
+		this.repo = repo;
+		this.commit = commit;
+		this.missing = missing;
+		this.required = required;
+	}
+}
 
 export async function loadRoleSources(
 	repo: string,
@@ -27,6 +110,62 @@ export async function loadRoleSources(
 ): Promise<Record<Role, RoleSource>> {
 	const commit = await resolveBaseCommit(repo, base, exec);
 	return loadAt(repo, commit, exec);
+}
+
+export async function loadExecutionRoleSources(
+	repo: string,
+	base: string,
+	exec: GitExec,
+): Promise<
+	Record<
+		"preparer" | "implementer" | "scout" | "reviewer" | "verifier",
+		RoleSource
+	>
+> {
+	const commit = await resolveBaseCommit(repo, base, exec);
+	const required = [
+		...new Set(
+			Object.values(executionRoleSkillPaths).flatMap(({ path, resources }) => [
+				path,
+				...resources,
+			]),
+		),
+	];
+	const blobs = new Map<string, { sha: string; content: string }>();
+	const missing: string[] = [];
+	for (const file of required) {
+		const relative = repoPath(file);
+		const blob = await readBlob(repo, commit, relative, exec);
+		if (blob === null) missing.push(relative);
+		else blobs.set(relative, blob);
+	}
+	if (missing.length > 0)
+		throw new MissingRoleSourcesError(repo, commit, missing, required);
+	const sources = {} as Record<
+		"implementer" | "scout" | "reviewer" | "verifier",
+		RoleSource
+	>;
+	for (const role of Object.keys(executionRoleSkillPaths) as Array<
+		keyof typeof executionRoleSkillPaths
+	>) {
+		const { path, resources } = executionRoleSkillPaths[role];
+		const main = blobs.get(path);
+		if (!main) throw new Error(`execution role source ${path} not found`);
+		const loaded: Record<string, string> = {};
+		for (const resource of resources) {
+			const blob = blobs.get(resource);
+			if (!blob)
+				throw new Error(`execution role resource ${resource} not found`);
+			loaded[resource] = blob.content;
+		}
+		sources[role] = {
+			path,
+			sha: main.sha,
+			content: main.content,
+			resources: loaded,
+		};
+	}
+	return { preparer: EXECUTION_PREPARER_SOURCE, ...sources };
 }
 
 export async function checkRoleSources(
@@ -46,8 +185,13 @@ export async function checkRoleSources(
 			),
 		};
 	} catch (error) {
-		const message = error instanceof Error ? error.message : String(error);
-		return { name: "skills", ok: false, detail: clamp(message, MAX_DETAIL) };
+		const detail =
+			error instanceof MissingRoleSourcesError
+				? compactMissing(error)
+				: error instanceof Error
+					? error.message
+					: String(error);
+		return { name: "skills", ok: false, detail: clamp(detail, MAX_DETAIL) };
 	}
 }
 
@@ -56,14 +200,36 @@ async function loadAt(
 	commit: string,
 	exec: GitExec,
 ): Promise<Record<Role, RoleSource>> {
+	const required = [
+		...new Set(
+			Object.values(roleSkillPaths).flatMap(({ path, resources }) => [
+				path,
+				...resources,
+			]),
+		),
+	];
+	const blobs = new Map<string, { sha: string; content: string }>();
+	const missing: string[] = [];
+	for (const path of required) {
+		const relative = repoPath(path);
+		const blob = await readBlob(repo, commit, relative, exec);
+		if (blob === null) missing.push(relative);
+		else blobs.set(relative, blob);
+	}
+	if (missing.length > 0)
+		throw new MissingRoleSourcesError(repo, commit, missing, required);
+
 	const sources = {} as Record<Role, RoleSource>;
 	for (const role of Object.keys(roleSkillPaths) as Role[]) {
 		const { path, resources } = roleSkillPaths[role];
-		const main = await readBlob(repo, commit, repoPath(path), exec);
+		const main = blobs.get(path);
+		if (main === undefined) throw new Error(`role source ${path} not found`);
 		const loaded: Record<string, string> = {};
 		for (const resource of resources) {
-			const relative = repoPath(resource);
-			loaded[relative] = (await readBlob(repo, commit, relative, exec)).content;
+			const blob = blobs.get(resource);
+			if (blob === undefined)
+				throw new Error(`role resource ${resource} not found`);
+			loaded[resource] = blob.content;
 		}
 		sources[role] = {
 			path,
@@ -80,7 +246,7 @@ async function readBlob(
 	commit: string,
 	path: string,
 	exec: GitExec,
-): Promise<{ sha: string; content: string }> {
+): Promise<{ sha: string; content: string } | null> {
 	const spec = `${commit}:${path}`;
 	const sha = await exec(["-C", repo, "rev-parse", spec], {});
 	const content = await exec(["-C", repo, "show", spec], {});
@@ -88,9 +254,8 @@ async function readBlob(
 		sha.exitCode !== 0 ||
 		content.exitCode !== 0 ||
 		content.stdout.trim().length === 0
-	) {
-		throw new Error(`role source ${path} not found at ${commit} in ${repo}`);
-	}
+	)
+		return null;
 	return { sha: sha.stdout.trim(), content: content.stdout };
 }
 
@@ -103,6 +268,20 @@ function repoPath(path: string): string {
 		throw new Error(`invalid role source path ${path}`);
 	}
 	return path;
+}
+
+function compactMissing(error: MissingRoleSourcesError): string {
+	const groups = new Map<string, string[]>();
+	for (const path of error.missing) {
+		const parts = path.split("/");
+		const name = parts.pop() ?? path;
+		const dir = parts.join("/") || ".";
+		groups.set(dir, [...(groups.get(dir) ?? []), name]);
+	}
+	const listed = [...groups]
+		.map(([dir, names]) => `${dir}/{${names.join(",")}}`)
+		.join("; ");
+	return `missing role files at ${error.commit.slice(0, 12)}: ${listed}. Add these files; see docs/payo/usage.md.`;
 }
 
 function clamp(value: string, max: number): string {

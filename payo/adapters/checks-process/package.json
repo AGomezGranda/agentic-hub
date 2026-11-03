@@ -1,0 +1,13 @@
+{
+	"name": "@payo/checks-process",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"exports": {
+		".": "./src/index.ts"
+	},
+	"dependencies": {
+		"@payo/contracts": "workspace:*",
+		"@payo/kernel": "workspace:*"
+	}
+}

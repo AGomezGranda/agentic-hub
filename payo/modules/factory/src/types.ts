@@ -23,6 +23,10 @@ export interface RoleSource {
 	sha: string;
 	content: string;
 	resources: Record<string, string>;
+	/** Shared instruction rendered as its own block; absent on legacy snapshots. */
+	addendum?: string;
+	/** Hash of content + resources + addendum, absent on legacy snapshots. */
+	composedSha?: string;
 }
 export interface FactoryDeps {
 	store: RunStore;

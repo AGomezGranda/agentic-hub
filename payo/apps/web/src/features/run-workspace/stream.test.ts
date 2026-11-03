@@ -1,8 +1,9 @@
 import type { RunEvent } from "@payo/contracts";
-import { PayoApiError } from "@web/shared/api/client.ts";
+import { PayoApiError, setServerPort } from "@web/shared/api/client.ts";
 import { afterEach, expect, it, vi } from "vitest";
 import {
 	EventLog,
+	MalformedEventError,
 	type RunEventStreamResult,
 	SseParser,
 	streamRunEvents,
@@ -27,7 +28,10 @@ function sse(value: unknown): string {
 	return `id: ${event.seq}\ndata: ${JSON.stringify(value)}\n\n`;
 }
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+	vi.unstubAllGlobals();
+	sessionStorage.clear();
+});
 
 it("parses split SSE blocks, multiline data, CRLF and heartbeat comments", () => {
 	const parser = new SseParser();
@@ -146,6 +150,21 @@ it("stops after run.ended and reports unauthorized stream responses", async () =
 	).rejects.toBeInstanceOf(PayoApiError);
 });
 
+it("rejects malformed events instead of retrying them forever", async () => {
+	const fetchImpl = (async () =>
+		new Response('data: {"type":"unknown"}\n\n', {
+			headers: { "Content-Type": "text/event-stream" },
+		})) as typeof fetch;
+	await expect(
+		streamRunEvents({
+			runId: RUN_ID,
+			token: "secret",
+			fetchImpl,
+			onEvent: () => {},
+		}),
+	).rejects.toBeInstanceOf(MalformedEventError);
+});
+
 it("cancels a pending stream when its signal is aborted", async () => {
 	let cancelled = false;
 	const fetchImpl = (async () =>
@@ -168,4 +187,26 @@ it("cancels a pending stream when its signal is aborted", async () => {
 	controller.abort();
 	await expect(pending).resolves.toBe("aborted");
 	expect(cancelled).toBe(true);
+});
+
+it("streams from the selected loopback port", async () => {
+	setServerPort(8123);
+	let requestUrl = "";
+	const fetchImpl = (async (input: RequestInfo | URL) => {
+		requestUrl = String(input);
+		return new Response("", {
+			headers: { "Content-Type": "text/event-stream" },
+		});
+	}) as typeof fetch;
+
+	await streamRunEvents({
+		runId: RUN_ID,
+		token: "secret",
+		fetchImpl,
+		onEvent: () => {},
+	});
+
+	expect(requestUrl).toBe(
+		`http://127.0.0.1:8123/api/v1/runs/${RUN_ID}/events/stream`,
+	);
 });

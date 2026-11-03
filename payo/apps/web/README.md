@@ -9,8 +9,14 @@ The sidebar run list refreshes every five seconds. Select a run to see its swarm
 decisions and activity; its workspace streams recorded events while open.
 Agent activity may be delayed: the producer batches events and may hold a
 partial batch until an attempt ends. Select an agent to inspect its recorded
-output, which may contain sensitive text. Server status and run creation each
-have their own page in the main navigation.
+output, which may contain sensitive text. Server status, run creation and the
+shared TOML **Settings** editor each have their own page in the main navigation.
+
+The connection screen accepts a loopback port (default `7331`) and keeps only
+that port in `sessionStorage`; the bearer token remains memory-only. After
+changing `[server].port`, restart Payo and reconnect at the new port. The
+Settings page writes only the server-selected config file and explains that a
+restart is required for changes to apply.
 
 ## Source layout
 
@@ -22,20 +28,24 @@ src/
     navigation.ts             Browser-history routing
     styles.css                Global styles and theme tokens
   features/
-    connection/               Token prompt, doctor status and connection errors
+    connection/               Token prompt, port selection, doctor status and connection errors
     runs/                     Run list, creation form and run-summary API
     run-workspace/            Run display, activity, event API and streaming
       useRunActivity.ts       Queries, stream lifetime, retries and cache refresh
       stream.ts               SSE parsing, event ordering and authenticated transport
     plan-review/              Plan rendering, answers, gate commands and review API
+    settings/                 TOML settings form, validation and config API
   shared/
-    api/client.ts             HTTP transport, server URL and API errors
+    api/client.ts             HTTP transport, loopback port and API errors
     ui/Button.tsx             Feature-independent UI controls
   test/setup.ts               Shared DOM-test setup
 ```
 
 Tests live beside their implementation. App tests exercise assembled flows;
 feature tests cover interactions and streaming, and shared tests cover transport.
+Settings tests cover field editing, contract-backed validation, conflict reload,
+environment overrides and dirty-draft navigation guards. Transport tests cover
+`PUT`, selected-port URLs and the session-only port.
 
 ## Dependency rules
 
@@ -45,7 +55,8 @@ feature tests cover interactions and streaming, and shared tests cover transport
   genuinely feature-independent, not simply because it is used in two files.
 - Cross-feature dependencies form a directed graph:
   `run-workspace → plan-review → runs`, with `run-workspace → runs` also allowed.
-  `connection` and `runs` depend only on shared code and external packages.
+  `connection`, `runs` and `settings` depend only on shared code and external
+  packages.
 - Endpoint functions belong to the feature that uses them; only HTTP mechanics
   belong in `shared/api`. Public request/response schemas stay in `@payo/contracts`.
 - Use relative imports inside a feature and `@web/…` for imports across source

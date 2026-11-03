@@ -20,7 +20,8 @@ async function jsonArtifact(
 }
 export function storeCheckpoint(
 	store: RunStore,
-	checkpoint: FactoryCheckpoint,
+	checkpoint: Omit<FactoryCheckpoint, "pendingPlanUpdate"> &
+		Partial<Pick<FactoryCheckpoint, "pendingPlanUpdate">>,
 ): Promise<RunEventBody> {
 	return jsonArtifact(
 		store,

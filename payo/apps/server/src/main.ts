@@ -2,9 +2,14 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { ensureServerToken } from "./auth.ts";
 import { type Composition, createComposition } from "./composition.ts";
-import { loadConfig, type ServerConfig } from "./config.ts";
+import {
+	assertRealModeModels,
+	loadConfig,
+	type ServerConfig,
+} from "./config.ts";
 import { runDoctor, startupBlockingFailures } from "./doctor.ts";
 import { createHandler } from "./http.ts";
+import { createConfigSettingsService } from "./settings.ts";
 
 async function main(): Promise<void> {
 	let config: ServerConfig;
@@ -15,8 +20,10 @@ async function main(): Promise<void> {
 		return;
 	}
 	if (!config.devFakes) {
-		if (config.model === null) {
-			fail(new Error("PAYO_MODEL is required in real mode"));
+		try {
+			assertRealModeModels(config);
+		} catch (error) {
+			fail(error);
 			return;
 		}
 		const failures = startupBlockingFailures(await runDoctor(config));
@@ -29,6 +36,12 @@ async function main(): Promise<void> {
 	}
 
 	const token = await ensureServerToken(config.dataDir);
+	const configSettings = createConfigSettingsService({
+		configFile: config.configFile,
+		env: process.env,
+		cwd: process.cwd(),
+		devFakes: config.devFakes,
+	});
 	let services: Composition | null = null;
 	let port = config.port;
 	const server = createServer(
@@ -37,6 +50,7 @@ async function main(): Promise<void> {
 			webOrigins: config.webOrigins,
 			getPort: () => port,
 			getServices: () => services,
+			configSettings,
 		}),
 	);
 

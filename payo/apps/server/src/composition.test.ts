@@ -20,11 +20,13 @@ import {
 
 function config(overrides: Partial<ServerConfig> = {}): ServerConfig {
 	return {
+		configFile: "/tmp/payo-composition/config.toml",
 		dataDir: "/tmp/payo-composition",
 		repo: "/repo",
 		baseBranch: "main",
 		maxConcurrentAgents: 4,
 		webOrigins: [],
+		checks: [],
 		devFakes: true,
 		scenario: "clean",
 		port: 0,
@@ -34,6 +36,12 @@ function config(overrides: Partial<ServerConfig> = {}): ServerConfig {
 		gitBin: "git",
 		piProvider: "anthropic",
 		model: null,
+		roles: {
+			planner: { model: null, timeoutMs: 300_000 },
+			reviewer: { model: null, timeoutMs: 300_000 },
+			verifier: { model: null, timeoutMs: 300_000 },
+			reviser: { model: null, timeoutMs: 300_000 },
+		},
 		...overrides,
 	};
 }
@@ -60,7 +68,7 @@ const roleSources = {
 
 const plan = {
 	markdown: "# Plan\n",
-	prStrategy: [{ id: "pr", title: "One", phases: [] }],
+	prStrategy: [{ id: "pr", title: "One", phases: ["One phase"] }],
 	openQuestions: [],
 };
 
@@ -219,6 +227,37 @@ it("rejects an unknown fake scenario and scenarios without --dev-fakes", async (
 	).rejects.toThrow(/--dev-fakes/);
 });
 
+it("allows planning without an implementer model but rejects implementation actionably", async () => {
+	const store = createMemoryRunStore();
+	const model = { provider: "anthropic", id: "test-model" };
+	const composition = await createComposition({
+		config: config({
+			devFakes: false,
+			scenario: null,
+			checks: [{ name: "unit", command: "true", args: [], timeout_ms: 1000 }],
+			roles: {
+				planner: { model, timeoutMs: 1000 },
+				reviewer: { model, timeoutMs: 1000 },
+				verifier: { model, timeoutMs: 1000 },
+				reviser: { model, timeoutMs: 1000 },
+			},
+		}),
+		store,
+		adapters: injected(() => createFakeRunner(cleanScript())),
+	});
+	const runId = await composition.start({
+		workItemRequest: { source: "jira", key: "T" },
+		repo: "/repo",
+		baseBranch: "main",
+	});
+	await composition.waitForIdle();
+	await composition.approve(runId);
+	await expect(composition.implement(runId, { prId: "pr" })).rejects.toThrow(
+		/\[roles\.implementer\]\.model/,
+	);
+	await composition.shutdown();
+});
+
 it("uses an injected adapter set in real mode", async () => {
 	const store = createMemoryRunStore();
 	const composition = await createComposition({
@@ -249,6 +288,53 @@ it("uses an injected adapter set in real mode", async () => {
 	expect(await composition.summary(runId)).toMatchObject({
 		status: "active",
 		stage: "Approval",
+	});
+	await composition.shutdown();
+});
+
+it("snapshots provider-qualified models and role timeouts into each new run", async () => {
+	const store = createMemoryRunStore();
+	const configured = config({
+		roles: {
+			planner: { model: { provider: "openai", id: "o3" }, timeoutMs: 1111 },
+			reviewer: {
+				model: { provider: "anthropic", id: "claude-review" },
+				timeoutMs: 2222,
+			},
+			verifier: {
+				model: { provider: "google", id: "gemini-check" },
+				timeoutMs: 3333,
+			},
+			reviser: {
+				model: { provider: "openai", id: "o4-mini" },
+				timeoutMs: 4444,
+			},
+		},
+	});
+	const composition = await createComposition({
+		config: configured,
+		store,
+		adapters: injected(() => createFakeRunner(cleanScript())),
+	});
+	const runId = await composition.start({
+		workItemRequest: { source: "jira", key: "T" },
+		repo: "/repo",
+		baseBranch: "main",
+	});
+	configured.roles.planner.model = { provider: "changed", id: "later" };
+	const [created] = await store.read(runId);
+	expect(created).toMatchObject({
+		type: "run.created",
+		config: {
+			factory: {
+				roles: {
+					planner: { model: "openai/o3", timeoutMs: 1111 },
+					reviewer: { model: "anthropic/claude-review", timeoutMs: 2222 },
+					verifier: { model: "google/gemini-check", timeoutMs: 3333 },
+					reviser: { model: "openai/o4-mini", timeoutMs: 4444 },
+				},
+			},
+		},
 	});
 	await composition.shutdown();
 });

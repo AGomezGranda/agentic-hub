@@ -7,7 +7,42 @@
 	"formatter": {
 		"enabled": true
 	},
+	"css": {
+		"parser": {
+			"tailwindDirectives": true
+		}
+	},
 	"overrides": [
+		{
+			"includes": ["packages/config/**"],
+			"linter": {
+				"rules": {
+					"style": {
+						"noRestrictedImports": {
+							"level": "error",
+							"options": {
+								"patterns": [
+									{
+										"group": ["@payo/*", "!@payo/contracts"],
+										"message": "config imports only @payo/contracts."
+									},
+									{
+										"group": [
+											"**/packages/**",
+											"**/modules/**",
+											"**/adapters/**",
+											"**/apps/**",
+											"../../*/**"
+										],
+										"message": "Import another Payo package by its @payo name, not a relative path."
+									}
+								]
+							}
+						}
+					}
+				}
+			}
+		},
 		{
 			"includes": ["packages/contracts/**"],
 			"linter": {
@@ -181,9 +216,10 @@
 										"group": [
 											"@payo/*",
 											"@payo/kernel/testing",
-											"!@payo/contracts"
+											"!@payo/contracts",
+											"!@payo/config"
 										],
-										"message": "cli is a thin HTTP client: it imports only @payo/contracts."
+										"message": "cli imports only @payo/contracts and @payo/config for local bootstrap settings."
 									},
 									{
 										"group": [

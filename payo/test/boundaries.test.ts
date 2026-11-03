@@ -22,7 +22,9 @@ const KERNEL = "kernel imports only @payo/contracts.";
 const MODULES = "Modules import only @payo/kernel and @payo/contracts.";
 const ADAPTERS =
 	"Adapters import only @payo/kernel and @payo/contracts; only apps/server wires adapters.";
-const CLI = "cli is a thin HTTP client: it imports only @payo/contracts.";
+const CLI =
+	"cli imports only @payo/contracts and @payo/config for local bootstrap settings.";
+const CONFIG = "config imports only @payo/contracts.";
 const WEB = "web imports only @payo/contracts.";
 const CONTRACTS = "contracts imports no other @payo package.";
 
@@ -83,9 +85,15 @@ const cases: BoundaryCase[] = [
 		ADAPTERS,
 	],
 	["apps/cli/src/a.ts", `import "@payo/kernel";`, CLI],
+	["apps/cli/src/a.ts", `import "@payo/server";`, CLI],
 	["apps/cli/src/a.ts", `import "@payo/contracts";`, undefined],
+	["apps/cli/src/a.ts", `import "@payo/config";`, undefined],
 	["apps/cli/src/a.ts", `import "@payo/kernel/testing";`, CLI],
+	["packages/config/src/a.ts", `import "@payo/contracts";`, undefined],
+	["packages/config/src/a.ts", `import "@payo/kernel";`, CONFIG],
+	["packages/config/src/a.ts", `import "zod";`, undefined],
 	["apps/web/src/a.ts", `import "@payo/contracts";`, undefined],
+	["apps/web/src/a.ts", `import "@payo/config";`, WEB],
 	["apps/web/src/a.ts", `import "@payo/factory";`, WEB],
 	["apps/web/src/a.ts", `import "../../server/src/main.ts";`, RELATIVE_ESCAPE],
 	[

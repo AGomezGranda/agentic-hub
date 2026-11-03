@@ -15,6 +15,7 @@ export type Command =
 			repo?: string;
 			baseBranch?: string;
 	  }
+	| { command: "implement"; runId: string; prId: string; base?: string }
 	| { command: "status"; runId: string }
 	| { command: "logs"; runId: string; follow: boolean }
 	| { command: "answer"; runId: string; questionId: string; text: string }
@@ -22,12 +23,26 @@ export type Command =
 	| { command: "request-changes"; runId: string }
 	| { command: "resume"; runId: string }
 	| { command: "edit"; runId: string }
+	| { command: "plan-update"; runId: string; prompt: string }
+	| { command: "plan-versions"; runId: string }
+	| { command: "plan-show" | "plan-restore"; runId: string; version: number }
+	| { command: "plan-diff"; runId: string; from: number; to: number }
 	| { command: "doctor" }
 	| { command: "token" };
 
 function runId(value: string | undefined): string {
 	if (!value || value.startsWith("-")) throw new UsageError("run id required");
 	return value;
+}
+
+function version(value: string | undefined): number {
+	if (
+		!value ||
+		!/^[1-9]\d*$/.test(value) ||
+		!Number.isSafeInteger(Number(value))
+	)
+		throw new UsageError("positive version number required");
+	return Number(value);
 }
 
 function valueAfter(
@@ -100,15 +115,71 @@ function parseStart(
 	};
 }
 
+function parseImplement(
+	args: readonly string[],
+): Extract<Command, { command: "implement" }> {
+	const sourceRunId = runId(args[0]);
+	let prId: string | undefined;
+	let base: string | undefined;
+	for (let index = 1; index < args.length; index++) {
+		const arg = args[index];
+		if (arg === "--pr") {
+			if (prId !== undefined)
+				throw new UsageError("--pr may be used only once");
+			prId = valueAfter(args, index, arg);
+			index++;
+		} else if (arg === "--base") {
+			if (base !== undefined)
+				throw new UsageError("--base may be used only once");
+			base = valueAfter(args, index, arg);
+			index++;
+		} else if (arg?.startsWith("-")) {
+			throw new UsageError(`unknown option ${arg}`);
+		} else {
+			throw new UsageError("unexpected positional argument");
+		}
+	}
+	if (!prId)
+		throw new UsageError(
+			"usage: payo implement <approved-run-id> --pr <pr-id> [--base <ref>]",
+		);
+	return { command: "implement", runId: sourceRunId, prId, base };
+}
+
 export function parseArgs(argv: readonly string[]): Command {
 	const [command, ...rest] = argv;
 	if (!command) throw new UsageError("usage: payo <command> [options]");
 
 	switch (command) {
+		case "plan-update": {
+			const prompt = rest.slice(1).join(" ");
+			if (!prompt.trim()) throw new UsageError("prompt text required");
+			return { command, runId: runId(rest[0]), prompt };
+		}
+		case "plan-versions":
+			if (rest.length !== 1)
+				throw new UsageError("usage: payo plan-versions <run-id>");
+			return { command, runId: runId(rest[0]) };
+		case "plan-show":
+		case "plan-restore":
+			if (rest.length !== 2)
+				throw new UsageError(`usage: payo ${command} <run-id> <version>`);
+			return { command, runId: runId(rest[0]), version: version(rest[1]) };
+		case "plan-diff":
+			if (rest.length !== 3)
+				throw new UsageError("usage: payo plan-diff <run-id> <from> <to>");
+			return {
+				command,
+				runId: runId(rest[0]),
+				from: version(rest[1]),
+				to: version(rest[2]),
+			};
 		case "serve":
 			return { command: "serve", args: [...rest] };
 		case "start":
 			return parseStart(rest);
+		case "implement":
+			return parseImplement(rest);
 		case "status":
 			if (rest.length !== 1)
 				throw new UsageError("usage: payo status <run-id>");

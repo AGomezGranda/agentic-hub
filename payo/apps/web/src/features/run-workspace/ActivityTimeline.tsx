@@ -1,5 +1,6 @@
 import type { RunEvent } from "@payo/contracts";
 import { useState } from "react";
+import { activityLabel, agentEventDetail } from "./swarmState.ts";
 
 type AttemptEvent = Extract<
 	RunEvent,
@@ -48,7 +49,7 @@ export function ActivityTimeline({ events }: { events: RunEvent[] }) {
 				</label>
 			</div>
 			{items.length === 0 ? (
-				<p className="rounded-sm bg-[#f6f8f6] px-3 py-4 text-sm text-[var(--muted)]">
+				<p className="rounded-sm bg-[var(--surface-raised)] px-3 py-4 text-sm text-[var(--muted)]">
 					{filter === "all"
 						? "No activity recorded yet."
 						: "No agent attempts recorded yet."}
@@ -67,7 +68,7 @@ export function ActivityTimeline({ events }: { events: RunEvent[] }) {
 							>
 								<span
 									aria-hidden="true"
-									className="mt-1.5 size-2 shrink-0 rounded-sm bg-[#9aaba2]"
+									className="mt-1.5 size-2 shrink-0 rounded-sm bg-[var(--muted)]"
 								/>
 								<div className="min-w-0 flex-1">
 									<p className="text-sm font-medium text-[var(--ink)]">
@@ -128,7 +129,7 @@ function AttemptDetails({ attempt }: { attempt: AttemptGroup }) {
 	const outcome =
 		finished?.type === "attempt.finished" ? ` · ${finished.outcome}` : "";
 	return (
-		<details className="rounded-sm border border-[var(--line)] bg-[#fbfcfb] px-3 py-3">
+		<details className="rounded-sm border border-[var(--line)] bg-[var(--surface)] px-3 py-3">
 			<summary className="cursor-pointer list-inside text-sm font-semibold">
 				Attempt: {title}
 				{outcome}
@@ -154,30 +155,10 @@ function AttemptDetails({ attempt }: { attempt: AttemptGroup }) {
 
 function AttemptEventText({ event }: { event: AttemptEvent }) {
 	if (event.type === "attempt.event") {
-		const { event: agentEvent } = event;
-		const label =
-			agentEvent.type === "tool_call"
-				? `Tool call · ${agentEvent.name}`
-				: agentEvent.type === "tool_result"
-					? `Tool result · ${agentEvent.name} · ${agentEvent.ok ? "ok" : "failed"}`
-					: agentEvent.type === "error"
-						? "Agent error"
-						: agentEvent.type === "result"
-							? "Agent result"
-							: agentEvent.type === "message"
-								? "Agent message"
-								: agentEvent.type === "usage"
-									? "Usage recorded"
-									: "Agent started";
-		const text =
-			agentEvent.type === "message" || agentEvent.type === "result"
-				? agentEvent.text
-				: agentEvent.type === "error"
-					? agentEvent.message
-					: null;
+		const text = agentEventDetail(event.event);
 		return (
 			<div>
-				<p className="font-medium">{label}</p>
+				<p className="font-medium">{activityLabel(event.event)}</p>
 				{text !== null ? (
 					<pre className="mt-1 whitespace-pre-wrap break-words font-sans text-sm text-[var(--muted)]">
 						{text}

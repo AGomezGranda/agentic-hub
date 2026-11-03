@@ -5,9 +5,48 @@ import {
 	RunReview,
 	VerifiedOutput,
 } from "@payo/contracts";
-import { readArtifact } from "./artifacts.ts";
+import { sha256Hex } from "@payo/kernel";
+import { loadPlanVersions, readArtifact } from "./artifacts.ts";
+import { CommandError } from "./errors.ts";
 import { readPlan } from "./plans.ts";
 import { type FactoryHandle, mutableFactoryHandle } from "./types.ts";
+
+export async function readPlanVersions(handle: FactoryHandle) {
+	const { deps, log } = mutableFactoryHandle(handle);
+	const versions = await loadPlanVersions(
+		deps.store,
+		await deps.store.read(log.current().runId),
+	);
+	return Promise.all(
+		versions.map(async (version) => {
+			const markdown = new TextDecoder().decode(
+				await readArtifact(deps.store, version.markdown),
+			);
+			if (markdown !== version.plan.markdown)
+				throw new Error("invalid plan markdown artifact");
+			return {
+				number: version.number,
+				source: version.source,
+				markdown,
+				questions: version.plan.openQuestions,
+				answers: version.answers,
+			};
+		}),
+	);
+}
+
+export async function readPlanVersion(handle: FactoryHandle, number: number) {
+	const version = (await readPlanVersions(handle)).find(
+		(item) => item.number === number,
+	);
+	if (!version)
+		throw new CommandError(
+			404,
+			"not_found",
+			`plan version ${number} not found`,
+		);
+	return version;
+}
 
 function unavailable(
 	reason: "not_available" | "missing" | "unsafe" | "invalid",
@@ -55,6 +94,8 @@ async function projectPlan(
 				markdown,
 				editorPath: join(deps.dataDir, "runs", runId, "plan.md"),
 				questions: version.plan.openQuestions,
+				version: version.number,
+				workingCopyHash: sha256Hex(new TextEncoder().encode(markdown)),
 			};
 		}
 		return {
@@ -62,6 +103,8 @@ async function projectPlan(
 			markdown: snapshotMarkdown,
 			editorPath: null,
 			questions: version.plan.openQuestions,
+			version: version.number,
+			workingCopyHash: sha256Hex(new TextEncoder().encode(snapshotMarkdown)),
 		};
 	} catch (error) {
 		return unavailable(failureReason(error));

@@ -2,16 +2,21 @@ import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+	acceptPlanUpdate,
 	answer,
 	approve,
 	beginFactory,
 	executeFactory,
 	openFactory,
+	QUALITY_EXPECTATIONS,
+	readPlanVersions,
 	requestChanges,
+	restorePlan,
 	resume,
 	start,
+	updatePlan,
 } from "@payo/factory";
-import { createLimiter, createMemoryRunStore } from "@payo/kernel";
+import { createLimiter, createMemoryRunStore, sha256Hex } from "@payo/kernel";
 import type { FakeStep } from "@payo/runner-fake";
 import { expect, it } from "vitest";
 import {
@@ -30,6 +35,424 @@ const clean = () => [
 	...Array.from({ length: 7 }, () => envelope({ findings: [] })),
 	envelope({ verdicts: [] }),
 ];
+
+it("restores a saved version after preserving the edited working copy", async () => {
+	const { deps, input } = await setup([envelope(plan), ...clean(), ...clean()]);
+	const handle = await start(deps, input);
+	const path = join(deps.dataDir, "runs", "run", "plan.md");
+	const edited = "# Edited\n";
+	await writeFile(path, edited);
+	await restorePlan(handle, {
+		version: 1,
+		expectedVersion: 1,
+		expectedWorkingCopyHash: sha256Hex(new TextEncoder().encode(edited)),
+		signal: input.signal,
+	});
+	expect(handle.checkpoint).toMatchObject({
+		stage: "Approval",
+		cycle: 2,
+		round: 1,
+	});
+	expect(await readFile(path, "utf8")).toBe(plan.markdown);
+	expect((await readPlanVersions(handle)).map((v) => v.source)).toEqual([
+		"agent",
+		"human",
+		"restore",
+	]);
+});
+
+it("resumes a restore accepted before its saved result is installed", async () => {
+	const { deps, input } = await setup([envelope(plan), ...clean(), ...clean()]);
+	const handle = await start(deps, input);
+	const path = join(deps.dataDir, "runs", "run", "plan.md");
+	await writeFile(path, "# Edited\n");
+	await acceptPlanUpdate(handle, {
+		version: 1,
+		expectedVersion: 1,
+		expectedWorkingCopyHash: sha256Hex(new TextEncoder().encode("# Edited\n")),
+	});
+	const reopened = await openFactory(deps, "run");
+	await resume(reopened, { signal: input.signal });
+	expect(reopened.checkpoint.stage).toBe("Approval");
+	expect(await readFile(path, "utf8")).toBe(plan.markdown);
+	expect((await readPlanVersions(reopened)).map((v) => v.source)).toEqual([
+		"agent",
+		"human",
+		"restore",
+	]);
+});
+
+it.each(["restore", "prompt"] as const)(
+	"recovers a %s after installation but before its checkpoint",
+	async (kind) => {
+		const revised = { ...plan, markdown: "# Revised after crash\n" };
+		const scripts =
+			kind === "prompt"
+				? [
+						envelope(plan),
+						...clean(),
+						envelope({ plan: revised, unreconciledFindingIds: [] }),
+						...clean(),
+					]
+				: [envelope(plan), ...clean(), ...clean()];
+		const { deps, input } = await setup(scripts);
+		const store = deps.store;
+		let crash = false;
+		deps.store = {
+			...store,
+			async append(runId, events, seq) {
+				for (const event of events) {
+					if (
+						!crash ||
+						event.type !== "artifact.recorded" ||
+						event.artifact.kind !== "factory-checkpoint-v1"
+					)
+						continue;
+					const checkpoint = JSON.parse(
+						new TextDecoder().decode(
+							await store.readArtifact(event.artifact.sha256),
+						),
+					);
+					if (
+						checkpoint.pendingPlanUpdate?.result &&
+						checkpoint.plan?.sha256 ===
+							checkpoint.pendingPlanUpdate.result.sha256
+					) {
+						crash = false;
+						throw new Error("installation checkpoint interrupted");
+					}
+				}
+				return store.append(runId, events, seq);
+			},
+		};
+		const handle = await start(deps, input);
+		const expected = {
+			expectedVersion: 1,
+			expectedWorkingCopyHash: sha256Hex(
+				new TextEncoder().encode(plan.markdown),
+			),
+		};
+		await acceptPlanUpdate(
+			handle,
+			kind === "prompt"
+				? { ...expected, prompt: "Change the plan" }
+				: { ...expected, version: 1 },
+		);
+		crash = true;
+		await expect(
+			executeFactory(handle, { signal: input.signal }),
+		).rejects.toThrow("installation checkpoint interrupted");
+		const reopened = await openFactory(deps, "run");
+		await resume(reopened, { signal: input.signal });
+		expect(reopened.checkpoint.stage).toBe("Approval");
+		expect(
+			await readFile(join(deps.dataDir, "runs", "run", "plan.md"), "utf8"),
+		).toContain(kind === "prompt" ? "# Revised after crash" : "# Plan");
+		expect(
+			(await readPlanVersions(reopened)).map((item) => item.source),
+		).toEqual(["agent", kind === "prompt" ? "agent" : "restore"]);
+	},
+);
+
+it("preserves an external edit made after accepting a restore", async () => {
+	const { deps, input } = await setup([envelope(plan), ...clean(), ...clean()]);
+	const handle = await start(deps, input);
+	const path = join(deps.dataDir, "runs", "run", "plan.md");
+	await acceptPlanUpdate(handle, {
+		version: 1,
+		expectedVersion: 1,
+		expectedWorkingCopyHash: sha256Hex(new TextEncoder().encode(plan.markdown)),
+	});
+	await writeFile(path, "# External change\n");
+	await executeFactory(handle, { signal: input.signal });
+	expect(handle.checkpoint.stage).toBe("Escalated");
+	expect(await readFile(path, "utf8")).toBe("# External change\n");
+	await resume(handle, { signal: input.signal });
+	expect(handle.checkpoint.stage).toBe("Approval");
+	expect(await readFile(path, "utf8")).toContain("# External change");
+	expect((await readPlanVersions(handle)).map((v) => v.source)).toEqual([
+		"agent",
+		"restore",
+		"human",
+	]);
+});
+
+it("revises the current edited plan from a prompt and reviews the result", async () => {
+	const revised = { ...plan, markdown: "# Revised\n" };
+	const { deps, input, runner } = await setup([
+		envelope(plan),
+		...clean(),
+		envelope({ plan: revised, unreconciledFindingIds: [] }),
+		...clean(),
+	]);
+	const handle = await start(deps, input);
+	const path = join(deps.dataDir, "runs", "run", "plan.md");
+	const edited = "# Human edit\n";
+	await writeFile(path, edited);
+	await updatePlan(handle, {
+		prompt: "Improve it",
+		expectedVersion: 1,
+		expectedWorkingCopyHash: sha256Hex(new TextEncoder().encode(edited)),
+		signal: input.signal,
+	});
+	expect(handle.checkpoint).toMatchObject({ stage: "Approval", round: 1 });
+	const call = runner.calls.find((item) => item.role === "reviser");
+	expect(call?.inputs.map((item) => item.name)).toEqual(
+		expect.arrayContaining(["plan", "prompt"]),
+	);
+	expect((await readPlanVersions(handle)).map((v) => v.source)).toEqual([
+		"agent",
+		"human",
+		"agent",
+	]);
+	expect(await readFile(path, "utf8")).toContain("# Revised");
+});
+
+it("retries an interrupted prompt with its original instructions", async () => {
+	const revised = { ...plan, markdown: "# Resumed\n" };
+	const { deps, input, runner } = await setup([
+		envelope(plan),
+		...clean(),
+		envelope({ plan: revised, unreconciledFindingIds: [] }),
+		...clean(),
+	]);
+	const handle = await start(deps, input);
+	await acceptPlanUpdate(handle, {
+		prompt: "Keep this prompt",
+		expectedVersion: 1,
+		expectedWorkingCopyHash: sha256Hex(new TextEncoder().encode(plan.markdown)),
+	});
+	const reopened = await openFactory(deps, "run");
+	await resume(reopened, { signal: input.signal });
+	const ref = runner.calls
+		.find((call) => call.role === "reviser")
+		?.inputs.find((item) => item.name === "prompt")?.ref;
+	if (!ref) throw new Error("missing prompt input");
+	expect(
+		new TextDecoder().decode(await deps.store.readArtifact(ref.sha256)),
+	).toBe("Keep this prompt");
+	expect(reopened.checkpoint).toMatchObject({
+		stage: "Approval",
+		cycle: 2,
+		round: 1,
+		pendingPlanUpdate: null,
+	});
+});
+
+it("preserves an edit made during a cancelled prompt revision", async () => {
+	const { deps, input, runner } = await setup([
+		envelope(plan),
+		...clean(),
+		[{ kind: "hang" }],
+		...clean(),
+	]);
+	const handle = await start(deps, input);
+	const path = join(deps.dataDir, "runs", "run", "plan.md");
+	const controller = new AbortController();
+	const work = updatePlan(handle, {
+		prompt: "Revise",
+		expectedVersion: 1,
+		expectedWorkingCopyHash: sha256Hex(new TextEncoder().encode(plan.markdown)),
+		signal: controller.signal,
+	});
+	while (!runner.calls.some((call) => call.role === "reviser"))
+		await new Promise((resolve) => setTimeout(resolve, 1));
+	await writeFile(path, "# Edited during revision\n");
+	controller.abort();
+	await work;
+	expect(handle.checkpoint.stage).toBe("Escalated");
+	expect(await readFile(path, "utf8")).toBe("# Edited during revision\n");
+	await resume(handle, { signal: input.signal });
+	expect(handle.checkpoint.stage).toBe("Approval");
+	expect(await readFile(path, "utf8")).toContain("# Edited during revision");
+});
+
+it("preserves a working-file edit made during a restore review", async () => {
+	const { deps, input } = await setup([
+		envelope(plan),
+		...clean(),
+		...clean(),
+		...clean(),
+	]);
+	const handle = await start(deps, input);
+	const path = join(deps.dataDir, "runs", "run", "plan.md");
+	const runner = deps.runner;
+	let edit = true;
+	deps.runner = {
+		...runner,
+		async *run(spec, signal) {
+			if (edit && spec.role === "reviewer") {
+				edit = false;
+				await writeFile(path, "# Changed during review\n");
+			}
+			yield* runner.run(spec, signal);
+		},
+	};
+	await restorePlan(handle, {
+		version: 1,
+		expectedVersion: 1,
+		expectedWorkingCopyHash: sha256Hex(new TextEncoder().encode(plan.markdown)),
+		signal: input.signal,
+	});
+	expect(handle.checkpoint.stage).toBe("Escalated");
+	expect(await readFile(path, "utf8")).toBe("# Changed during review\n");
+	await resume(handle, { signal: input.signal });
+	expect(handle.checkpoint.stage).toBe("Approval");
+	expect(await readFile(path, "utf8")).toContain("# Changed during review");
+});
+
+it("keeps answers recorded while a prompt update is escalated", async () => {
+	const questionPlan = {
+		...plan,
+		openQuestions: [{ id: "q", question: "Why?" }],
+	};
+	const { deps, input } = await setup([
+		envelope(questionPlan),
+		...clean(),
+		[{ kind: "throw", message: "failed" }],
+		...clean(),
+	]);
+	const handle = await start(deps, input);
+	await updatePlan(handle, {
+		prompt: "Revise",
+		expectedVersion: 1,
+		expectedWorkingCopyHash: sha256Hex(
+			new TextEncoder().encode(questionPlan.markdown),
+		),
+		signal: input.signal,
+	});
+	expect(handle.checkpoint.stage).toBe("Escalated");
+	await answer(handle, { questionId: "q", text: "Because" });
+	await resume(handle, { signal: input.signal });
+	expect(handle.checkpoint.stage).toBe("Approval");
+	expect(handle.checkpoint.answers).toEqual({ q: "Because" });
+	expect(
+		await readFile(join(deps.dataDir, "runs", "run", "plan.md"), "utf8"),
+	).toContain("Because");
+});
+
+it("keeps an answer made after a restore installation conflict", async () => {
+	const questionPlan = {
+		...plan,
+		openQuestions: [{ id: "q", question: "Why?" }],
+	};
+	const { deps, input } = await setup([
+		envelope(questionPlan),
+		...clean(),
+		...clean(),
+	]);
+	const handle = await start(deps, input);
+	await acceptPlanUpdate(handle, {
+		version: 1,
+		expectedVersion: 1,
+		expectedWorkingCopyHash: sha256Hex(new TextEncoder().encode(plan.markdown)),
+	});
+	const path = join(deps.dataDir, "runs", "run", "plan.md");
+	await writeFile(path, "# External change\n");
+	await executeFactory(handle, { signal: input.signal });
+	await answer(handle, { questionId: "q", text: "Because" });
+	await resume(handle, { signal: input.signal });
+	expect(handle.checkpoint.answers).toEqual({ q: "Because" });
+});
+
+it("starts a new round for updates and restores from a high-round approval", async () => {
+	const finding = {
+		id: "f",
+		severity: "P1",
+		title: "Bug",
+		path: null,
+		line: null,
+		evidence: "e",
+		consequence: "c",
+		suggestedFix: "fix",
+	};
+	const blocked = () => [
+		envelope({ findings: [finding] }),
+		...Array.from({ length: 6 }, () => envelope({ findings: [] })),
+		envelope({
+			verdicts: [
+				{
+					sourceIds: ["f"],
+					classification: "BLOCKER",
+					severity: "P1",
+					reason: "confirmed",
+					counterEvidence: null,
+				},
+			],
+		}),
+	];
+	const revision = envelope({ plan, unreconciledFindingIds: [] });
+	const { deps, input } = await setup([
+		envelope(plan),
+		...blocked(),
+		revision,
+		...blocked(),
+		revision,
+		...clean(),
+		revision,
+		...clean(),
+		...clean(),
+	]);
+	const handle = await start(deps, input);
+	expect(handle.checkpoint.round).toBe(3);
+	let current = (await readPlanVersions(handle)).at(-1);
+	if (!current) throw new Error("missing version");
+	let working = await readFile(
+		join(deps.dataDir, "runs", "run", "plan.md"),
+		"utf8",
+	);
+	await updatePlan(handle, {
+		prompt: "Change",
+		expectedVersion: current.number,
+		expectedWorkingCopyHash: sha256Hex(new TextEncoder().encode(working)),
+		signal: input.signal,
+	});
+	expect(handle.checkpoint).toMatchObject({ stage: "Approval", round: 1 });
+	current = (await readPlanVersions(handle)).at(-1);
+	if (!current) throw new Error("missing version");
+	working = await readFile(
+		join(deps.dataDir, "runs", "run", "plan.md"),
+		"utf8",
+	);
+	await restorePlan(handle, {
+		version: 1,
+		expectedVersion: current.number,
+		expectedWorkingCopyHash: sha256Hex(new TextEncoder().encode(working)),
+		signal: input.signal,
+	});
+	expect(handle.checkpoint).toMatchObject({ stage: "Approval", round: 1 });
+});
+
+it("does not change a gate for invalid or stale updates", async () => {
+	const { deps, input } = await setup([envelope(plan), ...clean()]);
+	const handle = await start(deps, input);
+	const before = await deps.store.read("run");
+	const expectedWorkingCopyHash = sha256Hex(
+		new TextEncoder().encode(plan.markdown),
+	);
+	await expect(
+		acceptPlanUpdate(handle, {
+			prompt: " ",
+			expectedVersion: 1,
+			expectedWorkingCopyHash,
+		}),
+	).rejects.toThrow("blank");
+	await expect(
+		acceptPlanUpdate(handle, {
+			prompt: "change",
+			expectedVersion: 2,
+			expectedWorkingCopyHash,
+		}),
+	).rejects.toThrow("changed");
+	await expect(
+		acceptPlanUpdate(handle, {
+			version: 99,
+			expectedVersion: 1,
+			expectedWorkingCopyHash,
+		}),
+	).rejects.toThrow("not found");
+	expect(await deps.store.read("run")).toEqual(before);
+});
 
 it("snapshots edits and answers, then approves with retryable cleanup", async () => {
 	const questionPlan = {
@@ -103,6 +526,17 @@ it("does not remove the workspace while an unrelated step is running", async () 
 	const reopened = await openFactory(deps, input.runId);
 	await expect(approve(reopened)).rejects.toThrow();
 	expect(removed).toBe(false);
+});
+
+it("does not overwrite an edit made while approval cleans up", async () => {
+	const { deps, input } = await setup([envelope(plan), ...clean()]);
+	const handle = await start(deps, input);
+	const path = join(deps.dataDir, "runs", "run", "plan.md");
+	deps.workspace.remove = async () => {
+		await writeFile(path, "# Concurrent edit\n");
+	};
+	await approve(handle);
+	expect(await readFile(path, "utf8")).toBe("# Concurrent edit\n");
 });
 
 it("requestChanges reviews the edited snapshot in a new cycle", async () => {
@@ -280,6 +714,8 @@ it("begins at ResolveWorkItem without runner calls and executes the same handle 
 	await executeFactory(handle, { signal });
 	expect(handle.checkpoint.stage).toBe("Approval");
 	expect(runner.calls).toHaveLength(9);
+	for (const call of runner.calls)
+		expect(call.instructions).toContain(QUALITY_EXPECTATIONS);
 });
 
 it("runs a clean plan and seven reviews to approval, and reopens without agents", async () => {
@@ -339,7 +775,8 @@ it("escalates a runner exception and resumes with a fresh planner attempt", asyn
 	);
 	expect(runner.calls[1]?.instructions).toContain("skill");
 	expect(runner.calls[1]?.instructions).not.toContain("changed later");
-	expect(runner.calls[1]?.roleSpecSha).toBe("123456");
+	expect(runner.calls[1]?.roleSpecSha).toMatch(/^[0-9a-f]{64}$/);
+	expect(runner.calls[1]?.roleSpecSha).not.toBe("changed-sha");
 });
 
 it("escalates after three blocking rounds and records each decision", async () => {

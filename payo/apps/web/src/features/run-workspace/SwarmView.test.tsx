@@ -1,9 +1,17 @@
 import type { RunEvent } from "@payo/contracts";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { SwarmView } from "./SwarmView.tsx";
 
+beforeEach(() => {
+	HTMLDialogElement.prototype.showModal = function () {
+		this.setAttribute("open", "");
+	};
+	HTMLDialogElement.prototype.close = function () {
+		this.removeAttribute("open");
+	};
+});
 afterEach(cleanup);
 it("groups each review swarm into one column without combining separate rounds", () => {
 	const events = [

@@ -3,7 +3,7 @@ import {
 	type RunEvent,
 	RunEventSchema,
 } from "@payo/contracts";
-import { API_BASE_URL, PayoApiError } from "@web/shared/api/client.ts";
+import { getApiBaseUrl, PayoApiError } from "@web/shared/api/client.ts";
 
 export interface SseBlock {
 	id?: number;
@@ -60,11 +60,11 @@ export class SseParser {
 
 export class EventLog {
 	private readonly bySequence = new Map<number, RunEvent>();
+	private ordered: RunEvent[] = [];
 	private nextSequence = 1;
 
 	constructor(events: readonly RunEvent[] = []) {
-		for (const event of events) this.bySequence.set(event.seq, event);
-		this.advanceCursor();
+		this.merge(events);
 	}
 
 	get cursor(): number {
@@ -72,7 +72,25 @@ export class EventLog {
 	}
 
 	get events(): RunEvent[] {
-		return [...this.bySequence.values()].sort((a, b) => a.seq - b.seq);
+		return this.ordered;
+	}
+
+	merge(events: readonly RunEvent[]): RunEvent[] {
+		for (const event of events) {
+			if (this.bySequence.has(event.seq)) continue;
+			this.bySequence.set(event.seq, event);
+			const index = this.ordered.findIndex((known) => known.seq > event.seq);
+			this.ordered =
+				index < 0
+					? [...this.ordered, event]
+					: [
+							...this.ordered.slice(0, index),
+							event,
+							...this.ordered.slice(index),
+						];
+		}
+		this.advanceCursor();
+		return this.ordered;
 	}
 
 	add(event: RunEvent): {
@@ -81,9 +99,8 @@ export class EventLog {
 		cursor: number;
 	} {
 		const added = !this.bySequence.has(event.seq);
-		if (added) this.bySequence.set(event.seq, event);
-		this.advanceCursor();
-		return { added, events: this.events, cursor: this.cursor };
+		const events = added ? this.merge([event]) : this.ordered;
+		return { added, events, cursor: this.cursor };
 	}
 
 	private advanceCursor(): void {
@@ -114,7 +131,7 @@ export async function streamRunEvents({
 }: StreamRunEventsOptions): Promise<RunEventStreamResult> {
 	if (signal?.aborted) return "aborted";
 	const url = new URL(
-		`${API_BASE_URL}/runs/${encodeURIComponent(runId)}/events/stream`,
+		`${getApiBaseUrl()}/runs/${encodeURIComponent(runId)}/events/stream`,
 	);
 	if (fromSeq !== undefined) url.searchParams.set("fromSeq", String(fromSeq));
 	const response = await fetchImpl(url, {
@@ -165,7 +182,14 @@ export async function streamRunEvents({
 		throw error;
 	} finally {
 		signal?.removeEventListener("abort", cancelReader);
-		if (signal?.aborted) await reader.cancel().catch(() => {});
+		await reader.cancel().catch(() => {});
+	}
+}
+
+export class MalformedEventError extends Error {
+	constructor() {
+		super("event stream returned an event the console could not read");
+		this.name = "MalformedEventError";
 	}
 }
 
@@ -174,9 +198,11 @@ function parseEvent(block: SseBlock): RunEvent {
 	try {
 		value = JSON.parse(block.data);
 	} catch {
-		throw new Error("event stream returned invalid JSON");
+		throw new MalformedEventError();
 	}
-	return RunEventSchema.parse(value);
+	const event = RunEventSchema.safeParse(value);
+	if (!event.success) throw new MalformedEventError();
+	return event.data;
 }
 
 async function streamError(response: Response): Promise<PayoApiError> {

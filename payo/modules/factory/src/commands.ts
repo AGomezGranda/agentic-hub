@@ -12,11 +12,23 @@ import {
 	WorkItem,
 	WorkItemRequest,
 } from "@payo/contracts";
-import { commit, openRun, openRunLog, runAgentStep } from "@payo/kernel";
-import { readArtifact, savePlanVersion, storeCheckpoint } from "./artifacts.ts";
+import {
+	commit,
+	openRun,
+	openRunLog,
+	runAgentStep,
+	sha256Hex,
+} from "@payo/kernel";
+import {
+	loadPlanVersions,
+	readArtifact,
+	savePlanVersion,
+	storeCheckpoint,
+} from "./artifacts.ts";
 import { CommandError } from "./errors.ts";
 import { approvalDiff } from "./metrics.ts";
 import { readPlan, renderAnswers, validateRunId, writePlan } from "./plans.ts";
+import { QUALITY_EXPECTATIONS } from "./quality.ts";
 import { review } from "./review.ts";
 import { lenses, roleSpec, snapshotRole } from "./roles.ts";
 import { loadCheckpoint } from "./state.ts";
@@ -42,6 +54,7 @@ const invalid = (message: string) =>
 	new CommandError(400, "invalid_request", message);
 const configOf = (handle: MutableFactoryHandle) =>
 	FactoryRunConfig.parse(handle.log.current().config.factory);
+const hash = (value: string) => sha256Hex(new TextEncoder().encode(value));
 
 async function checkpoint(
 	handle: MutableFactoryHandle,
@@ -101,7 +114,7 @@ async function version(handle: MutableFactoryHandle): Promise<PlanVersion> {
 async function savePlan(
 	handle: MutableFactoryHandle,
 	plan: PlanOutput,
-	source: "agent" | "human" | "answer",
+	source: "agent" | "human" | "answer" | "restore",
 	answers = handle.checkpoint.answers,
 ) {
 	const events = await savePlanVersion(handle.deps.store, {
@@ -141,7 +154,7 @@ async function pause(handle: MutableFactoryHandle, reason: string) {
 			{ type: "step.finished", stepId, outcome: "escalated" },
 		],
 	);
-	if (handle.checkpoint.plan)
+	if (handle.checkpoint.plan && !handle.checkpoint.pendingPlanUpdate)
 		await writePlan(
 			handle.deps.dataDir,
 			handle.log.current().runId,
@@ -152,6 +165,41 @@ async function run(handle: MutableFactoryHandle, signal: AbortSignal) {
 	const { deps, log } = handle;
 	const config = configOf(handle);
 	while (true) {
+		const pending = handle.checkpoint.pendingPlanUpdate;
+		if (
+			pending?.result &&
+			handle.checkpoint.plan?.sha256 !== pending.result.sha256
+		) {
+			const saved = PlanVersion.parse(
+				JSON.parse(
+					new TextDecoder().decode(
+						await readArtifact(deps.store, pending.result),
+					),
+				),
+			);
+			const current = await readPlan(deps.dataDir, log.current().runId);
+			if (
+				hash(current) !== pending.expectedWorkingCopyHash &&
+				current !== saved.plan.markdown
+			) {
+				await marker(handle, "PlanReview", [id()]);
+				await pause(
+					handle,
+					"working plan changed during update; resume to review the edited file",
+				);
+				return;
+			}
+			if (current !== saved.plan.markdown)
+				await writePlan(deps.dataDir, log.current().runId, saved.plan.markdown);
+			await checkpoint(handle, {
+				plan: pending.result,
+				answers: saved.answers,
+				pendingPlanUpdate: {
+					...pending,
+					expectedWorkingCopyHash: hash(saved.plan.markdown),
+				},
+			});
+		}
 		const stage = handle.checkpoint.stage;
 		if (stage === "ResolveWorkItem" || stage === "FetchTicket") {
 			const stepId = id();
@@ -215,6 +263,15 @@ async function run(handle: MutableFactoryHandle, signal: AbortSignal) {
 				inputs.push({ name: "plan", ref: handle.checkpoint.plan });
 			if (handle.checkpoint.review)
 				inputs.push({ name: "review", ref: handle.checkpoint.review });
+			if (
+				handle.checkpoint.pendingPlanUpdate?.kind === "prompt" &&
+				!handle.checkpoint.pendingPlanUpdate.result
+			) {
+				inputs.push({
+					name: "prompt",
+					ref: required(handle.checkpoint.pendingPlanUpdate.prompt, "prompt"),
+				});
+			}
 			const shape = jsonEnvelope(
 				stage === "Plan" ? PlanOutput : RevisionOutput,
 			);
@@ -234,6 +291,12 @@ async function run(handle: MutableFactoryHandle, signal: AbortSignal) {
 				config.roles[role],
 				inputs,
 			);
+			if (
+				handle.checkpoint.pendingPlanUpdate?.kind === "prompt" &&
+				!handle.checkpoint.pendingPlanUpdate.result
+			)
+				spec.instructions +=
+					"\n\nRevise the supplied plan according to the supplied prompt. Preserve existing answers and stable question IDs; use new IDs when question meaning changes.";
 			const result = await runAgentStep(
 				{ ...deps, log },
 				{
@@ -275,17 +338,37 @@ async function run(handle: MutableFactoryHandle, signal: AbortSignal) {
 			}
 			const revised =
 				stage === "Revise" ? RevisionOutput.parse(result.value) : null;
-			const plan = revised ? revised.plan : PlanOutput.parse(result.value);
+			const outputPlan = revised
+				? revised.plan
+				: PlanOutput.parse(result.value);
+			const plan = handle.checkpoint.pendingPlanUpdate
+				? {
+						...outputPlan,
+						markdown: renderAnswers(
+							outputPlan.markdown,
+							handle.checkpoint.answers,
+						),
+					}
+				: outputPlan;
 			const saved = await savePlan(handle, plan, "agent");
 			await checkpoint(
 				handle,
 				{
 					stage: "PlanReview",
-					plan: saved.ref,
+					plan: handle.checkpoint.pendingPlanUpdate
+						? handle.checkpoint.plan
+						: saved.ref,
+					pendingPlanUpdate: handle.checkpoint.pendingPlanUpdate
+						? { ...handle.checkpoint.pendingPlanUpdate, result: saved.ref }
+						: null,
 					lastAgentPlan: saved.ref,
 					round:
 						handle.checkpoint.round +
-						(revised?.unreconciledFindingIds.length ? 0 : 1),
+						(revised?.unreconciledFindingIds.length ||
+						(handle.checkpoint.pendingPlanUpdate &&
+							!handle.checkpoint.pendingPlanUpdate.result)
+							? 0
+							: 1),
 					inFlight: revised?.unreconciledFindingIds.length
 						? { stage: "Revise", stepIds: [stepId] }
 						: null,
@@ -322,6 +405,19 @@ async function run(handle: MutableFactoryHandle, signal: AbortSignal) {
 				return;
 			}
 			if (result.decision === "Approval") {
+				if (handle.checkpoint.pendingPlanUpdate) {
+					const current = await readPlan(deps.dataDir, log.current().runId);
+					if (
+						hash(current) !==
+						handle.checkpoint.pendingPlanUpdate.expectedWorkingCopyHash
+					) {
+						await pause(
+							handle,
+							"working plan changed during review; resume to review the edited file",
+						);
+						return;
+					}
+				}
 				await writePlan(
 					deps.dataDir,
 					log.current().runId,
@@ -330,7 +426,12 @@ async function run(handle: MutableFactoryHandle, signal: AbortSignal) {
 				const stepId = id();
 				await checkpoint(
 					handle,
-					{ stage: "Approval", review: result.ref, inFlight: null },
+					{
+						stage: "Approval",
+						review: result.ref,
+						inFlight: null,
+						pendingPlanUpdate: null,
+					},
 					[
 						{ type: "step.started", stepId, name: "approval" },
 						{
@@ -364,7 +465,10 @@ export async function beginFactory(
 	validateRunId(input.runId);
 	const roleArtifacts: Record<string, ArtifactRef> = {};
 	for (const [role, source] of Object.entries(deps.roleSources))
-		roleArtifacts[role] = await snapshotRole(deps.store, source);
+		roleArtifacts[role] = await snapshotRole(deps.store, {
+			...source,
+			addendum: QUALITY_EXPECTATIONS,
+		});
 	const request = WorkItemRequest.parse(input.workItemRequest);
 	const promptArtifact =
 		request.source === "prompt"
@@ -405,6 +509,7 @@ export async function beginFactory(
 		answers: {},
 		review: null,
 		approvalMetric: null,
+		pendingPlanUpdate: null,
 		inFlight: null,
 	};
 	const state = await commit(deps.store, null, [
@@ -558,7 +663,59 @@ export async function resume(
 			if (state.log.current().steps.get(stepId)?.status === "running")
 				events.push({ type: "step.finished", stepId, outcome: "failed" });
 		const stage = marker.stage;
-		if (
+		if (state.checkpoint.pendingPlanUpdate) {
+			const pending = state.checkpoint.pendingPlanUpdate;
+			const markdown = await readPlan(
+				state.deps.dataDir,
+				state.log.current().runId,
+			);
+			const savedResult = pending.result
+				? PlanVersion.parse(
+						JSON.parse(
+							new TextDecoder().decode(
+								await readArtifact(state.deps.store, pending.result),
+							),
+						),
+					)
+				: null;
+			if (
+				hash(markdown) !== pending.expectedWorkingCopyHash &&
+				markdown !== savedResult?.plan.markdown
+			) {
+				const current = await version(state);
+				const answered =
+					current.source === "answer" &&
+					state.checkpoint.plan?.sha256 !== pending.base.sha256 &&
+					state.checkpoint.plan?.sha256 !== pending.result?.sha256;
+				const basis = answered ? current : (savedResult ?? current);
+				const answers = answered
+					? state.checkpoint.answers
+					: (savedResult?.answers ?? state.checkpoint.answers);
+				const saved = await savePlan(
+					state,
+					{ ...basis.plan, markdown: renderAnswers(markdown, answers) },
+					"human",
+					answers,
+				);
+				await checkpoint(
+					state,
+					{
+						stage: "PlanReview",
+						plan: saved.ref,
+						answers,
+						pendingPlanUpdate: {
+							...pending,
+							result: saved.ref,
+							expectedWorkingCopyHash: hash(markdown),
+						},
+						inFlight: null,
+					},
+					[...events, ...saved.events],
+				);
+			} else {
+				await checkpoint(state, { stage, inFlight: null }, events);
+			}
+		} else if (
 			state.checkpoint.plan &&
 			(stage === "PlanReview" || stage === "Revise")
 		) {
@@ -620,6 +777,143 @@ export function assertChangeable(handle: FactoryHandle): void {
 	approvalGate(state);
 }
 
+type PlanUpdateInput = {
+	expectedVersion: number;
+	expectedWorkingCopyHash: string;
+} & ({ prompt: string } | { version: number });
+
+/** Accepts and checkpoints an update before any agent work starts. */
+export async function acceptPlanUpdate(
+	handle: FactoryHandle,
+	input: PlanUpdateInput,
+): Promise<void> {
+	assertChangeable(handle);
+	const state = mutableFactoryHandle(handle);
+	state.busy = true;
+	try {
+		const gate = approvalGate(state);
+		const current = await version(state);
+		const versions = await loadPlanVersions(
+			state.deps.store,
+			await state.deps.store.read(state.log.current().runId),
+		);
+		const selected =
+			"version" in input
+				? versions.find((item) => item.number === input.version)
+				: undefined;
+		if ("prompt" in input && !input.prompt.trim())
+			throw invalid("prompt must not be blank");
+		if ("version" in input && !selected)
+			throw new CommandError(404, "not_found", "plan version not found");
+		const markdown = await readPlan(
+			state.deps.dataDir,
+			state.log.current().runId,
+		);
+		if (
+			current.number !== input.expectedVersion ||
+			hash(markdown) !== input.expectedWorkingCopyHash
+		)
+			throw conflict("plan changed; inspect and retry");
+		const events: RunEventBody[] = [];
+		let base = required(state.checkpoint.plan, "plan");
+		let nextNumber = versions.length + 1;
+		if (markdown !== current.plan.markdown) {
+			const saved = await savePlanVersion(state.deps.store, {
+				number: nextNumber++,
+				source: "human",
+				plan: { ...current.plan, markdown },
+				answers: state.checkpoint.answers,
+			});
+			events.push(...saved);
+			base = refOf(required(saved[1], "plan version"));
+		}
+		let result: ArtifactRef | null = null;
+		let prompt: ArtifactRef | null = null;
+		if (selected) {
+			const savedMarkdown = new TextDecoder().decode(
+				await readArtifact(state.deps.store, selected.markdown),
+			);
+			if (savedMarkdown !== selected.plan.markdown)
+				throw new Error("invalid plan markdown artifact");
+			const saved = await savePlanVersion(state.deps.store, {
+				number: nextNumber,
+				source: "restore",
+				plan: selected.plan,
+				answers: selected.answers,
+			});
+			events.push(...saved);
+			result = refOf(required(saved[1], "plan version"));
+		} else if ("prompt" in input) {
+			prompt = await state.deps.store.putArtifact(
+				new TextEncoder().encode(input.prompt),
+				{ kind: "factory-plan-update-prompt-v1", mediaType: "text/plain" },
+			);
+			events.push({
+				type: "artifact.recorded",
+				artifact: prompt,
+				attemptId: null,
+			});
+		}
+		await checkpoint(
+			state,
+			{
+				stage: selected ? "PlanReview" : "Revise",
+				plan: base,
+				review: null,
+				cycle: state.checkpoint.cycle + 1,
+				round: 1,
+				inFlight: null,
+				pendingPlanUpdate: {
+					kind: selected ? "restore" : "prompt",
+					base,
+					expectedWorkingCopyHash: hash(markdown),
+					prompt,
+					version: selected?.number ?? null,
+					result,
+				},
+			},
+			[
+				...events,
+				{
+					type: "gate.resolved",
+					gateId: gate.gateId,
+					command: "requestChanges",
+					note: null,
+				},
+				{ type: "step.finished", stepId: gate.stepId, outcome: "succeeded" },
+			],
+		);
+	} finally {
+		state.busy = false;
+	}
+}
+
+export async function updatePlan(
+	handle: FactoryHandle,
+	input: {
+		prompt: string;
+		expectedVersion: number;
+		expectedWorkingCopyHash: string;
+		signal: AbortSignal;
+	},
+): Promise<FactoryHandle> {
+	await acceptPlanUpdate(handle, input);
+	return executeFactory(handle, { signal: input.signal });
+}
+
+export async function restorePlan(
+	handle: FactoryHandle,
+	input: {
+		version: number;
+		expectedVersion: number;
+		expectedWorkingCopyHash: string;
+		signal: AbortSignal;
+	},
+): Promise<FactoryHandle> {
+	await acceptPlanUpdate(handle, input);
+	return executeFactory(handle, { signal: input.signal });
+}
+
 export async function answer(
 	handle: FactoryHandle,
 	input: { questionId: string; text: string },
@@ -641,16 +935,22 @@ export async function answer(
 			...state.checkpoint.answers,
 			[input.questionId]: input.text,
 		};
-		const markdown = renderAnswers(
-			await readPlan(state.deps.dataDir, state.log.current().runId),
-			answers,
+		const workingCopy = await readPlan(
+			state.deps.dataDir,
+			state.log.current().runId,
 		);
+		const markdown = renderAnswers(workingCopy, answers);
 		const saved = await savePlan(
 			state,
 			{ ...current.plan, markdown },
 			"answer",
 			answers,
 		);
+		if (
+			(await readPlan(state.deps.dataDir, state.log.current().runId)) !==
+			workingCopy
+		)
+			throw conflict("plan changed while saving answer; inspect and retry");
 		await writePlan(state.deps.dataDir, state.log.current().runId, markdown);
 		await checkpoint(state, { plan: saved.ref, answers }, saved.events);
 		return handle;
@@ -669,10 +969,11 @@ export async function requestChanges(
 	try {
 		const gate = approvalGate(state);
 		const current = await version(state);
-		const markdown = renderAnswers(
-			await readPlan(state.deps.dataDir, state.log.current().runId),
-			state.checkpoint.answers,
+		const workingCopy = await readPlan(
+			state.deps.dataDir,
+			state.log.current().runId,
 		);
+		const markdown = renderAnswers(workingCopy, state.checkpoint.answers);
 		const saved = await savePlan(state, { ...current.plan, markdown }, "human");
 		await checkpoint(
 			state,
@@ -724,10 +1025,11 @@ export async function approve(handle: FactoryHandle): Promise<FactoryHandle> {
 			)
 		)
 			throw conflict("unanswered questions");
-		const markdown = renderAnswers(
-			await readPlan(state.deps.dataDir, state.log.current().runId),
-			state.checkpoint.answers,
+		const workingCopy = await readPlan(
+			state.deps.dataDir,
+			state.log.current().runId,
 		);
+		const markdown = renderAnswers(workingCopy, state.checkpoint.answers);
 		const saved = await savePlan(state, { ...current.plan, markdown }, "human");
 		const agent = PlanVersion.parse(
 			JSON.parse(
@@ -744,10 +1046,15 @@ export async function approve(handle: FactoryHandle): Promise<FactoryHandle> {
 			approvalDiff(agent.plan.markdown, markdown),
 			"factory-approval-diff-v1",
 		);
+		if (
+			(await readPlan(state.deps.dataDir, state.log.current().runId)) !==
+			workingCopy
+		)
+			throw conflict("plan changed during approval; inspect and retry");
+		await writePlan(state.deps.dataDir, state.log.current().runId, markdown);
 		await state.deps.workspace.remove(
 			required(state.checkpoint.workspace, "workspace"),
 		);
-		await writePlan(state.deps.dataDir, state.log.current().runId, markdown);
 		await checkpoint(
 			state,
 			{ stage: "Approved", plan: saved.ref, approvalMetric: metric },

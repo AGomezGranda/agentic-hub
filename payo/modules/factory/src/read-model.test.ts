@@ -7,10 +7,15 @@ import {
 	createLimiter,
 	createMemoryRunStore,
 	type MemoryBacking,
+	sha256Hex,
 } from "@payo/kernel";
 import { expect, it } from "vitest";
 import { beginFactory, executeFactory, start } from "./commands.ts";
-import { readRunReview } from "./read-model.ts";
+import {
+	readPlanVersion,
+	readPlanVersions,
+	readRunReview,
+} from "./read-model.ts";
 
 const plan = {
 	markdown: "# Snapshot plan\n",
@@ -169,6 +174,8 @@ it("uses the latest validated snapshot before an approval or escalation gate", a
 			markdown: plan.markdown,
 			editorPath: null,
 			questions: plan.openQuestions,
+			version: 1,
+			workingCopyHash: sha256Hex(new TextEncoder().encode(plan.markdown)),
 		});
 	} finally {
 		controller.abort();
@@ -187,6 +194,8 @@ it("projects the checked working plan, answers, and validated review findings", 
 		markdown: "# External edit\n",
 		editorPath: planPath,
 		questions: plan.openQuestions,
+		version: 1,
+		workingCopyHash: sha256Hex(new TextEncoder().encode("# External edit\n")),
 	});
 	expect(result.answers).toEqual({});
 	expect(result.review).toEqual({
@@ -301,4 +310,41 @@ it("reports missing or checksum-invalid plan artifacts as unavailable", async ()
 		available: false,
 		reason: "invalid",
 	});
+});
+
+it("reads ordered versions and rejects missing or corrupt artifacts", async () => {
+	const { handle, backing } = await setup(finalReviewScripts);
+	const versions = await readPlanVersions(handle);
+	expect(versions).toMatchObject([
+		{
+			number: 1,
+			source: "agent",
+			markdown: plan.markdown,
+			questions: plan.openQuestions,
+			answers: {},
+		},
+	]);
+	expect(await readPlanVersion(handle, 1)).toEqual(versions[0]);
+	await expect(readPlanVersion(handle, 999)).rejects.toThrow("not found");
+	const ref = handle.checkpoint.plan;
+	if (!ref) throw new Error("missing plan reference");
+	backing.artifacts.delete(ref.sha256);
+	await expect(readPlanVersions(handle)).rejects.toThrow();
+
+	const corrupt = await setup(finalReviewScripts);
+	const records = await corrupt.deps.store.read("run");
+	const markdown = records.find(
+		(event) =>
+			event.type === "artifact.recorded" &&
+			event.artifact.kind === "factory-plan-markdown",
+	);
+	if (markdown?.type !== "artifact.recorded")
+		throw new Error("missing markdown artifact");
+	corrupt.backing.artifacts.set(
+		markdown.artifact.sha256,
+		new TextEncoder().encode("corrupt"),
+	);
+	await expect(readPlanVersions(corrupt.handle)).rejects.toThrow(
+		"artifact bytes do not match reference",
+	);
 });

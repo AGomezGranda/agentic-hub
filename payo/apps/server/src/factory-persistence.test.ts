@@ -1,7 +1,16 @@
 import { mkdtemp, readFile, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { answer, approve, openFactory, resume, start } from "@payo/factory";
+import { ExecutionCheckpoint, ExecutionRunConfig } from "@payo/contracts";
+import {
+	answer,
+	approve,
+	beginExecution,
+	openExecution,
+	openFactory,
+	resume,
+	start,
+} from "@payo/factory";
 import { createLimiter } from "@payo/kernel";
 import { createSqliteRunStore } from "@payo/store-sqlite";
 import { expect, it } from "vitest";
@@ -371,6 +380,186 @@ it("reopens an escalation and resumes only when requested", async () => {
 	await resume(handle, { signal: input.signal });
 	expect(handle.checkpoint.stage).toBe("Approval");
 	await deps.store.close();
+});
+
+it("reopens an accepted phase receipt and gates before the next writer", async () => {
+	const approvedPlan = {
+		markdown:
+			"# Plan\n\n## Phase 1\nFoundation.\nAcceptance: foundation works.\n\n## Phase 2\nIntegration.\nAcceptance: integration works.\n",
+		prStrategy: [
+			{
+				id: "pr-multi",
+				title: "Two phases",
+				phases: ["Foundation", "Integration"],
+			},
+		],
+		openQuestions: [{ id: "q", question: "Why?" }],
+	};
+	const { deps, input } = await setup([envelope(approvedPlan), ...clean()]);
+	const source = await start(deps, input);
+	await answer(source, { questionId: "q", text: "Independent phases." });
+	await approve(source);
+	const sourceEvents = await deps.store.read("run");
+
+	const roleNames = [
+		"preparer",
+		"implementer",
+		"scout",
+		"reviewer",
+		"verifier",
+	];
+	const roleArtifacts: Record<
+		string,
+		Awaited<ReturnType<typeof deps.store.putArtifact>>
+	> = {};
+	const roles: Record<string, { model: string | null; timeoutMs: number }> = {};
+	const roleProvenance: Record<string, { path: string; sha: string }> = {};
+	for (const role of roleNames) {
+		const sourceRole = {
+			path: `skills/${role}.md`,
+			sha: `sha-${role}`,
+			content: `${role} instructions`,
+			resources: {},
+		};
+		roleArtifacts[role] = await deps.store.putArtifact(
+			new TextEncoder().encode(JSON.stringify(sourceRole)),
+			{ kind: "factory-role-source-v1", mediaType: "application/json" },
+		);
+		roles[role] = { model: null, timeoutMs: 1_000 };
+		roleProvenance[role] = { path: sourceRole.path, sha: sourceRole.sha };
+	}
+	const execution = await beginExecution(
+		{ store: deps.store },
+		{
+			sourceRunId: "run",
+			prId: "pr-multi",
+			baseCommit: "base-commit",
+			checks: [{ name: "unit", command: "true", args: [], timeout_ms: 1_000 }],
+			roles,
+			roleArtifacts,
+			roleProvenance,
+			maxConcurrentAgents: 2,
+		},
+	);
+	const runId = execution.log.current().runId;
+	const config = ExecutionRunConfig.parse(
+		execution.log.current().config.factory,
+	);
+	const manifest = await deps.store.putArtifact(
+		new TextEncoder().encode(
+			JSON.stringify({
+				pr: { id: "pr-multi", title: "Two phases" },
+				phases: [
+					{
+						id: "phase-1",
+						title: "Foundation",
+						planExcerpt: "## Phase 1\nFoundation.",
+						acceptanceCriteria: ["Acceptance: foundation works."],
+					},
+					{
+						id: "phase-2",
+						title: "Integration",
+						planExcerpt: "## Phase 2\nIntegration.",
+						acceptanceCriteria: ["Acceptance: integration works."],
+					},
+				],
+				prerequisites: [],
+				issues: [],
+			}),
+		),
+		{ kind: "factory-execution-manifest-v1", mediaType: "application/json" },
+	);
+	const putEvidence = (kind: string) =>
+		deps.store.putArtifact(new TextEncoder().encode("{}"), {
+			kind,
+			mediaType: "application/json",
+		});
+	const [report, checks, review] = await Promise.all([
+		putEvidence("factory-execution-implementation-report-v1"),
+		putEvidence("factory-execution-check-results-v1"),
+		putEvidence("factory-execution-review-v1"),
+	]);
+	const receipt = await deps.store.putArtifact(
+		new TextEncoder().encode(
+			JSON.stringify({
+				phaseId: "phase-1",
+				phaseIndex: 0,
+				planHash: config.plan.sha256,
+				startCommit: "base-commit",
+				resultCommit: "phase-one-commit",
+				report,
+				checks,
+				review,
+				summary: "Foundation complete",
+				acceptedCriteria: ["Acceptance: foundation works."],
+				deviations: [],
+			}),
+		),
+		{
+			kind: "factory-execution-phase-receipt-v1",
+			mediaType: "application/json",
+		},
+	);
+	const originalEvents = await deps.store.read(runId);
+	const checkpointEvent = originalEvents.findLast(
+		(event) =>
+			event.type === "artifact.recorded" &&
+			event.artifact.kind === "factory-execution-checkpoint-v1",
+	);
+	if (checkpointEvent?.type !== "artifact.recorded")
+		throw new Error("initial execution checkpoint is missing");
+	const initial = ExecutionCheckpoint.parse(
+		JSON.parse(
+			new TextDecoder().decode(
+				await deps.store.readArtifact(checkpointEvent.artifact.sha256),
+			),
+		),
+	);
+	const next = ExecutionCheckpoint.parse({
+		...initial,
+		revision: initial.revision + 1,
+		stage: "Implement",
+		phaseIndex: 1,
+		scope: "phase",
+		manifest,
+		workspace: {
+			path: join(deps.dataDir, "worktrees", runId),
+			branch: `payo/${runId}`,
+			baseCommit: config.baseCommit,
+			head: "phase-one-commit",
+			fingerprint: "phase-one-snapshot",
+			historyFingerprint: "phase-one-history",
+		},
+		receipts: [receipt],
+	});
+	const nextCheckpoint = await deps.store.putArtifact(
+		new TextEncoder().encode(JSON.stringify(next)),
+		{ kind: "factory-execution-checkpoint-v1", mediaType: "application/json" },
+	);
+	await deps.store.append(
+		runId,
+		[
+			{ type: "artifact.recorded", artifact: manifest, attemptId: null },
+			{ type: "artifact.recorded", artifact: receipt, attemptId: null },
+			{ type: "artifact.recorded", artifact: nextCheckpoint, attemptId: null },
+		],
+		originalEvents.at(-1)?.seq ?? 0,
+	);
+	await deps.store.close();
+
+	const reopenedStore = await createSqliteRunStore({ dataDir: deps.dataDir });
+	try {
+		const reopened = await openExecution({ store: reopenedStore }, runId);
+		expect(reopened.checkpoint).toMatchObject({
+			stage: "Escalated",
+			phaseIndex: 1,
+			receipts: [receipt],
+		});
+		expect(reopened.log.current().attempts.size).toBe(0);
+		expect(await reopenedStore.read("run")).toEqual(sourceEvents);
+	} finally {
+		await reopenedStore.close();
+	}
 });
 
 it("does not advance when a completed planner's checkpoint batch fails", async () => {

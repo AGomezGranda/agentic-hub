@@ -13,6 +13,8 @@ const api = vi.hoisted(() => ({
 	approveRun: vi.fn(),
 	requestChanges: vi.fn(),
 	resumeRun: vi.fn(),
+	getPlanVersions: vi.fn(),
+	submitPlanUpdate: vi.fn(),
 }));
 vi.mock("./api.ts", () => api);
 vi.mock("@web/features/runs/api.ts", () => ({ getRun: api.getRun }));
@@ -97,6 +99,140 @@ beforeEach(() => {
 	);
 	api.requestChanges.mockResolvedValue({ runId: RUN_ID });
 	api.resumeRun.mockResolvedValue({ runId: RUN_ID });
+	api.getPlanVersions.mockResolvedValue([]);
+	api.submitPlanUpdate.mockResolvedValue({ runId: RUN_ID });
+});
+
+it("submits a revision prompt with freshly fetched concurrency values", async () => {
+	const user = userEvent.setup();
+	api.getRunReview.mockResolvedValue({
+		...review(),
+		plan: { ...review().plan, version: 2, workingCopyHash: "a".repeat(64) },
+	});
+	mount();
+	await user.click(await screen.findByRole("button", { name: "Revise plan" }));
+	const prompt = screen.getByLabelText("What should change?");
+	expect(
+		screen.getByRole("button", { name: "Submit revision" }),
+	).toBeDisabled();
+	await user.type(prompt, "Make it clearer");
+	await user.click(screen.getByRole("button", { name: "Submit revision" }));
+	await waitFor(() =>
+		expect(api.submitPlanUpdate).toHaveBeenCalledWith("token", RUN_ID, {
+			prompt: "Make it clearer",
+			expectedVersion: 2,
+			expectedWorkingCopyHash: "a".repeat(64),
+		}),
+	);
+});
+
+it("compares saved versions and confirms restore with current state", async () => {
+	const user = userEvent.setup();
+	api.getRunReview.mockResolvedValue({
+		...review(),
+		plan: { ...review().plan, version: 2, workingCopyHash: "a".repeat(64) },
+	});
+	api.getPlanVersions.mockResolvedValue([
+		{
+			number: 1,
+			source: "agent",
+			markdown: "# First",
+			questions: [],
+			answers: {},
+		},
+		{
+			number: 2,
+			source: "human",
+			markdown: "# Second",
+			questions: [],
+			answers: {},
+		},
+	]);
+	mount();
+	await user.click(await screen.findByRole("button", { name: "History" }));
+	await user.click(screen.getByRole("button", { name: "Version 1 · agent" }));
+	expect(screen.getByText("First")).toBeInTheDocument();
+	await user.click(screen.getByRole("button", { name: "Compare" }));
+	await user.click(
+		screen.getByRole("button", { name: "Use as baseline · v2" }),
+	);
+	expect(screen.getByText("+ # First")).toBeInTheDocument();
+	expect(screen.getByText("− # Second")).toBeInTheDocument();
+	await user.click(
+		screen.getByRole("button", { name: "Restore this version" }),
+	);
+	expect(
+		screen.getByText(/creates a new version and runs review/i),
+	).toBeInTheDocument();
+	await user.click(screen.getByRole("button", { name: "Confirm restore" }));
+	await waitFor(() =>
+		expect(api.submitPlanUpdate).toHaveBeenCalledWith("token", RUN_ID, {
+			version: 1,
+			expectedVersion: 2,
+			expectedWorkingCopyHash: "a".repeat(64),
+		}),
+	);
+});
+
+it("labels an old draft separately from an answer restored by the server", async () => {
+	const user = userEvent.setup();
+	api.getRunReview.mockResolvedValue({
+		...review(),
+		answers: { q1: "First answer" },
+	});
+	mount();
+	const input = await screen.findByLabelText("Why this approach?");
+	await user.clear(input);
+	await user.type(input, "Unsaved text");
+	api.getRunReview.mockResolvedValue({
+		...review(),
+		answers: { q1: "Restored answer" },
+	});
+	window.dispatchEvent(new Event("focus"));
+	expect(
+		await screen.findByText(/Unsaved draft.*Saved answer: Restored answer/),
+	).toBeInTheDocument();
+});
+
+it("keeps the prompt after a conflict and hides restore controls after approval", async () => {
+	const user = userEvent.setup();
+	api.getRunReview.mockResolvedValue({
+		...review(),
+		plan: { ...review().plan, version: 1, workingCopyHash: "a".repeat(64) },
+	});
+	api.submitPlanUpdate.mockRejectedValue(
+		Object.assign(new Error("stale"), { status: 409 }),
+	);
+	api.getPlanVersions.mockResolvedValue([
+		{
+			number: 1,
+			source: "agent",
+			markdown: "# Saved",
+			questions: [],
+			answers: {},
+		},
+	]);
+	mount();
+	await user.click(await screen.findByRole("button", { name: "Revise plan" }));
+	const prompt = screen.getByLabelText("What should change?");
+	await user.type(prompt, "Keep my draft");
+	await user.click(screen.getByRole("button", { name: "Submit revision" }));
+	expect(await screen.findByRole("alert")).toHaveTextContent(/state changed/i);
+	expect(prompt).toHaveValue("Keep my draft");
+	api.getRun.mockResolvedValue(
+		summary({ status: "ended", stage: "Approved", openGates: [] }),
+	);
+	window.dispatchEvent(new Event("focus"));
+	await waitFor(() =>
+		expect(
+			screen.queryByLabelText("What should change?"),
+		).not.toBeInTheDocument(),
+	);
+	await user.click(screen.getByRole("button", { name: "History" }));
+	await user.click(screen.getByRole("button", { name: "Version 1 · agent" }));
+	expect(
+		screen.queryByRole("button", { name: /restore this version/i }),
+	).not.toBeInTheDocument();
 });
 
 afterEach(cleanup);
@@ -164,7 +300,11 @@ it("saves individual answers, refreshes the view, then allows approval", async (
 		screen.getByRole("button", { name: /approve and end the run/i }),
 	).toBeEnabled();
 	await user.click(
-		screen.getByRole("button", { name: /approve and end the run/i }),
+		screen.getByRole("button", { name: "Approve and end the run" }),
+	);
+	expect(api.approveRun).not.toHaveBeenCalled();
+	await user.click(
+		screen.getByRole("button", { name: "Confirm approve and end the run" }),
 	);
 	await waitFor(() =>
 		expect(api.approveRun).toHaveBeenCalledWith("token", RUN_ID),
@@ -229,7 +369,10 @@ it("refreshes external edits on focus and refreshes again after conflicts", asyn
 	await screen.findByText("Externally edited");
 
 	await user.click(
-		screen.getByRole("button", { name: /approve and end the run/i }),
+		screen.getByRole("button", { name: "Approve and end the run" }),
+	);
+	await user.click(
+		screen.getByRole("button", { name: "Confirm approve and end the run" }),
 	);
 	expect(await screen.findByRole("alert")).toHaveTextContent(
 		/state changed|conflict/i,
@@ -250,7 +393,10 @@ it("prevents decisions on a failed pre-command refresh and offers a retry", asyn
 	api.getRunReview.mockRejectedValueOnce(new Error("connection lost"));
 
 	await user.click(
-		screen.getByRole("button", { name: /approve and end the run/i }),
+		screen.getByRole("button", { name: "Approve and end the run" }),
+	);
+	await user.click(
+		screen.getByRole("button", { name: "Confirm approve and end the run" }),
 	);
 	expect(await screen.findByRole("alert")).toHaveTextContent(
 		/connection lost/i,
@@ -267,6 +413,9 @@ it("keeps answer controls keyboard reachable with a visible focus style", async 
 	mount();
 	const textarea = await screen.findByLabelText("Why this approach?");
 
+	await user.tab();
+	expect(screen.getByRole("button", { name: "Review" })).toHaveFocus();
+	await user.tab();
 	await user.tab();
 	expect(screen.getByRole("link", { name: "View activity" })).toHaveFocus();
 	await user.tab();
@@ -294,4 +443,59 @@ it("offers retry and prevents decisions when the review read fails", async () =>
 	expect(
 		await screen.findByRole("heading", { name: "Plan", level: 2 }),
 	).toBeInTheDocument();
+});
+
+it("keeps revision drafts across history navigation and shows the empty archive", async () => {
+	const user = userEvent.setup();
+	mount();
+	await user.click(await screen.findByRole("button", { name: "Revise plan" }));
+	await user.type(
+		screen.getByLabelText("What should change?"),
+		"Keep this draft",
+	);
+	await user.click(screen.getByRole("button", { name: "History" }));
+	expect(
+		screen.queryByRole("button", { name: "Approve and end the run" }),
+	).not.toBeInTheDocument();
+	expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
+	expect(await screen.findByText("No saved versions yet.")).toBeInTheDocument();
+	await user.click(screen.getByRole("button", { name: "Back to review" }));
+	expect(screen.getByLabelText("What should change?")).toHaveValue(
+		"Keep this draft",
+	);
+});
+
+it("opens the newest snapshot and compares to its predecessor with context", async () => {
+	const user = userEvent.setup();
+	api.getPlanVersions.mockResolvedValue([
+		{
+			number: 1,
+			source: "agent",
+			markdown: "# Shared\nOld\nEnd",
+			questions: [],
+			answers: {},
+		},
+		{
+			number: 2,
+			source: "human",
+			markdown: "# Shared\nNew\nEnd",
+			questions: [],
+			answers: {},
+		},
+	]);
+	mount();
+	await user.click(await screen.findByRole("button", { name: "History" }));
+	expect(
+		screen.getByRole("button", { name: "Version 2 · human" }),
+	).toHaveAttribute("aria-pressed", "true");
+	await user.click(screen.getByRole("button", { name: "Compare" }));
+	expect(screen.getByText("v1 → v2")).toBeInTheDocument();
+	expect(screen.getByText("− Old")).toBeInTheDocument();
+	expect(screen.getByText("+ New")).toBeInTheDocument();
+	expect(screen.getByText("# Shared")).toBeInTheDocument();
+	expect(screen.getByText("End")).toBeInTheDocument();
+	expect(screen.getByRole("button", { name: "Baseline · v1" })).toHaveAttribute(
+		"aria-pressed",
+		"true",
+	);
 });

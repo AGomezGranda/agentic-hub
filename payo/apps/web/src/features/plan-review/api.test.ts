@@ -1,4 +1,4 @@
-import { API_BASE_URL } from "@web/shared/api/client.ts";
+import { getApiBaseUrl } from "@web/shared/api/client.ts";
 import { afterEach, expect, it, vi } from "vitest";
 import {
 	answerQuestion,
@@ -43,7 +43,7 @@ it("loads the validated review projection using the selected run URL", async () 
 
 	expect(await getRunReview(token, runId)).toEqual(review);
 	expect(fetchMock).toHaveBeenCalledWith(
-		`${API_BASE_URL}/runs/${runId}/review`,
+		`${getApiBaseUrl()}/runs/${runId}/review`,
 		expect.objectContaining({
 			method: "GET",
 			headers: expect.objectContaining({ Authorization: `Bearer ${token}` }),
@@ -69,10 +69,10 @@ it("sends answers and only the gate-specific commands", async () => {
 	await resumeRun(token, runId);
 
 	expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
-		`${API_BASE_URL}/runs/${runId}/answer`,
-		`${API_BASE_URL}/runs/${runId}/approve`,
-		`${API_BASE_URL}/runs/${runId}/request-changes`,
-		`${API_BASE_URL}/runs/${runId}/resume`,
+		`${getApiBaseUrl()}/runs/${runId}/answer`,
+		`${getApiBaseUrl()}/runs/${runId}/approve`,
+		`${getApiBaseUrl()}/runs/${runId}/request-changes`,
+		`${getApiBaseUrl()}/runs/${runId}/resume`,
 	]);
 	expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
 		method: "POST",

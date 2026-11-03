@@ -1,10 +1,19 @@
 # Payo implementation roadmap
 
-Status: proposed, for review. Breaks the [engine design](engine-design.md) into steps. Each step becomes its own plan through `create-plan`; this document fixes order, scope and exit criteria, not implementation detail.
+Status: planning snapshot, not a live task list. The workspace, kernel, planning
+flow, real adapters, server/CLI, web UI, and approved-plan execution through
+sequential phases, bounded review/repair, and restart recovery are implemented.
+GitHub publication and PR automation remain future work. See [usage](usage.md)
+for current behavior and source code for implementation details.
 
 ## Shape
 
-Build inside-out on fakes first, then swap in real adapters. Every step ends with something runnable and tested. Slice 1 (work item → approved plan) accepts Jira and direct-prompt inputs; steps 1–7 build it, while steps 8–10 are later slices, listed so slice 1 does not paint them into a corner. Linear remains future work.
+The original sequence was to build inside-out on fakes, then swap in real
+adapters. Slice 1 (work item → approved plan) accepts Jira and direct-prompt
+inputs. Steps 1–6 describe the implemented foundation; step 7 records real-run
+tuning goals rather than a verified completion claim. The web UI in step 10 and
+approved-plan execution in step 8 have since been implemented. Step 9 (GitHub/PR
+automation) remains future work; Linear is also future work.
 
 ```mermaid
 flowchart LR
@@ -15,9 +24,9 @@ flowchart LR
   S3 --> S6["6 Real adapters"]
   S5 --> S7["7 First real run"]
   S6 --> S7
-  S7 --> S8["8 Implement per PR"]
-  S8 --> S9["9 Draft PRs + PR review"]
-  S5 --> S10["10 Web UI"]
+  S7 --> S8["8 Implement per PR (implemented)"]
+  S8 --> S9["9 Draft PRs + PR review (future)"]
+  S5 --> S10["10 Web UI (implemented)"]
 ```
 
 Step 6 can run in parallel with steps 4–5 once step 3 has fixed the `AgentRunner` and `AgentEvent` contracts.
@@ -30,7 +39,7 @@ Step 6 can run in parallel with steps 4–5 once step 3 has fixed the `AgentRunn
 
 - pnpm workspace with the package layout from the design (`packages/`, `modules/factory`, `adapters/*`, `apps/*`), empty but wired.
 - Node 24 (type stripping, `node:sqlite`), TS strict with `tsc --noEmit`, Biome, Vitest, Zod.
-- One `pnpm check` that runs lint, types and tests. Add it to the repo README and as a Node 24 job in `.github/workflows/ci.yml`, beside the Python and swarm-viewer jobs.
+- One `pnpm check` that runs lint, types and tests. Add it to the repo README and as a Node 24 job in `.github/workflows/ci.yml`, beside the Python job.
 - Dependency rules as package dependencies plus Biome restricted imports.
 
 **Done when:** `pnpm check` passes. A deliberate `kernel → adapter` or `module → module` import fails it.
@@ -120,21 +129,25 @@ Step 6 can run in parallel with steps 4–5 once step 3 has fixed the `AgentRunn
 **Done when:** those tickets reach Approved or a justified escalation, and every attempt is inspectable from `payo logs`.
 **Output:** a short findings note feeding the step 8 plan.
 
-## Later slices
+## Approved-plan execution (implemented)
 
-Outline only. Each is planned when its predecessor is done, using what slice 1 taught.
-
-### 8. Implementation per PR
-
-`implement-plan` per PR in the PR strategy, in its own worktree. `Checks` port (test, lint, types) gating progress. Implementation review: plan-conformance lens plus the quality lenses, triage, fix, re-check, max 3 rounds, escalation on contradicting findings, failing checks, or a wrong plan. Ends with a branch ready for a draft PR.
+Phase 8 accepts one PR unit by explicit CLI command, pins the approved plan and
+base, validates an executable phase manifest, and executes phases sequentially
+in a retained local branch/worktree. Engine-owned checks and all mandatory
+review lenses gate phase receipts. Verified blockers and failed checks use
+bounded fresh-context repair. The last phase receives full PR-wide checks and
+review with a separate final repair budget. Restart gates preserve edits and
+accepted receipts; explicit resume reconciles partial work and commit intent.
+See [usage](usage.md) for the CLI, `[execution].checks` TOML, local-code trust
+boundary, status, and cleanup ownership.
 
 ### 9. Draft PRs and human PR review
 
 `gh` `CodeHost` adapter. Intent and outcome events around push and PR creation, reconciled against GitHub before any retry. Human PR review gate: code changes go back to implementation review, plan changes back to approval. Record how much you change at PR review, the factory's second quality metric. Mark ready and mark phases done in the plan. A `next PR` gate: the next PR may start once the previous one is open, branching from it, but opens only after the previous one merges and it is rebased onto the base branch.
 
-### 10. Web UI
+### 10. Web UI (implemented)
 
-`apps/web`: Vite, React, TanStack Query, SSE. Runs list, run timeline, attempt logs, gates with their allowed commands, review findings. No plan editing in the browser. Retire `tools/swarm-viewer` once it covers that view.
+`apps/web` provides the local Vite/React console: run creation and list, run workspace with live activity, plan review and gate actions, and shared TOML settings. Plans remain editor-managed. This is the supported dashboard for Payo runs; independent Pi swarms are outside its scope. See [usage](usage.md#web-ui) and [`payo/apps/web/README.md`](../../payo/apps/web/README.md) for the current workflow and app boundaries.
 
 ## Open for review
 

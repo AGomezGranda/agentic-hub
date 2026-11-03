@@ -48,7 +48,7 @@ export function NewRunForm({
 		localError ?? (error instanceof Error ? error.message : null);
 	return (
 		<form className="space-y-5" onSubmit={submit}>
-			<fieldset className="inline-flex rounded-sm bg-[#f1f5f2] p-1">
+			<fieldset className="inline-flex rounded-sm bg-[var(--canvas)] p-1">
 				<legend className="sr-only">Work-item type</legend>
 				{(["jira", "prompt"] as const).map((choice) => (
 					<Button
@@ -132,7 +132,7 @@ export function NewRunForm({
 			{errorMessage ? (
 				<p
 					role="alert"
-					className="rounded-sm border border-[#f1c6b3] bg-[#fff5ef] px-3 py-2.5 text-sm text-[#8d421f]"
+					className="rounded-sm border border-[var(--danger-border)] bg-[var(--danger-surface)] px-3 py-2.5 text-sm text-[var(--danger)]"
 				>
 					{errorMessage}
 				</p>
@@ -151,7 +151,7 @@ export function NewRunForm({
 }
 
 const inputClass =
-	"min-h-11 w-full rounded-sm border border-[var(--line)] bg-white px-3 text-sm outline-none transition placeholder:text-[#a0ada8] focus:border-[var(--accent)] focus:ring-2 focus:ring-[#176b5720]";
+	"min-h-11 w-full rounded-sm border border-[var(--line)] bg-[var(--canvas)] px-3 text-sm outline-none transition placeholder:text-[var(--muted)] focus:border-[var(--accent)] focus:ring-2 focus:ring-[var(--focus-ring)]";
 
 function Field({
 	label,

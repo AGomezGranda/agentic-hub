@@ -9,6 +9,7 @@ const sourceRoot = fileURLToPath(new URL("../apps/web/src/", import.meta.url));
 const featureDependencies: Record<string, readonly string[]> = {
 	connection: [],
 	runs: [],
+	settings: [],
 	"plan-review": ["runs"],
 	"run-workspace": ["runs", "plan-review"],
 };

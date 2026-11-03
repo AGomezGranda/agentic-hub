@@ -1,24 +1,45 @@
 import { randomUUID } from "node:crypto";
 import type {
 	DoctorReport,
+	ImplementRequest,
+	PlanRestoreRequest,
+	PlanUpdateRequest,
+	PlanVersionDetail,
 	RunEvent,
 	RunReview,
 	RunSummary,
 	WorkItemRequest,
 } from "@payo/contracts";
 import {
+	ExecutionRunConfig as ExecutionRunConfigSchema,
+	FactoryRunConfig as FactoryRunConfigSchema,
+} from "@payo/contracts";
+import {
+	acceptPlanUpdate,
 	answer as answerRun,
 	approve as approveRun,
 	assertChangeable,
+	assertExecutionResumable,
 	assertResumable,
+	beginExecution,
 	beginFactory,
+	type ExecutionHandle,
+	executeExecution,
 	executeFactory,
 	type FactoryDeps,
 	type FactoryHandle,
+	findExistingExecution,
+	openExecution,
 	openFactory,
+	QUALITY_EXPECTATIONS,
+	readExecutionSummary,
+	readPlanVersion,
+	readPlanVersions,
 	readRunReview,
 	requestChanges as requestChangesRun,
+	resumeExecution,
 	resume as resumeRun,
+	snapshotRole,
 } from "@payo/factory";
 import {
 	createLimiter,
@@ -32,13 +53,20 @@ import type { AdapterSet } from "./adapters.ts";
 import { createAdapterSet } from "./adapters.ts";
 import type { ServerConfig } from "./config.ts";
 import { runDoctor } from "./doctor.ts";
-import { busy, notFound } from "./errors.ts";
+import { ApiFailure, busy, notFound } from "./errors.ts";
 
 export interface Composition {
 	readonly config: ServerConfig;
 	readonly store: RunStore;
+	implement(sourceRunId: string, input: ImplementRequest): Promise<string>;
 	summary(runId: string): Promise<RunSummary>;
 	review(runId: string): Promise<RunReview>;
+	planVersions(runId: string): Promise<PlanVersionDetail[]>;
+	planVersion(runId: string, number: number): Promise<PlanVersionDetail>;
+	planUpdate(
+		runId: string,
+		input: PlanUpdateRequest | PlanRestoreRequest,
+	): Promise<void>;
 	listRuns(): Promise<RunSummary[]>;
 	readEvents(runId: string, fromSeq?: number): Promise<RunEvent[]>;
 	hasRun(runId: string): boolean;
@@ -89,8 +117,12 @@ export interface CompositionOptions {
 	doctor?: () => Promise<DoctorReport>;
 }
 
-const DEFAULT_ROLE_TIMEOUT_MS = 300_000;
-const EXTENDED_ROLE_TIMEOUT_MS = 300_000;
+function runRole(role: ServerConfig["roles"]["planner"]) {
+	return {
+		model: role.model ? `${role.model.provider}/${role.model.id}` : null,
+		timeoutMs: role.timeoutMs,
+	};
+}
 
 export async function createComposition(
 	options: CompositionOptions,
@@ -109,12 +141,13 @@ export async function createComposition(
 	}
 	const doctor = options.doctor ?? (() => runDoctor(config));
 	const roles = {
-		planner: { model: config.model, timeoutMs: DEFAULT_ROLE_TIMEOUT_MS },
-		reviewer: { model: config.model, timeoutMs: DEFAULT_ROLE_TIMEOUT_MS },
-		verifier: { model: config.model, timeoutMs: EXTENDED_ROLE_TIMEOUT_MS },
-		reviser: { model: config.model, timeoutMs: EXTENDED_ROLE_TIMEOUT_MS },
+		planner: runRole(config.roles.planner),
+		reviewer: runRole(config.roles.reviewer),
+		verifier: runRole(config.roles.verifier),
+		reviser: runRole(config.roles.reviser),
 	};
 	const handles = new Map<string, FactoryHandle>();
+	const executionHandles = new Map<string, ExecutionHandle>();
 	const tasks = new Set<Promise<unknown>>();
 	const controllers = new Set<AbortController>();
 	let stopping = false;
@@ -143,10 +176,70 @@ export async function createComposition(
 		dataDir: config.dataDir,
 		roleSources: adapters.roleSources,
 	});
+	const executionDeps = () => ({
+		store,
+		runner: (adapters.executionRunner ?? adapters.runner)(),
+		limiter,
+		workspace: adapters.executionWorkspace,
+		checks: adapters.checks,
+		dataDir: config.dataDir,
+		loadReviewRoleSnapshots: async (
+			sourceRunId: string,
+			pinnedBase: string,
+		) => {
+			if (!adapters.loadExecutionRoleSources)
+				throw new Error("execution role-source loader is not configured");
+			const sourceEvents = await store.read(sourceRunId);
+			if (sourceEvents.length === 0)
+				throw new Error(`source run ${sourceRunId} not found`);
+			const sourceState = fold(sourceEvents);
+			const sourceConfig = FactoryRunConfigSchema.parse(
+				sourceState.config.factory,
+			);
+			const sources = await adapters.loadExecutionRoleSources(
+				sourceState.repo,
+				pinnedBase,
+			);
+			const settings = (role: "reviewer" | "verifier") => ({
+				model: sourceConfig.roles[role].model,
+				timeoutMs: sourceConfig.roles[role].timeoutMs,
+			});
+			return {
+				roleArtifacts: {
+					scout: await snapshotRole(store, {
+						...sources.scout,
+						addendum: QUALITY_EXPECTATIONS,
+					}),
+					reviewer: await snapshotRole(store, {
+						...sources.reviewer,
+						addendum: QUALITY_EXPECTATIONS,
+					}),
+					verifier: await snapshotRole(store, {
+						...sources.verifier,
+						addendum: QUALITY_EXPECTATIONS,
+					}),
+				},
+				roles: {
+					scout: settings("verifier"),
+					reviewer: settings("reviewer"),
+					verifier: settings("verifier"),
+				},
+			};
+		},
+	});
 
 	for (const runId of ids) {
 		try {
-			handles.set(runId, await openFactory(depsForRun(), runId));
+			const saved = states.get(runId);
+			if (
+				saved &&
+				ExecutionRunConfigSchema.safeParse(saved.config.factory).success
+			)
+				executionHandles.set(
+					runId,
+					await openExecution(executionDeps(), runId),
+				);
+			else handles.set(runId, await openFactory(depsForRun(), runId));
 		} catch (error) {
 			// One unrecoverable record must not block recovery of the others.
 			logFailure(`could not recover run ${runId}`, error);
@@ -184,27 +277,31 @@ export async function createComposition(
 	}
 
 	async function summaryOf(runId: string): Promise<RunSummary> {
-		const handle = handleOf(runId);
-		const state = handle.log.current();
+		const factory = handles.get(runId);
+		const execution = executionHandles.get(runId);
+		if (!factory && !execution) throw notFound(`run ${runId} not found`);
+		const state = (factory ?? execution)?.log.current();
+		if (!state) throw notFound(`run ${runId} not found`);
 		const events = await store.read(runId);
 		const first = events[0]?.at;
 		const last = events.at(-1)?.at;
 		if (!first || !last) throw notFound(`run ${runId} not found`);
+		const workItem = factory?.checkpoint.workItem;
+		const executionSummary = execution
+			? await readExecutionSummary(execution)
+			: undefined;
 		return {
 			runId,
 			repo: state.repo,
 			baseBranch: state.baseBranch,
 			status: state.status,
 			outcome: state.outcome,
-			stage: handle.checkpoint.stage,
-			workItem: handle.checkpoint.workItem
+			stage: execution?.checkpoint.stage ?? factory?.checkpoint.stage ?? null,
+			workItem: workItem
 				? {
-						source: handle.checkpoint.workItem.origin.source,
-						title: handle.checkpoint.workItem.title,
-						key:
-							handle.checkpoint.workItem.origin.source === "jira"
-								? handle.checkpoint.workItem.origin.key
-								: null,
+						source: workItem.origin.source,
+						title: workItem.title,
+						key: workItem.origin.source === "jira" ? workItem.origin.key : null,
 					}
 				: null,
 			startedAt: first,
@@ -218,6 +315,7 @@ export async function createComposition(
 					allowedCommands: [...gate.allowedCommands],
 					reason: gate.reason,
 				})),
+			...(executionSummary ? { execution: executionSummary } : {}),
 		};
 	}
 
@@ -239,9 +337,24 @@ export async function createComposition(
 			return readRunReview(handleOf(runId));
 		},
 
+		async planVersions(runId) {
+			return readPlanVersions(handleOf(runId));
+		},
+		async planVersion(runId, number) {
+			return readPlanVersion(handleOf(runId), number);
+		},
+		async planUpdate(runId, input) {
+			if (stopping) throw busy("server is shutting down");
+			const handle = handleOf(runId);
+			await track(() => acceptPlanUpdate(handle, input));
+			schedule((signal) => executeFactory(handle, { signal }));
+		},
+
 		async listRuns() {
 			const summaries = await Promise.all(
-				[...handles.keys()].map((runId) => summaryOf(runId).catch(() => null)),
+				[...new Set([...handles.keys(), ...executionHandles.keys()])].map(
+					(runId) => summaryOf(runId).catch(() => null),
+				),
 			);
 			return summaries
 				.filter((run): run is RunSummary => run !== null)
@@ -253,16 +366,149 @@ export async function createComposition(
 		},
 
 		async readEvents(runId, fromSeq) {
-			if (!handles.has(runId)) throw notFound(`run ${runId} not found`);
+			if (!handles.has(runId) && !executionHandles.has(runId))
+				throw notFound(`run ${runId} not found`);
 			return store.read(runId, fromSeq);
 		},
 
 		hasRun(runId) {
-			return handles.has(runId);
+			return handles.has(runId) || executionHandles.has(runId);
 		},
 
 		isActive(runId) {
-			return handles.get(runId)?.log.current().status === "active";
+			return (
+				(handles.get(runId) ?? executionHandles.get(runId))?.log.current()
+					.status === "active"
+			);
+		},
+
+		async implement(sourceRunId, input) {
+			if (stopping) throw busy("server is shutting down");
+			const deps = executionDeps();
+			const existing = await findExistingExecution(deps, {
+				sourceRunId,
+				prId: input.prId,
+				baseBranch: input.base,
+				explicitBase: input.base !== undefined,
+			});
+			if (existing) {
+				const runId = existing.log.current().runId;
+				if (!executionHandles.has(runId)) executionHandles.set(runId, existing);
+				return runId;
+			}
+			if (config.checks.length === 0)
+				throw new ApiFailure(
+					400,
+					"invalid_request",
+					"implement requires a nonempty [execution].checks suite",
+				);
+			if (process.platform === "win32")
+				throw new ApiFailure(
+					400,
+					"execution_unavailable",
+					"writable execution requires POSIX process-group cleanup",
+				);
+			const implementer = config.roles.implementer;
+			if (!config.devFakes && !implementer?.model)
+				throw new ApiFailure(
+					400,
+					"invalid_request",
+					"implement requires [roles.implementer].model; configure the writer model before accepting execution",
+				);
+			if (!adapters.executionWorkspace || !adapters.checks)
+				throw new ApiFailure(
+					503,
+					"execution_unavailable",
+					"execution workspace and engine-check adapters are not configured",
+				);
+			if (!adapters.loadExecutionRoleSources)
+				throw new ApiFailure(
+					503,
+					"execution_unavailable",
+					"execution role-source loader is not configured",
+				);
+			let sources: Awaited<
+				ReturnType<NonNullable<AdapterSet["loadExecutionRoleSources"]>>
+			>;
+			let pinnedBase: string;
+			const sourceEvents = await store.read(sourceRunId);
+			if (sourceEvents.length === 0)
+				throw notFound(`source run ${sourceRunId} not found`);
+			const sourceState = fold(sourceEvents);
+			try {
+				pinnedBase = await adapters.executionWorkspace.resolveBase(
+					sourceState.repo,
+					input.base ?? sourceState.baseBranch,
+					new AbortController().signal,
+				);
+				sources = await adapters.loadExecutionRoleSources(
+					sourceState.repo,
+					pinnedBase,
+				);
+			} catch (error) {
+				throw new ApiFailure(
+					400,
+					"execution_roles_unavailable",
+					`cannot load execution role sources: ${error instanceof Error ? error.message : String(error)}`,
+				);
+			}
+			const roleArtifacts = {
+				preparer: await snapshotRole(store, sources.preparer),
+				implementer: await snapshotRole(store, {
+					...sources.implementer,
+					addendum: QUALITY_EXPECTATIONS,
+				}),
+				scout: await snapshotRole(store, {
+					...sources.scout,
+					addendum: QUALITY_EXPECTATIONS,
+				}),
+				reviewer: await snapshotRole(store, {
+					...sources.reviewer,
+					addendum: QUALITY_EXPECTATIONS,
+				}),
+				verifier: await snapshotRole(store, {
+					...sources.verifier,
+					addendum: QUALITY_EXPECTATIONS,
+				}),
+			};
+			const roleSettings = (
+				role: ServerConfig["roles"]["planner"] | undefined,
+			) => ({
+				model: role?.model ? `${role.model.provider}/${role.model.id}` : null,
+				timeoutMs: role?.timeoutMs ?? 300_000,
+			});
+			const roleMap = {
+				preparer: roleSettings(config.roles.verifier),
+				implementer: roleSettings(implementer),
+				scout: roleSettings(config.roles.verifier),
+				reviewer: roleSettings(config.roles.reviewer),
+				verifier: roleSettings(config.roles.verifier),
+			};
+			const handle = await beginExecution(deps, {
+				sourceRunId,
+				prId: input.prId,
+				baseBranch: input.base,
+				baseCommit: pinnedBase,
+				explicitBase: input.base !== undefined,
+				checks: config.checks,
+				roles: roleMap,
+				roleArtifacts,
+				roleProvenance: Object.fromEntries(
+					Object.entries(sources).map(([name, source]) => [
+						name,
+						{
+							path: source.path,
+							sha: source.sha,
+						},
+					]),
+				),
+				maxConcurrentAgents: cap,
+			});
+			const runId = handle.log.current().runId;
+			if (executionHandles.has(runId)) return runId;
+			executionHandles.set(runId, handle);
+			schedule((signal) => executeExecution(handle, { signal }));
+			return runId;
 		},
 
 		async start(input) {
@@ -302,6 +548,12 @@ export async function createComposition(
 		},
 
 		async resume(runId) {
+			const execution = executionHandles.get(runId);
+			if (execution) {
+				assertExecutionResumable(execution);
+				schedule((signal) => resumeExecution(execution, { signal }));
+				return;
+			}
 			const handle = handleOf(runId);
 			assertResumable(handle);
 			schedule((signal) => resumeRun(handle, { signal }));

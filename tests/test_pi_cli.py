@@ -45,7 +45,10 @@ def test_pi_help_documents_subcommands_and_manifest_override(
         with pytest.raises(SystemExit) as exc:
             cli.main(["pi", command, "--help"])
         assert exc.value.code == 0
-        assert "--manifest" in capsys.readouterr().out
+        help_output = capsys.readouterr().out
+        assert "--manifest" in help_output
+        if command in ("apply", "bump"):
+            assert "--dry-run" in help_output
 
 
 def test_isolated_apply_status_release_round_trip(

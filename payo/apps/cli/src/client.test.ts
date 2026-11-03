@@ -1,9 +1,10 @@
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, it, vi } from "vitest";
+import { afterAll, expect, it, vi } from "vitest";
 import {
 	CliClient,
 	ClientError,
@@ -11,7 +12,20 @@ import {
 	SseParser,
 	serverUrl,
 } from "./client.ts";
-import { runCli } from "./index.ts";
+import { runCli as runUnisolatedCli } from "./index.ts";
+
+const testHome = mkdtempSync(join(tmpdir(), "payo-cli-test-home-"));
+afterAll(() => rmSync(testHome, { recursive: true, force: true }));
+
+async function runCli(
+	argv: readonly string[],
+	io: Parameters<typeof runUnisolatedCli>[1] = {},
+): Promise<number> {
+	return runUnisolatedCli(argv, {
+		...io,
+		env: { HOME: testHome, ...io.env },
+	});
+}
 
 const runId = "6f1f1b1e-2b4c-4f7a-9d3e-2f4a5b6c7d8e";
 const summary = {
@@ -34,8 +48,47 @@ async function dataDir(): Promise<string> {
 }
 
 it("resolves the same data directory default as the server", () => {
-	expect(resolveDataDir({ PAYO_DATA_DIR: "/tmp/payo" })).toBe("/tmp/payo");
-	expect(resolveDataDir({}).endsWith("/.payo")).toBe(true);
+	expect(resolveDataDir({ HOME: testHome, PAYO_DATA_DIR: "/tmp/payo" })).toBe(
+		"/tmp/payo",
+	);
+	expect(resolveDataDir({ HOME: testHome })).toBe(join(testHome, ".payo"));
+});
+
+it("keeps the environment-only bootstrap when the default config file is absent", async () => {
+	const home = await mkdtemp(join(tmpdir(), "payo-cli-home-"));
+	try {
+		expect(resolveDataDir({ HOME: home })).toBe(join(home, ".payo"));
+		expect(resolveDataDir({ HOME: home, PAYO_DATA_DIR: "/tmp/env-payo" })).toBe(
+			"/tmp/env-payo",
+		);
+		expect(serverUrl({ HOME: home })).toBe("http://127.0.0.1:7331");
+		expect(serverUrl({ HOME: home, PAYO_PORT: "7444" })).toBe(
+			"http://127.0.0.1:7444",
+		);
+	} finally {
+		await rm(home, { recursive: true, force: true });
+	}
+});
+
+it("uses the shared TOML data directory and configured port with env precedence", async () => {
+	const dir = await mkdtemp(join(tmpdir(), "payo-cli-config-"));
+	const path = join(dir, "config.toml");
+	await writeFile(
+		path,
+		`[server]
+port = 7444
+[paths]
+data_dir = "${join(dir, "file-data")}"`,
+	);
+	const env = { PAYO_CONFIG_FILE: path };
+	expect(resolveDataDir(env)).toBe(join(dir, "file-data"));
+	expect(serverUrl(env)).toBe("http://127.0.0.1:7444");
+	expect(resolveDataDir({ ...env, PAYO_DATA_DIR: join(dir, "env-data") })).toBe(
+		join(dir, "env-data"),
+	);
+	expect(serverUrl({ ...env, PAYO_PORT: "7555" })).toBe(
+		"http://127.0.0.1:7555",
+	);
 });
 
 it("uses the test server URL only in test mode", () => {
@@ -48,6 +101,7 @@ it("uses the test server URL only in test mode", () => {
 	expect(
 		serverUrl({
 			NODE_ENV: "production",
+			HOME: testHome,
 			PAYO_TEST_SERVER_URL: "http://127.0.0.1:4444",
 		}),
 	).toBe("http://127.0.0.1:7331");
@@ -65,6 +119,24 @@ it("sends a bearer token and no Origin header", async () => {
 	const headers = (init?.headers ?? {}) as Record<string, string>;
 	expect(headers.Authorization).toBe("Bearer secret");
 	expect(headers.Origin).toBeUndefined();
+});
+
+it("posts explicit implementation acceptance and returns its execution ID", async () => {
+	let request: { url: string; init?: RequestInit } | undefined;
+	const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
+		request = { url, init };
+		return new Response(JSON.stringify({ runId }), { status: 202 });
+	}) as unknown as typeof fetch;
+	const client = new CliClient("http://127.0.0.1:7331", "secret", fetchImpl);
+
+	expect(
+		await client.implement("approved-run", { prId: "pr-1", base: "payo/pr-0" }),
+	).toBe(runId);
+	expect(request?.url).toContain("/api/v1/runs/approved-run/implement");
+	expect(JSON.parse(String(request?.init?.body))).toEqual({
+		prId: "pr-1",
+		base: "payo/pr-0",
+	});
 });
 
 it("posts canonical prompt and Jira start requests and returns the run ID", async () => {
@@ -124,6 +196,27 @@ it("serializes the legacy-compatible Jira CLI command canonically", async () => 
 		expect(output).toEqual([`${runId}\n`]);
 	} finally {
 		await new Promise<void>((resolve) => server.close(() => resolve()));
+	}
+});
+
+it("runs implement and prints the linked execution ID", async () => {
+	const dir = await dataDir();
+	const server = await serveReport({ runId });
+	try {
+		const output: string[] = [];
+		const code = await runCli(["implement", runId, "--pr", "pr-1"], {
+			env: {
+				PAYO_DATA_DIR: dir,
+				NODE_ENV: "test",
+				PAYO_TEST_SERVER_URL: server.url,
+			},
+			stdout: (text) => output.push(text),
+			stderr: () => {},
+		});
+		expect(code).toBe(0);
+		expect(output).toEqual([`${runId}\n`]);
+	} finally {
+		await server.close();
 	}
 });
 

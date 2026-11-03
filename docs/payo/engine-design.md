@@ -1,6 +1,16 @@
 # Payo engine design
 
-Status: agreed design, partially implemented: real adapters exist behind the ports and the server defaults to them; the web UI does not exist yet. It turns the [agentic factory](agentic-factory.md) flow into an engine and interfaces, as the first workflow module of the [local agent workbench](high-level-architecture.md). Where this document and the architecture document differ on near-term choices, this one wins; the architecture document still describes the long-term shape.
+Status: agreed design and implementation snapshot. Real Jira, Git, Pi, checks,
+and SQLite adapters are wired into the server, and the React web UI is
+implemented. The factory plans and reviews work, then waits for explicit human
+approval. A separate linked execution run can sequentially implement every
+phase of one selected PR unit, run checks and mandatory review, perform bounded
+repairs, and leave a reviewed local branch. It does not push or create PRs. Use
+the [usage guide](usage.md) for supported behavior and the
+[roadmap](implementation-roadmap.md) for planning status. It turns the [agentic factory](agentic-factory.md) vision into the first
+workflow module of the [local agent workbench](high-level-architecture.md). Where
+near-term choices differ, this document wins; the architecture document remains
+the long-term proposal.
 
 ## Decisions
 
@@ -8,9 +18,9 @@ Status: agreed design, partially implemented: real adapters exist behind the por
 |---|---|
 | Location | `payo/` in agentic-hub: a pnpm workspace beside `skills/`. Payo is the platform; the factory is its first module. |
 | Process model | `payo serve` runs one local host process that owns the engine. CLI and web are thin clients over HTTP and SSE. The engine is a plain library, so tests drive it without a server. |
-| Language and runtime | TypeScript on Node 24 LTS, with native type stripping and `node:sqlite`. No Python in the engine. The Python skill installer stays as it is. |
+| Language and runtime | TypeScript on Node 24 or newer, with native type stripping and `node:sqlite`. No Python in the engine. The Python skill installer stays as it is. |
 | Tooling | pnpm workspaces, Biome (lint and format), TS strict with `tsc --noEmit`, Vitest, Zod. |
-| UI | Vite + React SPA (`apps/web`), TanStack Query, SSE for live updates. CLI from day one. No TUI. The plan is edited in your own editor, not in the browser. |
+| UI | Implemented Vite + React SPA (`apps/web`), TanStack Query, and SSE for live updates, alongside the CLI. No TUI. Direct plan edits use the user's editor; the browser supports review, prompt-driven revisions, version restore, and gate decisions, but has no freeform plan editor. |
 | Agent questions | No mid-step conversation in v1. Agents return open questions; the engine gates on them. Implementation never starts until every open question has your answer or explanation. |
 | Durability | An append-only event log in SQLite is the source of truth; state is derived from it. |
 | Observability | Normalised events streamed live, raw harness logs kept, IDs threaded everywhere. No OpenTelemetry until there is a consumer. |
@@ -21,9 +31,10 @@ Status: agreed design, partially implemented: real adapters exist behind the por
 payo/
   packages/
     kernel/        runs, steps, attempts, event log, gates, artifacts, fan-out, ports
-    contracts/     zod schemas: API, events, agent output contracts
+    contracts/     Zod schemas: API, events, agent output contracts
+    config/        shared TOML configuration and precedence
   modules/
-    factory/       work item → PRs: state machine, role specs, convergence rules
+    factory/       planning plus approved-plan phase execution and review
     (later)        pr-review/, incident/, evaluation/
   adapters/
     runner-pi/  runner-fake/  (later runner-claude/, runner-codex/)
@@ -41,15 +52,22 @@ Dependency rules:
 - Adapters implement kernel ports. Only `apps/server` wires them in.
 - `contracts` imports no other `@payo` package.
 - Adapters import only `kernel` and `contracts`, never another adapter or module.
-- `apps/cli` is a thin client and imports only `contracts`.
+- `apps/cli` is a thin client and imports `contracts`, plus `config` only for local bootstrap settings; it never imports the server, modules or adapters.
 - Every layer, including `apps/server`, is barred from relative imports into another package; packages refer to each other by their `@payo` name.
 - The rules are enforced by package dependencies, and by Biome restricted imports where packages alone are not enough.
 
-The kernel holds only what the factory needs and any workflow would reuse. Routing, the model gateway, profiling and the module registry stay in the architecture document until a second module needs them. `tools/swarm-viewer` stays until the Payo web UI covers it.
+The kernel holds only what the factory needs and any workflow would reuse. Routing, the model gateway, profiling and the module registry stay in the architecture document until a second module needs them. The Payo web UI is the supported dashboard for Payo runs; independent Pi swarms are outside its scope.
+
+The current code implements `AgentRunner`, `WorkItemSource`, planning
+`Workspace`, execution-only `ExecutionWorkspace`, `Checks`, and `RunStore` in
+`packages/kernel`, with real adapters under `adapters/`. GitHub `CodeHost`
+operations remain outside this slice.
 
 ## Ownership
 
-The engine owns the flow, an agent owns one step, and the human talks to the engine, never directly to an agent.
+The engine owns the flow, an agent owns one fresh step/session, and the human
+talks to the engine, never directly to an agent. The approved planning run is
+terminal; a linked execution run owns implementation and verification progress.
 
 ```mermaid
 flowchart TB
@@ -132,25 +150,26 @@ Invalid output is retried once with the validation error, then escalated.
 
 | Record | Purpose |
 |---|---|
-| Run | One work item: repo, base branch, effective configuration, current state |
+| Run | One planning or linked execution lifecycle: repo, pinned/base reference, effective configuration, current state |
 | Step | A named stage: `plan`, `plan-review` round N, `approval` gate, … |
 | Attempt | One execution of a step: runner, model, role spec and skill SHA, input artifact hashes, usage, outcome |
 | Event | Append-only, ordered per run. The source of truth |
-| Artifact | Immutable, content-hashed: work-item snapshot, prompt request, plan versions, reviews, verified findings, diffs, raw harness logs |
+| Artifact | Immutable, content-hashed: work-item snapshot, approved plan, execution manifest, phase receipts, checks/reviews, diffs, raw harness logs |
 | Gate | A pending human decision: kind, what it blocks, allowed commands |
 
-Data lives in `~/.payo/`: `payo.db` and `artifacts/`. Prompt request text is stored as a `factory-work-item-request-v1` artifact under `PAYO_DATA_DIR`; `run.created.config` contains only its reference, not the original plaintext. Agents may echo the prompt in attempt events, which authenticated event consumers can read, so this is not a confidentiality boundary. Plans live there, not in the target repo; only lasting outputs such as docs and ADRs are committed. Worktrees live in `~/.payo/worktrees/<run>/`.
+By default, data lives in `~/.payo/`: `payo.db` and `artifacts/`; `[paths].data_dir` or `PAYO_DATA_DIR` can select another absolute path. Prompt request text is stored as a `factory-work-item-request-v1` artifact under the resolved data directory; `run.created.config` contains only its reference, not the original plaintext. Agents may echo the prompt in attempt events, which authenticated event consumers can read, so this is not a confidentiality boundary. Plans live there, not in the target repo. Planning worktrees and execution worktrees live under `~/.payo/worktrees/<run>/`; an execution retains its local `payo/<execution-id>` branch.
 
 Usage and cost stay `unknown` when a harness does not report them, never `0`.
 
 ## Durability rules
 
-- State is derived from events. Restarting the server rebuilds it.
-- On restart, attempts that were running become `interrupted` and raise a gate. Nothing is replayed automatically.
-- External effects (push, PR creation) record an intent event before acting and an outcome event after. An intent without an outcome is reconciled against GitHub before any retry.
-- One writer per run, enforced by `expectedSeq` on append.
+- State is derived from events and immutable artifacts. Restarting the server rebuilds it; execution startup creates a gate rather than scheduling work.
+- Interrupted writers preserve the branch/worktree and reconcile through a fresh context. Checks and reviews are rerun against the current snapshot; accepted receipts are never replayed.
+- Engine-owned local commits persist intent (expected parent/tree/trailer) before acting, then reconcile a matching commit after a crash. Unexpected history remains gated.
+- One writer per execution at a time; no review or check overlaps a writer. Optimistic append protects event progress, while workspace fingerprints bind evidence to a tree.
+- Execution worktrees are retained on success and failure. Payo does not silently force-remove them; the operator owns cleanup after active child processes stop.
 
-## Factory flow, slice 1
+## Factory planning flow
 
 ```mermaid
 stateDiagram-v2
@@ -173,7 +192,38 @@ stateDiagram-v2
 - **Convergence:** the loop stops when no verified P0/P1 finding remains. It escalates after round 3.
 - **Approval:** you edit the plan file in your editor, then `approve`. Approval is rejected while any open question lacks an answer. Answers are written back into the plan. The diff between the agent's last plan version and the approved version is recorded as a quality metric.
 
-Later slices add implementation, checks and implementation review per PR, then draft PRs and the human PR review gate, then the web UI.
+## Approved-plan execution
+
+`payo implement <approved-run-id> --pr <pr-id>` accepts exactly one selected
+PR unit and creates a separate run. The approved plan artifact—not a mutable
+working file—is authoritative. A read-only preparer maps strategy phases to
+validated exact excerpts and checks named prerequisites against the pinned base.
+Each sequential phase gets a fresh implementer context with the full plan, its
+phase input, repository instructions, and completed `PhaseReceipt` artifacts.
+Checks are engine-owned and come from a nonempty operator-configured command
+array; no shell command is read from model output.
+
+A phase advances only after stable checks, all eight mandatory review lenses,
+independent verification, and commit intent reconciliation. The phase receipt
+and next-phase checkpoint append atomically. After the last receipt, Payo checks
+and reviews the complete base-to-result PR diff. Final repairs use a separate
+bounded validation budget and return only to final checks/review; they do not
+re-enter the phase loop. Only clean final evidence ends the run as `reviewed`.
+
+Every phase, repair, and review role is a fresh attempt/session. Immutable
+artifacts and receipts carry context; transcripts do not. Restart creates a
+recovery gate. Resume verifies branch/path/base/history and saved intent, then
+reconciles interrupted writer changes or reruns check/review evidence. It never
+replays accepted phases or silently recreates a missing dirty worktree. Plan
+conflicts require a corrected, newly approved source run.
+
+Writable Pi is a trusted local-code execution boundary, not a sandbox: a writer
+can run code with the server user's permissions and inherited environment.
+Worktree isolation is not filesystem, process, network, or credential
+confinement. Payo retains branches/worktrees on all outcomes and owns local
+phase/final commits; the operator owns cleanup after active work and child
+processes have stopped. There are no push, GitHub, PR-creation, merge, or
+automatic next-PR operations in this slice.
 
 Jira requests are resolved by the Jira adapter; prompt requests resolve in the
 server without invoking `acli`. A Jira login is required for Jira runs, not for
@@ -186,4 +236,4 @@ Linear is future work; there is no source registry or auto-detection.
 - Whether parallel Pi runners sharing one OAuth login race when the token refreshes.
 - Later, not v1: Ollama Cloud as a model provider through Pi's `models.json`. Open: whether its models follow the final JSON envelope reliably, and whether it reports usage and cost (otherwise `unknown`).
 - Whether Biome's restricted-import rules are enough to enforce the dependency rules, or if a dependency checker is needed.
-- The web UI's token prompt and client implementation. The server and CLI already implement the baseline: per-install bearer token, loopback-only binding, exact Origin allowlist, `payo token` handoff, session-memory token storage, and authenticated fetch-based SSE rather than token-bearing URLs or native `EventSource`.
+- Broader UI execution controls and independent Pi-swarm dashboards. The server and CLI implement Payo's local baseline: per-install bearer token, loopback-only binding, exact Origin allowlist, `payo token` handoff, session-memory token storage, and authenticated fetch-based SSE rather than token-bearing URLs or native `EventSource`.

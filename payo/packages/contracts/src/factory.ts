@@ -114,6 +114,17 @@ const FactoryCheckpointSchema = z.object({
 	answers: z.record(z.string(), z.string()),
 	review: ArtifactRef.nullable(),
 	approvalMetric: ArtifactRef.nullable(),
+	pendingPlanUpdate: z
+		.object({
+			kind: z.enum(["prompt", "restore"]),
+			base: ArtifactRef,
+			expectedWorkingCopyHash: z.string(),
+			prompt: ArtifactRef.nullable(),
+			version: z.int().positive().nullable(),
+			result: ArtifactRef.nullable(),
+		})
+		.nullable()
+		.default(null),
 	inFlight: z
 		.object({ stage: FactoryStage, stepIds: z.array(Id).min(1) })
 		.nullable(),
@@ -140,7 +151,7 @@ export const FactoryCheckpoint = z.preprocess((input) => {
 export type FactoryCheckpoint = z.infer<typeof FactoryCheckpointSchema>;
 export const PlanVersion = z.object({
 	number: z.int().positive(),
-	source: z.enum(["agent", "human", "answer"]),
+	source: z.enum(["agent", "human", "answer", "restore"]),
 	markdown: ArtifactRef,
 	plan: PlanOutput,
 	answers: z.record(z.string(), z.string()),

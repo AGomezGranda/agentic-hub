@@ -4,6 +4,7 @@ import {
 	ApiError,
 	DoctorCheck,
 	DoctorReport,
+	ImplementRequest,
 	RunId,
 	RunReview,
 	RunSummary,
@@ -86,6 +87,17 @@ describe("API contracts", () => {
 				workItemRequest: { source: "jira", key: "T" },
 				baseBranch: " ",
 			}).success,
+		).toBe(false);
+	});
+
+	it("validates PR implementation requests", () => {
+		expect(ImplementRequest.parse({ prId: "pr-1" })).toEqual({ prId: "pr-1" });
+		expect(
+			ImplementRequest.parse({ prId: "pr-1", base: "payo/prior" }),
+		).toEqual({ prId: "pr-1", base: "payo/prior" });
+		expect(ImplementRequest.safeParse({ prId: " " }).success).toBe(false);
+		expect(
+			ImplementRequest.safeParse({ prId: "pr-1", base: " " }).success,
 		).toBe(false);
 	});
 

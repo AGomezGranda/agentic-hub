@@ -22,8 +22,8 @@ so skills treat it as serial-only until someone checks.
 
 ## Pi host setup
 
-The CLI-first [Pi handler](docs/pi-handler.md) manages an explicitly owned,
-portable subset of personal package declarations and settings. `pi/manifest.json`
+The CLI-first [Pi handler](docs/pi/pi-handler.md) manages an explicitly owned
+subset of personal package declarations and settings. `pi/manifest.json`
 is the desired state for that subset; `pi apply` makes the machine match it.
 
 The committed manifest is currently the author's selection: three pinned npm
@@ -64,7 +64,7 @@ uv tool install --editable .
 Keep the editable checkout in place: the Pi handler resolves the default manifest
 from it, independently of your working directory. Pi and its runtime prerequisites
 must be installed separately. See the [second-machine bootstrap and release
-checklist](docs/pi-handler.md#second-machine-bootstrap); authenticate locally,
+checklist](docs/pi/pi-handler.md#second-machine-bootstrap); authenticate locally,
 never through credentials committed here.
 
 ## Skills and agents
@@ -80,6 +80,7 @@ Install with `agentic-hub install <name>`, or `agentic-hub sync` for everything.
 | `mucho-texto` | Write a visual, mid-length summary of a plan, report, or RFC; the source is kept |
 | `remove-comment-slop` | Compress verbose comments and docstrings in Python `src/` and `tests/` without changing behavior |
 | `research-codebase` | Answer how something works, with cited `file:line` evidence (read-only) |
+| `dependency-injection` | Apply or audit dependency injection where it creates useful seams |
 | `review-plan` | Review a plan through lenses such as architecture, security, and tests |
 | `review-implementation` | Review the local git diff against its plan phase, then run the audit swarm |
 | `testing-strategy` | Audit a service's tests against the test pyramid and prioritise gaps |
@@ -141,7 +142,7 @@ may run only `pi --version`, and upstream startup can perform its own maintenanc
 so it is not a zero-write check. Package changes require Pi 1.4.0 on POSIX;
 setting-only apply does not launch Pi. The handler preserves unmanaged values and
 has no force-overwrite mode. `pi bump` needs `npm` on PATH and network access. Read
-the [Pi lifecycle and recovery guide](docs/pi-handler.md) before curating packages,
+the [Pi lifecycle and recovery guide](docs/pi/pi-handler.md) before curating packages,
 relocating the checkout, or repairing an interrupted apply.
 
 ## Behavior modes
@@ -172,7 +173,7 @@ any primary mode. `ctrl+r` picks up CLI changes without losing your pending choi
 `mode status` prints `Behavior: <state>` (`OFF`, `COACH`, `RUBBER DUCK`, `MIXED`,
 or `ERROR`) and each host's state, mode, and instruction file. Instruction contents
 are never printed. Instruction-file paths, per-host states, exit codes, and recovery
-steps are in [docs/behavior-modes.md](docs/behavior-modes.md#instruction-files-status-and-recovery).
+steps are in [docs/agentic-hub/behavior-modes.md](docs/agentic-hub/behavior-modes.md#instruction-files-status-and-recovery).
 
 Behavior is independent of skills: install, remove, and sync never inspect or
 change it. There is no per-project, per-host, or machine-sync switch. Uninstalling
@@ -189,9 +190,17 @@ uv run pyrefly check
 
 ### Payo
 
-Payo turns a Jira ticket or direct prompt into an approved implementation plan.
-The current slice stops at approval; it does not write code or open a PR yet. The full walkthrough,
-including gates, recovery, and fake-mode scenarios, is in
+Payo turns a Jira ticket or direct prompt into an approved implementation
+plan. After approval, an explicit `implement` command executes one selected PR
+unit's ordered phases in a linked run, with configured checks, mandatory
+implementation review, bounded repairs, and recovery gates. Each phase and
+repair starts in a fresh agent context; immutable receipts carry accepted work
+forward. Successful execution leaves a reviewed local branch/worktree; Payo
+does not push or create a PR. Writable Pi is trusted local-code execution, not a
+sandbox: it inherits the server user's permissions and environment. Execution
+worktrees are retained on all outcomes, and cleanup belongs to the operator
+once active processes stop. The full walkthrough, including check configuration,
+gates, recovery, and fake-mode scenarios, is in
 [docs/payo/usage.md](docs/payo/usage.md).
 
 The TypeScript workspace in `payo/` requires Node 24 and pnpm (the workspace pins
@@ -205,12 +214,15 @@ pnpm check
 ```
 
 Real Jira (`acli`), workspace (`git`) and runner (`pi`) adapters are the
-default. Real mode needs a Pi login for the configured provider and a repo
-containing `skills/` at the base branch. A Jira login is needed only for Jira
-runs; prompt-only starts do not require `acli`.
+default. Real mode needs a Pi login for every distinct configured role provider,
+a model for each planning/review role, and a repo containing `skills/` at the
+base branch. Execution additionally requires a nonempty `[execution].checks`
+suite and an explicit `[roles.implementer].model`. A Jira login is needed only
+for Jira runs; prompt-only starts do not require `acli`.
 
 ```
-export PAYO_MODEL=<model>            # required in real mode
+# Legacy environment-only setup; TOML configuration is also supported.
+export PAYO_MODEL=<model>
 export PAYO_PI_PROVIDER=anthropic    # default
 pnpm payo serve
 ```
@@ -229,8 +241,69 @@ accepts `PAYO_SCENARIO`.
 pnpm payo serve --dev-fakes
 ```
 
-The server binds only to `127.0.0.1:7331`. In another terminal, run commands from
-`payo/`; `start` prints the run ID that every other command requires.
+#### Configuration
+
+The server and CLI read the same optional `~/.config/payo/config.toml`; from the
+repository root, copy [`payo/config.example.toml`](payo/config.example.toml) as a
+starting point.
+`PAYO_CONFIG_FILE` selects another **absolute** file. The default file may be
+absent, but an explicitly selected missing file is an error. The authenticated
+web **Settings** page is the only Payo surface that writes this file; saving
+rewrites it as canonical TOML (comments and formatting are not preserved),
+validates the whole document, and requires a server restart before the new
+values apply. Unknown keys and invalid values fail rather than being ignored.
+Treat the file as trusted input because `[tools]` chooses executables. Keep
+credentials and provider endpoints in Pi's configuration, not in TOML.
+
+| TOML setting | Default | Meaning |
+|---|---|---|
+| `[server].port` / `web_origins` | `7331` / `[]` | Port range `1..65535`; CORS allows exact loopback origins only. Binding is fixed to `127.0.0.1`. |
+| `[paths].data_dir` / `repo` / `base_branch` | `~/.payo` / server startup directory / `main` | Data and repository paths must be absolute. |
+| `[execution].max_concurrent_agents` | `4` | Positive concurrency cap. |
+| `[execution].checks` | unset | Ordered operator-owned `{ name, command, args, timeout_ms }` suite; required to accept execution, invoked with argument arrays (no shell). |
+| `[tools].pi` / `acli` / `git` | `pi` / `acli` / `git` | Executable programs used by Payo. |
+| `[model].provider` / `id` | `anthropic` / unset | Real mode needs a model for each planning/review role. |
+| `[roles.<role>].timeout_ms` | `300000` | Timeout for planner/reviewer/verifier/reviser; implementer is optional at planning startup. Valid range `1..2147483647`. |
+| `[roles.<role>].model` | Inherits `[model]` | Override with an inline `{ provider, id }` pair. Execution requires an explicit implementer model. |
+
+```toml
+[model]
+provider = "anthropic"
+id = "claude-sonnet-4-5"
+
+[roles.planner]
+timeout_ms = 180000
+model = { provider = "openai", id = "o3" }
+```
+
+Resolution is built-in defaults → TOML → environment overrides → per-run
+`payo start --repo/--base` overrides. Legacy aliases remain available:
+`PAYO_DATA_DIR`, `PAYO_REPO`, `PAYO_BASE_BRANCH`, `PAYO_PORT`,
+`PAYO_MAX_CONCURRENT_AGENTS`, comma-separated `PAYO_WEB_ORIGINS`,
+`PAYO_PI_BIN`, `PAYO_ACLI_BIN`, `PAYO_GIT_BIN`, `PAYO_MODEL`, and
+`PAYO_PI_PROVIDER`. The last two are global field overrides applied to every
+role; `PAYO_MODEL` must not include a provider prefix. `PAYO_TEST_PORT` and
+`PAYO_TEST_SERVER_URL` are accepted only under `NODE_ENV=test`; `NODE_ENV` is a
+process/test control, while fake controls, `VISUAL` and `EDITOR` are not TOML
+settings.
+
+The server always binds only to `127.0.0.1` (default port `7331`). In another
+terminal, run commands from `payo/`; `start` prints the run ID that every other
+command requires.
+
+The web **Settings** page shows the selected config path and active environment
+override names. Environment variables remain authoritative after a save, so
+saved TOML can be shadowed until they are unset. A save presents the revision of
+the exact file bytes and returns `409 conflict` if the file changed first; the
+browser keeps the draft and offers to reload. Check-then-rename cannot close the
+narrow race with an unrelated external writer. On POSIX, saved files use mode
+`0600` and newly created parent directories use `0700`; existing directory
+permissions are unchanged. Windows ACLs are unchanged and mode bits do not
+promise owner-only access. Saving rejects an existing symlink config path. The
+data directory also selects the database and token location, and changing the
+port requires restarting Payo and reconnecting the browser at the new loopback
+port. Keep the web page's exact origin in `[server].web_origins` when it differs
+from the server origin, or the restarted server will reject browser requests.
 
 ```
 pnpm payo start ABC-123 [--repo /path/to/repo] [--base main]
@@ -242,6 +315,7 @@ pnpm payo logs <run-id> [-f]
 pnpm payo edit <run-id>
 pnpm payo answer <run-id> <question-id> <answer...>
 pnpm payo approve <run-id>
+pnpm payo implement <approved-run-id> --pr <pr-id> [--base <ref>]
 pnpm payo request-changes <run-id>
 pnpm payo resume <run-id>
 pnpm payo doctor
@@ -253,16 +327,17 @@ supported. `--prompt` joins trailing arguments with spaces; use `--` when a
 literal prompt token looks like an option, as in `payo start --prompt -- --repo`.
 The source-neutral request supports Jira and prompts; Linear is future work.
 
-The server defaults `PAYO_REPO` to the directory where `payo serve` started and
+`PAYO_REPO` defaults to the directory where `payo serve` started and
 `PAYO_BASE_BRANCH` to `main`; `--repo` and `--base` override them per run. Server
-and CLI share `PAYO_DATA_DIR` (default `~/.payo`) for the SQLite database,
-artifacts (including the original prompt text), plans, and the per-install bearer
-token. Prompt contents are stored as an artifact and are not copied directly into
-`run.created.config`, which contains only its reference. Agent-generated event
-text may echo a prompt and is visible to authenticated event consumers; do not use
-prompts whose contents must be hidden from them. Run `pnpm payo token` only when a client needs
-the token, and never share it. A stopped or crashed server never resumes work on
-its own: restart it, inspect the gate, and run `pnpm payo resume <run-id>`.
+and CLI resolve the same data directory (default `~/.payo`) for the SQLite
+database, artifacts (including the original prompt text), plans, and the
+per-install bearer token. Prompt contents are stored as an artifact and are not
+copied directly into `run.created.config`, which contains only its reference.
+Agent-generated event text may echo a prompt and is visible to authenticated
+event consumers; do not use prompts whose contents must be hidden from them. Run
+`pnpm payo token` only when a client needs the token, and never share it. A
+stopped or crashed server never resumes work on its own: restart it, inspect the
+gate, and run `pnpm payo resume <run-id>`.
 
 The live Pi smoke test is opt-in and needs a ready Pi login plus a real repo at
 the base branch. From the repository root, run `pnpm -C payo smoke`.
@@ -287,15 +362,13 @@ spliced in at install time, so common prose carries no host-specific commands.
 - `meta/`: plans and reviews
 - `payo/`: TypeScript workspace for the Payo engine (real-adapter-by-default server and CLI; see `docs/payo/engine-design.md`)
 
-## Tools
-
-- `tools/swarm-viewer/`: read-only local dashboard for pi-subagents swarm runs (`npm start` in that directory).
-
 ## Docs
 
-- [docs/pi-handler.md](docs/pi-handler.md): Pi declarations, ownership, apply, and recovery
-- [docs/behavior-modes.md](docs/behavior-modes.md): mode contracts, plus instruction files, status, and recovery
-- [docs/behavior-modes-acceptance.md](docs/behavior-modes-acceptance.md): behavior-mode acceptance record
-- [docs/pi-extension-recommendations.txt](docs/pi-extension-recommendations.txt): Pi extension recommendations and adoption order
-- [docs/payo/usage.md](docs/payo/usage.md): how to install, run, review, approve, and recover Payo runs
-- [docs/payo/](docs/payo/): proposed local agent workbench design and research (engine and CLI in `payo/`)
+- [docs/pi/pi-handler.md](docs/pi/pi-handler.md): Pi declaration ownership, apply, and recovery
+- [docs/pi/pi-extension-recommendations.txt](docs/pi/pi-extension-recommendations.txt): researched Pi extension recommendations; not an install manifest
+- [docs/agentic-hub/behavior-modes.md](docs/agentic-hub/behavior-modes.md): mode contracts, instruction-file selection, status, and recovery
+- [docs/agentic-hub/behavior-modes-acceptance.md](docs/agentic-hub/behavior-modes-acceptance.md): dated behavior-mode acceptance evidence and limitations
+- [docs/payo/usage.md](docs/payo/usage.md): current Payo setup, configuration, workflows, UI, and recovery
+- [docs/payo/engine-design.md](docs/payo/engine-design.md): Payo architecture and implementation scope
+- [docs/payo/implementation-roadmap.md](docs/payo/implementation-roadmap.md): planning snapshot; consult usage and code for current behavior
+- [docs/payo/README.md](docs/payo/README.md): Payo documentation map, implementation status, and source layout

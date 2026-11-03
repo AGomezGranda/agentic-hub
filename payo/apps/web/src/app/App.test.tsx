@@ -1,5 +1,11 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import {
+	cleanup,
+	render,
+	screen,
+	waitFor,
+	within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
@@ -8,6 +14,15 @@ import App from "./App.tsx";
 const RUN_ID = "6f1f1b1e-2b4c-4f7a-9d3e-2f4a5b6c7d8e";
 const ORIGIN = "http://127.0.0.1:7331/api/v1";
 const TOKEN = "test-token";
+
+function settingsSnapshot(document: unknown = { server: { port: 7331 } }) {
+	return {
+		configFile: "/tmp/payo-config.toml",
+		revision: "rev-1",
+		document,
+		environmentOverrides: [],
+	};
+}
 
 function runReview() {
 	return {
@@ -43,7 +58,7 @@ function jsonResponse(status: number, body: unknown): Response {
 	});
 }
 
-function mockEmptyServer(startResponse?: Response) {
+function mockEmptyServer(startResponse?: Response, origin = ORIGIN) {
 	const fetchMock = vi.fn(
 		async (input: RequestInfo | URL, init?: RequestInit) => {
 			const url = String(input);
@@ -51,21 +66,27 @@ function mockEmptyServer(startResponse?: Response) {
 			expect(
 				(init?.headers as Record<string, string> | undefined)?.Authorization,
 			).toBe(`Bearer ${TOKEN}`);
-			if (url === `${ORIGIN}/doctor`)
+			if (url === `${origin}/doctor`)
 				return jsonResponse(200, { ok: true, checks: [] });
-			if (url === `${ORIGIN}/runs/${RUN_ID}`)
+			if (url === `${origin}/settings/config` && init?.method === "PUT") {
+				const body = JSON.parse(String(init.body)) as { document: unknown };
+				return jsonResponse(200, settingsSnapshot(body.document));
+			}
+			if (url === `${origin}/settings/config`)
+				return jsonResponse(200, settingsSnapshot());
+			if (url === `${origin}/runs/${RUN_ID}`)
 				return jsonResponse(200, runSummary(RUN_ID));
-			if (url === `${ORIGIN}/runs/${RUN_ID}/review`)
+			if (url === `${origin}/runs/${RUN_ID}/review`)
 				return jsonResponse(200, runReview());
-			if (url === `${ORIGIN}/runs/${RUN_ID}/events`)
+			if (url === `${origin}/runs/${RUN_ID}/events`)
 				return jsonResponse(200, { events: [] });
 			if (url.includes(`/runs/${RUN_ID}/events/stream`))
 				return new Response(new ReadableStream({ start() {} }), {
 					headers: { "Content-Type": "text/event-stream" },
 				});
-			if (url === `${ORIGIN}/runs` && init?.method !== "POST")
+			if (url === `${origin}/runs` && init?.method !== "POST")
 				return jsonResponse(200, { runs: [] });
-			if (url === `${ORIGIN}/runs` && init?.method === "POST")
+			if (url === `${origin}/runs` && init?.method === "POST")
 				return startResponse ?? jsonResponse(202, { runId: RUN_ID });
 			throw new Error(`unexpected request ${init?.method ?? "GET"} ${url}`);
 		},
@@ -84,6 +105,8 @@ afterEach(() => {
 	cleanup();
 	vi.useRealTimers();
 	vi.unstubAllGlobals();
+	vi.restoreAllMocks();
+	sessionStorage.clear();
 	window.history.pushState({}, "", "/");
 });
 
@@ -360,6 +383,47 @@ it("opens a directly addressed run, switches runs, and follows browser back", as
 	expect(
 		await screen.findByRole("heading", { name: "Fake run" }),
 	).toBeInTheDocument();
+
+	const mainNavigation = screen.getByRole("navigation", {
+		name: "Main navigation",
+	});
+	expect(
+		within(mainNavigation).getByRole("link", { name: "New run" }),
+	).toBeInTheDocument();
+	expect(
+		within(mainNavigation).getByRole("link", { name: "Server status" }),
+	).toBeInTheDocument();
+	expect(screen.getByRole("link", { name: /Fake run/ })).toHaveAttribute(
+		"href",
+		`/runs/${RUN_ID}`,
+	);
+	expect(screen.getByRole("link", { name: /Second fake run/ })).toHaveAttribute(
+		"href",
+		`/runs/${RUN_B}`,
+	);
+
+	const selectedRunPath = window.location.pathname;
+	await user.click(screen.getByRole("radio", { name: "Repository" }));
+	expect(window.location.pathname).toBe(selectedRunPath);
+	await user.click(
+		within(mainNavigation).getByRole("link", { name: "New run" }),
+	);
+	expect(window.location.pathname).toBe("/runs/new");
+	expect(screen.getByRole("radio", { name: "Repository" })).toBeChecked();
+	await user.click(
+		within(mainNavigation).getByRole("link", { name: "Server status" }),
+	);
+	expect(window.location.pathname).toBe("/server");
+	expect(screen.getByRole("radio", { name: "Repository" })).toBeChecked();
+	await user.click(screen.getByRole("link", { name: /Second fake run/ }));
+	expect(window.location.pathname).toBe(`/runs/${RUN_B}`);
+	expect(screen.getByRole("radio", { name: "Repository" })).toBeChecked();
+	expect(
+		await screen.findByRole("heading", { name: "Second fake run" }),
+	).toBeInTheDocument();
+	expect(
+		screen.getByRole("navigation", { name: "Main navigation" }),
+	).toBeInTheDocument();
 });
 
 it("rejects malformed run IDs without requesting a run", async () => {
@@ -430,4 +494,172 @@ it("opens only the selected run's swarm and stops its stream on return", async (
 	await user.click(screen.getByRole("link", { name: /Payo/ }));
 	expect(streamSignal?.aborted).toBe(true);
 	expect(screen.getByRole("heading", { name: "New run" })).toBeInTheDocument();
+});
+
+it("loads settings from the connected navigation and marks the route", async () => {
+	const user = userEvent.setup();
+	mockEmptyServer();
+	render(<App />);
+	await connect(user);
+
+	const navigation = screen.getByRole("navigation", {
+		name: "Main navigation",
+	});
+	const settingsLink = within(navigation).getByRole("link", {
+		name: "Settings",
+	});
+	await user.click(settingsLink);
+
+	expect(window.location.pathname).toBe("/settings");
+	expect(settingsLink).toHaveAttribute("aria-current", "page");
+	expect(
+		screen.getByRole("heading", { level: 1, name: "Settings" }),
+	).toBeInTheDocument();
+	expect(
+		await screen.findByRole("heading", { name: "Selected file" }),
+	).toBeInTheDocument();
+
+	window.history.back();
+	await waitFor(() => expect(window.location.pathname).toBe("/"));
+	expect(
+		await screen.findByRole("heading", { name: "New run" }),
+	).toBeInTheDocument();
+});
+
+it("keeps the bearer token in memory and only the port in session storage", async () => {
+	const user = userEvent.setup();
+	mockEmptyServer();
+	render(<App />);
+	await connect(user);
+
+	const keys = Array.from({ length: sessionStorage.length }, (_, index) =>
+		sessionStorage.key(index),
+	);
+	expect(keys).toEqual(["payo.server-port"]);
+	expect(sessionStorage.getItem("payo.server-port")).toBe("7331");
+});
+
+it("uses a non-default loopback port for HTTP requests after reconnect", async () => {
+	const user = userEvent.setup();
+	const nonDefault = "http://127.0.0.1:8123/api/v1";
+	const fetchMock = mockEmptyServer(undefined, nonDefault);
+	render(<App />);
+
+	await user.type(screen.getByLabelText("Server token"), TOKEN);
+	await user.clear(screen.getByLabelText("Server port"));
+	await user.type(screen.getByLabelText("Server port"), "8123");
+	await user.click(screen.getByRole("button", { name: "Connect" }));
+
+	await screen.findByRole("heading", { name: "Recent runs" });
+	expect(sessionStorage.getItem("payo.server-port")).toBe("8123");
+	expect(fetchMock).toHaveBeenCalledWith(
+		`${nonDefault}/doctor`,
+		expect.objectContaining({ method: "GET" }),
+	);
+});
+
+it("rejects an invalid loopback port before connecting", async () => {
+	const user = userEvent.setup();
+	const fetchMock = mockEmptyServer();
+	render(<App />);
+
+	await user.type(screen.getByLabelText("Server token"), TOKEN);
+	await user.clear(screen.getByLabelText("Server port"));
+	await user.type(screen.getByLabelText("Server port"), "0");
+	await user.click(screen.getByRole("button", { name: "Connect" }));
+
+	expect(await screen.findByRole("alert")).toHaveTextContent(
+		/between 1 and 65535/,
+	);
+	expect(fetchMock).not.toHaveBeenCalled();
+	expect(screen.getByLabelText("Server token")).toBeInTheDocument();
+});
+
+it("keeps a dirty settings draft when in-app navigation is cancelled", async () => {
+	const user = userEvent.setup();
+	mockEmptyServer();
+	render(<App />);
+	await connect(user);
+	await user.click(screen.getByRole("link", { name: "Settings" }));
+	const port = await screen.findByLabelText("Server port");
+	await user.clear(port);
+	await user.type(port, "7444");
+
+	const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+	await user.click(screen.getByRole("link", { name: "New run" }));
+	expect(window.location.pathname).toBe("/settings");
+	expect(screen.getByLabelText("Server port")).toHaveValue(7444);
+
+	confirm.mockReturnValue(true);
+	await user.click(screen.getByRole("link", { name: "New run" }));
+	expect(window.location.pathname).toBe("/runs/new");
+	expect(screen.getByRole("heading", { name: "New run" })).toBeInTheDocument();
+});
+
+it("does not prompt when re-selecting the current settings page", async () => {
+	const user = userEvent.setup();
+	mockEmptyServer();
+	render(<App />);
+	await connect(user);
+	await user.click(screen.getByRole("link", { name: "Settings" }));
+	const port = await screen.findByLabelText("Server port");
+	await user.clear(port);
+	await user.type(port, "7444");
+
+	const confirm = vi.spyOn(window, "confirm");
+	await user.click(screen.getByRole("link", { name: "Settings" }));
+	expect(confirm).not.toHaveBeenCalled();
+	expect(screen.getByLabelText("Server port")).toHaveValue(7444);
+
+	confirm.mockReturnValue(false);
+	await user.click(screen.getByRole("link", { name: "New run" }));
+	expect(confirm).toHaveBeenCalledTimes(1);
+	expect(window.location.pathname).toBe("/settings");
+});
+
+it("keeps a dirty settings draft when browser back is cancelled", async () => {
+	const user = userEvent.setup();
+	mockEmptyServer();
+	render(<App />);
+	await connect(user);
+	await user.click(screen.getByRole("link", { name: "Server status" }));
+	await user.click(screen.getByRole("link", { name: "Settings" }));
+	const port = await screen.findByLabelText("Server port");
+	await user.clear(port);
+	await user.type(port, "7444");
+
+	const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+	window.history.back();
+	await waitFor(() => expect(window.location.pathname).toBe("/settings"));
+	expect(screen.getByLabelText("Server port")).toHaveValue(7444);
+
+	confirm.mockReturnValue(true);
+	window.history.back();
+	await waitFor(() => expect(window.location.pathname).toBe("/server"));
+	expect(
+		await screen.findByRole("heading", { name: "Server status" }),
+	).toBeInTheDocument();
+});
+
+it("warns before unloading a dirty settings draft", async () => {
+	const user = userEvent.setup();
+	mockEmptyServer();
+	render(<App />);
+	await connect(user);
+	await user.click(screen.getByRole("link", { name: "Settings" }));
+	const port = await screen.findByLabelText("Server port");
+	await user.clear(port);
+	await user.type(port, "7444");
+
+	const dirtyUnload = new Event("beforeunload", { cancelable: true });
+	window.dispatchEvent(dirtyUnload);
+	expect(dirtyUnload.defaultPrevented).toBe(true);
+
+	await user.click(screen.getByRole("button", { name: "Discard changes" }));
+	await waitFor(() =>
+		expect(screen.getByLabelText("Server port")).toHaveValue(7331),
+	);
+	const cleanUnload = new Event("beforeunload", { cancelable: true });
+	window.dispatchEvent(cleanUnload);
+	expect(cleanUnload.defaultPrevented).toBe(false);
 });

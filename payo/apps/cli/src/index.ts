@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { realpathSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import type { RunEvent, RunSummary } from "@payo/contracts";
+import { lineDiff } from "@payo/contracts";
 import { type Command, parseArgs, UsageError } from "./args.ts";
 import {
 	CliClient,
@@ -49,6 +50,55 @@ export async function runCli(
 		const client = new CliClient(serverUrl(env), await readToken(dataDir));
 
 		switch (command.command) {
+			case "implement":
+				stdout(
+					`${await client.implement(command.runId, { prId: command.prId, base: command.base })}\n`,
+				);
+				return 0;
+			case "plan-versions":
+				for (const item of await client.planVersions(command.runId))
+					stdout(`${item.number}\t${item.source}\n`);
+				return 0;
+			case "plan-show":
+				stdout(
+					(await client.planVersion(command.runId, command.version)).markdown,
+				);
+				return 0;
+			case "plan-diff": {
+				const [from, to] = await Promise.all([
+					client.planVersion(command.runId, command.from),
+					client.planVersion(command.runId, command.to),
+				]);
+				const diff = lineDiff(from.markdown, to.markdown);
+				if (!diff.removed.length && !diff.added.length) {
+					stdout(`Versions ${command.from} and ${command.to} are equal.\n`);
+					return 0;
+				}
+				stdout(
+					`Removed from version ${command.from}:\n${diff.removed.map((line) => `- ${line}`).join("\n")}\nAdded in version ${command.to}:\n${diff.added.map((line) => `+ ${line}`).join("\n")}\n`,
+				);
+				return 0;
+			}
+			case "plan-update":
+			case "plan-restore": {
+				const review = await client.review(command.runId);
+				if (
+					!review.plan.available ||
+					!review.plan.version ||
+					!review.plan.workingCopyHash
+				)
+					throw new Error(
+						"current plan unavailable; inspect the run and retry",
+					);
+				const expected = {
+					expectedVersion: review.plan.version,
+					expectedWorkingCopyHash: review.plan.workingCopyHash,
+				};
+				stdout(
+					`${await client.planUpdate(command.runId, command.command === "plan-update" ? { ...expected, prompt: command.prompt } : { ...expected, version: command.version })}\n`,
+				);
+				return 0;
+			}
 			case "start": {
 				const runId = await client.start({
 					workItemRequest: command.workItemRequest,
@@ -121,6 +171,52 @@ export function formatSummary(summary: RunSummary): string {
 		`status: ${summary.status}${summary.outcome ? ` (${summary.outcome})` : ""}`,
 		`stage: ${summary.stage ?? "unknown"}`,
 	];
+	if (summary.execution) {
+		lines.push(
+			`execution: ${summary.execution.runId} (source: ${summary.execution.sourceRunId}, PR: ${summary.execution.prId})`,
+		);
+		lines.push(
+			`phase: ${summary.execution.phaseIndex + 1}${summary.execution.phaseCount > 0 ? ` of ${summary.execution.phaseCount}` : ""} (${summary.execution.stage})`,
+		);
+		if (summary.execution.completedPhases.length > 0)
+			lines.push(
+				`completed phases: ${summary.execution.completedPhases.length}/${summary.execution.phaseCount}`,
+			);
+		if (summary.execution.resultCommit)
+			lines.push(`result commit: ${summary.execution.resultCommit}`);
+		if (summary.execution.artifactIssues.length > 0)
+			lines.push(
+				`artifact issues: ${summary.execution.artifactIssues.join("; ")}`,
+			);
+		if (summary.execution.branch)
+			lines.push(`branch: ${summary.execution.branch}`);
+		if (summary.execution.worktree)
+			lines.push(`worktree: ${summary.execution.worktree}`);
+		if (summary.execution.statusDetail)
+			lines.push(`execution detail: ${summary.execution.statusDetail}`);
+		if (summary.execution.escalationReason)
+			lines.push(`execution gate: ${summary.execution.escalationReason}`);
+		if (summary.execution.checks.length > 0)
+			lines.push(
+				`checks: ${summary.execution.checks.map((check) => `${check.name}=${check.status}`).join(", ")}`,
+			);
+		if (summary.execution.review) {
+			const review = summary.execution.review;
+			lines.push(
+				`review: ${review.lenses.length}/8 lenses; ${review.findings} findings; ${review.unresolved} unresolved; round ${review.round} (${summary.execution.scope})`,
+			);
+			if (review.uncheckedLenses.length)
+				lines.push(`unchecked lenses: ${review.uncheckedLenses.join(", ")}`);
+			if (review.acceptedFindingIds.length)
+				lines.push(
+					`accepted findings: ${review.acceptedFindingIds.join(", ")}`,
+				);
+			if (review.unresolvedFindingIds.length)
+				lines.push(
+					`unresolved findings: ${review.unresolvedFindingIds.join(", ")}`,
+				);
+		}
+	}
 	if (summary.openGates.length === 0) {
 		lines.push("open gates: none");
 	} else {

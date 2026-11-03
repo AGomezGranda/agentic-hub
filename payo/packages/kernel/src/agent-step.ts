@@ -293,16 +293,20 @@ async function streamAttempt(
 					await new Promise((resolve) => setImmediate(resolve));
 				}
 			} finally {
-				// shortcut: awaiting runner cleanup for up to 1 s; upgrade if a real adapter needs longer.
-				await Promise.race([
-					Promise.resolve()
-						.then(() => iterator.return?.())
-						.then(() => undefined)
-						.catch(() => {}),
-					new Promise<void>((resolve) => {
-						setTimeout(resolve, 1000).unref();
-					}),
-				]);
+				const cleanup = Promise.resolve()
+					.then(() => iterator.return?.())
+					.then(() => undefined);
+				if (spec.tools === "write") {
+					// Writable adapters must kill descendants before resolving iterator cleanup.
+					await cleanup;
+				} else {
+					await Promise.race([
+						cleanup.catch(() => {}),
+						new Promise<void>((resolve) => {
+							setTimeout(resolve, 1000).unref();
+						}),
+					]);
+				}
 			}
 		}
 		await flush();
@@ -403,9 +407,13 @@ function retrySpec(
 	output: ArtifactRef,
 	error: ArtifactRef,
 ): AgentSpec {
+	const writeRepair = spec.tools === "write";
 	return {
 		...spec,
-		instructions: `${spec.instructions}\n\n${RETRY_NOTE}`,
+		tools: writeRepair ? "read-only" : spec.tools,
+		instructions: writeRepair
+			? `${spec.instructions}\n\nThe previous write attempt may already have changed files. Do not edit files or make further changes. Inspect only the supplied previous-output and validation-error inputs, then return a corrected report about the existing changes. ${RETRY_NOTE}`
+			: `${spec.instructions}\n\n${RETRY_NOTE}`,
 		inputs: [
 			...spec.inputs,
 			{ name: "previous-output", ref: output },

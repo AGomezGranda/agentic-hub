@@ -1,5 +1,7 @@
 export * from "./agent.ts";
 export * from "./agent-step.ts";
+export * from "./checks.ts";
+export * from "./execution-workspace.ts";
 export * from "./fanout.ts";
 export * from "./instructions.ts";
 export * from "./run.ts";

@@ -101,7 +101,7 @@ export function corsHeaders(
 		"Access-Control-Allow-Origin": origin,
 		"Access-Control-Allow-Headers":
 			"authorization, content-type, last-event-id",
-		"Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+		"Access-Control-Allow-Methods": "GET, POST, PUT, OPTIONS",
 		Vary: "Origin",
 	};
 }

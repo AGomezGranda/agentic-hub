@@ -18,7 +18,7 @@ export function StageStrip({ stage }: { stage: string | null }) {
 	return (
 		<section
 			aria-label="Current stage"
-			className="flex min-h-14 items-center gap-3 rounded-sm border border-[var(--line)] bg-[#f8faf8] px-4"
+			className="flex min-h-14 items-center gap-3 rounded-sm border border-[var(--line)] bg-[var(--surface)] px-4"
 		>
 			<span
 				aria-hidden="true"

@@ -2,7 +2,13 @@
 
 ## Overview
 
-This document describes my vision for an agentic software factory: an end-to-end flow that takes a work item as input and produces one or more pull requests as output. The current Payo slice accepts either a Jira ticket or a direct prompt; Jira and prompt are explicit source variants, not auto-detected. Linear is future work.
+**Status: target workflow, not the current Payo capability.** This document
+describes a vision for an end-to-end software factory that takes a work item and
+eventually produces one or more pull requests. The implemented Payo flow accepts
+a Jira ticket or direct prompt, creates and reviews a plan, and stops for human
+approval; it does not implement code or open PRs. Jira and prompt are explicit
+source variants, not auto-detected. Linear is future work. See the [usage guide](usage.md)
+for current behavior.
 
 **Out of scope for now:**
 
@@ -15,7 +21,7 @@ This document describes my vision for an agentic software factory: an end-to-end
 - Maximise the quality of the solution, with a strong emphasis on technical excellence.
 - Minimise cost.
 
-## Work-item completion flow (v1)
+## Target work-item completion flow (future vision)
 
 The work item is the unit of work. The factory accepts either a source-resolved Jira ticket or an exact direct prompt and produces one or more PRs as output.
 

@@ -178,6 +178,133 @@ it("coalesces a burst of stream events into one summary refresh at the latest ga
 	expect(screen.getByText("Gate raised · approval")).toBeInTheDocument();
 });
 
+it("keeps streamed events after the run ends", async () => {
+	const historyEvent = {
+		type: "step.started",
+		stepId: STEP_ID,
+		name: "planning",
+		seq: 1,
+		at: timestamp,
+	};
+	const streamEvent = { ...historyEvent, name: "approval", seq: 2 };
+	const ended = {
+		type: "run.ended",
+		outcome: "approved",
+		seq: 3,
+		at: timestamp,
+	};
+	let summaryRequests = 0;
+	vi.stubGlobal(
+		"fetch",
+		vi.fn(async (input: RequestInfo | URL) => {
+			const url = String(input);
+			if (url.endsWith("/review")) return json(200, review());
+			if (url === `${BASE_URL}/runs/${RUN_ID}/events`)
+				return json(200, { events: [historyEvent] });
+			if (url === `${BASE_URL}/runs/${RUN_ID}`) {
+				summaryRequests += 1;
+				return json(
+					200,
+					summaryRequests > 1
+						? { ...summary(), status: "ended", outcome: "approved" }
+						: summary(),
+				);
+			}
+			if (url.includes(`/runs/${RUN_ID}/events/stream`))
+				return new Response(
+					[streamEvent, ended]
+						.map(
+							(event) => `id: ${event.seq}\ndata: ${JSON.stringify(event)}\n\n`,
+						)
+						.join(""),
+					{ status: 200, headers: { "Content-Type": "text/event-stream" } },
+				);
+			throw new Error(`unexpected request ${url}`);
+		}),
+	);
+	const user = userEvent.setup();
+	render(
+		wrap(<RunWorkspace token={TOKEN} runId={RUN_ID} onDisconnect={() => {}} />),
+	);
+
+	expect(await screen.findByText("Ended · approved")).toBeInTheDocument();
+	await user.click(screen.getByRole("button", { name: "Activity view" }));
+	expect(screen.getByText("Started · planning")).toBeInTheDocument();
+	expect(screen.getByText("Started · approval")).toBeInTheDocument();
+});
+
+it("does not refresh the summary for attempt events", async () => {
+	let summaryRequests = 0;
+	const attemptStarted = {
+		type: "attempt.started",
+		attemptId: "af1f1b1e-2b4c-4f7a-9d3e-2f4a5b6c7d8e",
+		stepId: STEP_ID,
+		role: "reviewer",
+		runner: "fake",
+		model: null,
+		roleSpecSha: null,
+		inputArtifacts: [],
+		seq: 1,
+		at: timestamp,
+	};
+	const message = {
+		type: "attempt.event",
+		attemptId: attemptStarted.attemptId,
+		event: { type: "message", text: "Looking at the plan" },
+		seq: 2,
+		at: timestamp,
+	};
+	vi.stubGlobal(
+		"fetch",
+		vi.fn(async (input: RequestInfo | URL) => {
+			const url = String(input);
+			if (url.endsWith("/review")) return json(200, review());
+			if (url === `${BASE_URL}/runs/${RUN_ID}/events`)
+				return json(200, { events: [] });
+			if (url === `${BASE_URL}/runs/${RUN_ID}`) {
+				summaryRequests += 1;
+				return json(200, summary());
+			}
+			if (url.includes(`/runs/${RUN_ID}/events/stream`))
+				return new Response(
+					new ReadableStream<Uint8Array>({
+						start(controller) {
+							controller.enqueue(
+								new TextEncoder().encode(
+									[attemptStarted, message]
+										.map(
+											(event) =>
+												`id: ${event.seq}\ndata: ${JSON.stringify(event)}\n\n`,
+										)
+										.join(""),
+								),
+							);
+						},
+					}),
+					{ status: 200, headers: { "Content-Type": "text/event-stream" } },
+				);
+			throw new Error(`unexpected request ${url}`);
+		}),
+	);
+	const user = userEvent.setup();
+	const queryClient = new QueryClient({
+		defaultOptions: { queries: { retry: false, staleTime: 60_000 } },
+	});
+	render(
+		wrap(
+			<RunWorkspace token={TOKEN} runId={RUN_ID} onDisconnect={() => {}} />,
+			queryClient,
+		),
+	);
+
+	await user.click(
+		await screen.findByRole("button", { name: "Activity view" }),
+	);
+	expect(await screen.findByText("Agent message")).toBeInTheDocument();
+	await new Promise((resolve) => setTimeout(resolve, 180));
+	expect(summaryRequests).toBe(1);
+});
+
 it("reconnects after a dropped stream and resumes from the next sequence", async () => {
 	let streamRequests = 0;
 	const streamUrls: string[] = [];
@@ -312,7 +439,7 @@ it("loads ended-run history without opening a live stream", async () => {
 	).toBe(false);
 });
 
-it("switches between decision, activity and split views", async () => {
+it("switches between decision and activity views", async () => {
 	const user = userEvent.setup();
 	vi.stubGlobal(
 		"fetch",
@@ -336,10 +463,14 @@ it("switches between decision, activity and split views", async () => {
 	await user.click(screen.getByRole("button", { name: "Decision view" }));
 	expect(screen.getByText("Activity", { selector: "h2" })).not.toBeVisible();
 	expect(await screen.findByRole("heading", { name: "Plan" })).toBeVisible();
-	await user.click(screen.getByRole("button", { name: "Activity view" }));
+	await user.click(screen.getByRole("link", { name: "View activity" }));
+	expect(screen.getByRole("button", { name: "Activity view" })).toHaveAttribute(
+		"aria-pressed",
+		"true",
+	);
 	expect(screen.getByRole("heading", { name: "Activity" })).toBeVisible();
 	expect(screen.getByText("Plan", { selector: "h2" })).not.toBeVisible();
-	await user.click(screen.getByRole("button", { name: "Split view" }));
+	await user.click(screen.getByRole("button", { name: "Decision view" }));
 	expect(screen.getByRole("heading", { name: "Plan" })).toBeVisible();
-	expect(screen.getByRole("heading", { name: "Activity" })).toBeVisible();
+	expect(screen.getByText("Activity", { selector: "h2" })).not.toBeVisible();
 });

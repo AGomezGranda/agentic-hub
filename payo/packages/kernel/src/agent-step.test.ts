@@ -189,6 +189,49 @@ describe("runAgentStep", () => {
 		expect(state.gates.size).toBe(0);
 	});
 
+	it("repairs invalid writer output with a read-only attempt that cannot change existing edits", async () => {
+		const { deps } = await setup();
+		const runner = scripted(
+			emits({ type: "result", text: "not json" }),
+			emits(valid),
+		);
+
+		const result = await runAgentStep(
+			deps,
+			stepOf(runner, { spec: specFor({ tools: "write" }) }),
+		);
+
+		expect(result.outcome).toBe("succeeded");
+		expect(runner.calls[0]?.tools).toBe("write");
+		expect(runner.calls[1]?.tools).toBe("read-only");
+		expect(runner.calls[1]?.instructions).toContain("Do not edit files");
+		expect(runner.calls[1]?.instructions).toContain("previous-output");
+	});
+
+	it("waits for write-runner cleanup beyond the read-only cleanup cap", async () => {
+		const { deps } = await setup();
+		let cleaned = false;
+		const runner = scripted(async function* () {
+			try {
+				yield valid;
+				await new Promise<never>(() => {});
+			} finally {
+				await tick(1050);
+				cleaned = true;
+			}
+		});
+		const started = Date.now();
+
+		const result = await runAgentStep(
+			deps,
+			stepOf(runner, { spec: specFor({ tools: "write" }) }),
+		);
+
+		expect(result.outcome).toBe("succeeded");
+		expect(cleaned).toBe(true);
+		expect(Date.now() - started).toBeGreaterThanOrEqual(1000);
+	});
+
 	it("escalates when the retry's output is invalid too, with the output's hash in the gate", async () => {
 		const { store, deps } = await setup();
 		const runner = scripted(

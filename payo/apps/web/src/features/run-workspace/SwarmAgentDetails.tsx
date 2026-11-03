@@ -1,4 +1,10 @@
-import { activityLabel, type SwarmAttempt } from "./swarmState.ts";
+import { Markdown } from "@web/shared/ui/Markdown.tsx";
+import { useEffect, useRef } from "react";
+import {
+	activityLabel,
+	agentEventDetail,
+	type SwarmAttempt,
+} from "./swarmState.ts";
 
 export function SwarmAgentDetails({
 	attempt,
@@ -9,13 +15,28 @@ export function SwarmAgentDetails({
 	onClose: () => void;
 	onOpenRun: () => void;
 }) {
+	const dialog = useRef<HTMLDialogElement>(null);
+	useEffect(() => {
+		const element = dialog.current;
+		element?.showModal();
+		return () => element?.close();
+	}, []);
 	return (
-		<aside
-			aria-label={`Details for ${attempt.role}`}
-			className="mt-4 border border-[var(--line)] bg-[var(--surface-raised)] p-4"
+		<dialog
+			ref={dialog}
+			aria-labelledby="swarm-details-title"
+			onCancel={onClose}
+			className="m-auto max-h-[85vh] w-[min(48rem,calc(100%-2rem))] overflow-y-auto border border-[var(--line)] bg-[var(--surface)] p-6 text-[var(--ink)] shadow-2xl backdrop:bg-black/70"
 		>
 			<div className="flex justify-between gap-3">
-				<h4 className="font-semibold">{attempt.role} details</h4>
+				<div>
+					<h2 id="swarm-details-title" className="text-xl font-semibold">
+						{attempt.role} details
+					</h2>
+					<p className="mt-1 text-sm text-[var(--muted)]">
+						{attempt.model ?? "Model unknown"} · {attempt.status}
+					</p>
+				</div>
 				<button
 					type="button"
 					onClick={onClose}
@@ -24,7 +45,7 @@ export function SwarmAgentDetails({
 					Close details
 				</button>
 			</div>
-			<ol className="mt-3 space-y-3">
+			<ol className="mt-6 space-y-4">
 				{attempt.events.map((event) => {
 					const label =
 						event.type === "attempt.event"
@@ -36,24 +57,27 @@ export function SwarmAgentDetails({
 						event.type === "attempt.finished"
 							? event.error
 							: event.type === "attempt.event"
-								? event.event.type === "message" ||
-									event.event.type === "result"
-									? event.event.text
-									: event.event.type === "error"
-										? event.event.message
-										: undefined
+								? agentEventDetail(event.event)
 								: undefined;
 					return (
-						<li key={event.seq} className="text-sm">
-							<p className="font-medium">{label}</p>
+						<li
+							key={event.seq}
+							className="border border-[var(--line)] bg-[var(--canvas)] p-4 text-sm"
+						>
+							<div className="flex flex-wrap items-baseline justify-between gap-2">
+								<p className="font-medium">{label}</p>
+								<time
+									dateTime={event.at}
+									className="text-xs text-[var(--muted)]"
+								>
+									{event.at}
+								</time>
+							</div>
 							{detail && (
-								<pre className="whitespace-pre-wrap break-words font-sans">
-									{detail}
-								</pre>
+								<div className="mt-3">
+									<Detail text={detail} />
+								</div>
 							)}
-							<time dateTime={event.at} className="text-xs text-[var(--muted)]">
-								{event.at}
-							</time>
 						</li>
 					);
 				})}
@@ -65,6 +89,43 @@ export function SwarmAgentDetails({
 			>
 				Open run workspace
 			</button>
-		</aside>
+		</dialog>
+	);
+}
+
+function Detail({ text }: { text: string }) {
+	let value: unknown;
+	try {
+		value = JSON.parse(text);
+	} catch {
+		return <Markdown>{text}</Markdown>;
+	}
+	if (!value || typeof value !== "object") return <Markdown>{text}</Markdown>;
+	const record = value as Record<string, unknown>;
+	const plan = record.plan;
+	const markdown =
+		typeof record.markdown === "string"
+			? record.markdown
+			: plan &&
+					typeof plan === "object" &&
+					"markdown" in plan &&
+					typeof plan.markdown === "string"
+				? plan.markdown
+				: null;
+	return (
+		<>
+			{markdown !== null && <Markdown>{markdown}</Markdown>}
+			<details
+				className={markdown !== null ? "mt-4" : ""}
+				open={markdown === null || undefined}
+			>
+				<summary className="cursor-pointer text-[var(--accent)]">
+					Structured data
+				</summary>
+				<pre className="mt-2 overflow-x-auto whitespace-pre-wrap break-words border border-[var(--line)] bg-[var(--surface)] p-3 text-xs">
+					{JSON.stringify(value, null, 2)}
+				</pre>
+			</details>
+		</>
 	);
 }

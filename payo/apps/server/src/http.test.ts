@@ -1,10 +1,18 @@
+import { writeFileSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { RunSummary, WorkItem, WorkItemRequest } from "@payo/contracts";
+import { loadPayoConfig, readPayoConfigDocument } from "@payo/config";
+import {
+	ExecutionRunConfig as ExecutionRunConfigSchema,
+	type RunSummary,
+	type WorkItem,
+	type WorkItemRequest,
+} from "@payo/contracts";
+import { QUALITY_EXPECTATIONS } from "@payo/factory";
 import type { FakeStep } from "@payo/runner-fake";
 import { afterEach, expect, it } from "vitest";
 import type { AdapterSet } from "./adapters.ts";
@@ -17,9 +25,11 @@ import {
 	fakeWorkspace,
 } from "./factory-fixtures.ts";
 import { createHandler } from "./http.ts";
+import { createConfigSettingsService } from "./settings.ts";
 
 interface Harness {
 	dataDir: string;
+	configFile: string;
 	token: string;
 	composition: Composition;
 	server: Server;
@@ -31,19 +41,27 @@ const harnesses: Harness[] = [];
 async function setup(
 	env: NodeJS.ProcessEnv = {},
 	adapters?: AdapterSet,
+	configContents = "",
 ): Promise<Harness> {
 	const dataDir = await mkdtemp(join(tmpdir(), "payo-http-"));
-	const config: ServerConfig = loadConfig(
-		{
-			PAYO_DATA_DIR: dataDir,
-			PAYO_REPO: dataDir,
-			NODE_ENV: "test",
-			PAYO_TEST_PORT: "0",
-			...env,
-		},
-		["--dev-fakes"],
-		dataDir,
-	);
+	const configFile = env.PAYO_CONFIG_FILE ?? join(dataDir, "config.toml");
+	if (env.PAYO_CONFIG_FILE === undefined)
+		writeFileSync(configFile, configContents);
+	const serverEnv = {
+		PAYO_DATA_DIR: dataDir,
+		PAYO_REPO: dataDir,
+		NODE_ENV: "test",
+		PAYO_TEST_PORT: "0",
+		...env,
+		PAYO_CONFIG_FILE: configFile,
+	};
+	const config: ServerConfig = loadConfig(serverEnv, ["--dev-fakes"], dataDir);
+	const configSettings = createConfigSettingsService({
+		configFile: config.configFile,
+		env: serverEnv,
+		cwd: dataDir,
+		devFakes: config.devFakes,
+	});
 	const token = await ensureServerToken(dataDir);
 	const composition = await createComposition({
 		config,
@@ -60,11 +78,19 @@ async function setup(
 			webOrigins: config.webOrigins,
 			getPort: () => port,
 			getServices: () => composition,
+			configSettings,
 		}),
 	);
 	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
 	port = (server.address() as AddressInfo).port;
-	const harness = { dataDir, token, composition, server, port };
+	const harness = {
+		dataDir,
+		configFile,
+		token,
+		composition,
+		server,
+		port,
+	};
 	harnesses.push(harness);
 	return harness;
 }
@@ -329,6 +355,26 @@ it("allows an exact-origin preflight without a token, then requires the token", 
 		"http://localhost:5173",
 	);
 	expect(preflight.headers.get("access-control-allow-origin")).not.toBe("*");
+	expect(preflight.headers.get("access-control-allow-methods")).toContain(
+		"PUT",
+	);
+
+	const settingsPreflight = await api(harness, "/api/v1/settings/config", {
+		method: "OPTIONS",
+		token: null,
+		headers: { Origin: "http://localhost:5173" },
+	});
+	expect(settingsPreflight.status).toBe(204);
+	expect(
+		settingsPreflight.headers.get("access-control-allow-methods"),
+	).toContain("PUT");
+
+	const hostilePreflight = await api(harness, "/api/v1/settings/config", {
+		method: "OPTIONS",
+		token: null,
+		headers: { Origin: "http://evil.example" },
+	});
+	expect(hostilePreflight.status).toBe(403);
 
 	const actual = await api(harness, "/api/v1/runs", {
 		method: "POST",
@@ -354,6 +400,132 @@ it("serves the doctor report behind the token and rejects other methods", async 
 		(await api(harness, "/api/v1/doctor", { method: "POST" })).status,
 	).toBe(405);
 	expect((await api(harness, "/api/v1/doctor/anything")).status).toBe(404);
+});
+
+it("serves and saves the selected config document behind the token", async () => {
+	const harness = await setup({ PAYO_BASE_BRANCH: "release" });
+	const initial = await api(harness, "/api/v1/settings/config");
+	expect(initial.status).toBe(200);
+	expect(initial.body).toMatchObject({
+		configFile: harness.configFile,
+		document: {},
+		environmentOverrides: ["PAYO_DATA_DIR", "PAYO_REPO", "PAYO_BASE_BRANCH"],
+	});
+	expect(initial.body.revision).toMatch(/^[0-9a-f]{64}$/);
+
+	const saved = await api(harness, "/api/v1/settings/config", {
+		method: "PUT",
+		body: {
+			revision: initial.body.revision,
+			document: { server: { port: 7444 } },
+		},
+	});
+	expect(saved.status).toBe(200);
+	expect(saved.body).toMatchObject({
+		configFile: harness.configFile,
+		document: { server: { port: 7444 } },
+	});
+	expect(saved.body.revision).not.toBe(initial.body.revision);
+	expect(readPayoConfigDocument(harness.configFile).document).toEqual({
+		server: { port: 7444 },
+	});
+
+	const reloaded = await api(harness, "/api/v1/settings/config");
+	expect(reloaded.body).toEqual(saved.body);
+
+	const stale = await api(harness, "/api/v1/settings/config", {
+		method: "PUT",
+		body: {
+			revision: initial.body.revision,
+			document: { server: { port: 7555 } },
+		},
+	});
+	expect(stale.status).toBe(409);
+	expect(stale.body.code).toBe("conflict");
+	expect(readPayoConfigDocument(harness.configFile).document).toEqual({
+		server: { port: 7444 },
+	});
+});
+
+it("validates settings requests and rejects unsupported methods", async () => {
+	const harness = await setup();
+	const snapshot = await api(harness, "/api/v1/settings/config");
+	const revision = snapshot.body.revision;
+
+	expect(
+		(
+			await api(harness, "/api/v1/settings/config", {
+				method: "PUT",
+				body: { revision, document: { extra: true } },
+			})
+		).status,
+	).toBe(400);
+	expect(
+		(
+			await api(harness, "/api/v1/settings/config", {
+				method: "PUT",
+				body: { revision, document: {}, extra: true },
+			})
+		).status,
+	).toBe(400);
+	expect(
+		(
+			await api(harness, "/api/v1/settings/config", {
+				method: "POST",
+				body: {},
+			})
+		).status,
+	).toBe(405);
+	expect(
+		(await api(harness, "/api/v1/settings/config", { token: null })).status,
+	).toBe(401);
+	expect(
+		(await api(harness, "/api/v1/settings/config", { token: "wrong" })).status,
+	).toBe(401);
+	expect((await api(harness, "/api/v1/settings/other")).status).toBe(404);
+
+	const hostile = await api(harness, "/api/v1/settings/config", {
+		headers: { Origin: "http://evil.example" },
+	});
+	expect(hostile.status).toBe(403);
+	const hostileHost = await raw(harness, {
+		method: "GET",
+		path: "/api/v1/settings/config",
+		headers: {
+			Host: "evil.example",
+			Authorization: `Bearer ${harness.token}`,
+		},
+	});
+	expect(hostileHost.status).toBe(403);
+});
+
+it("saves a file that reloads while the running composition is unchanged", async () => {
+	const harness = await setup();
+	const snapshot = await api(harness, "/api/v1/settings/config");
+	const saved = await api(harness, "/api/v1/settings/config", {
+		method: "PUT",
+		body: {
+			revision: snapshot.body.revision,
+			document: {
+				server: { port: 7444 },
+				execution: { max_concurrent_agents: 2 },
+			},
+		},
+	});
+	expect(saved.status).toBe(200);
+
+	const reloaded = loadPayoConfig(
+		{
+			PAYO_CONFIG_FILE: harness.configFile,
+			PAYO_DATA_DIR: harness.dataDir,
+			PAYO_REPO: harness.dataDir,
+		},
+		harness.dataDir,
+	);
+	expect(reloaded.port).toBe(7444);
+	expect(reloaded.maxConcurrentAgents).toBe(2);
+	expect(harness.composition.config.port).not.toBe(7444);
+	expect(harness.composition.config.maxConcurrentAgents).not.toBe(2);
 });
 
 it("validates bodies, run IDs and unknown runs", async () => {
@@ -439,7 +611,8 @@ it("serves authenticated run review data and current answers", async () => {
 	expect(before.body).toMatchObject({
 		plan: {
 			available: true,
-			markdown: "# Plan\n\nOne open question.\n",
+			markdown:
+				"# Plan\n\n## Phase 1\nImplement the synthetic foundation.\n\nAcceptance: synthetic foundation works.\n\n## Phase 2\nImplement the synthetic integration.\n\nAcceptance: synthetic integration works.\n",
 			questions: [{ id: "q1", question: "Why this approach?" }],
 		},
 		answers: {},
@@ -481,6 +654,138 @@ it("serves authenticated run review data and current answers", async () => {
 		method: "POST",
 	});
 	expect(conflict.status).toBe(409);
+});
+
+it("accepts an implementation durably, exposes execution summaries, and deduplicates retries", async () => {
+	const harness = await setup(
+		{},
+		undefined,
+		`[execution]
+checks = [{ name = "unit", command = "true", args = [], timeout_ms = 1000 }]
+`,
+	);
+	const sourceRunId = await startRun(harness);
+	await waitFor(
+		async () => (await summary(harness, sourceRunId)).stage === "Approval",
+	);
+	await approveRun(harness, sourceRunId);
+
+	const request = () =>
+		api(harness, `/api/v1/runs/${sourceRunId}/implement`, {
+			method: "POST",
+			body: { prId: "pr-1" },
+		});
+	const accepted = await request();
+	expect(accepted.status).toBe(202);
+	expect(accepted.body.runId).toMatch(/^[0-9a-f-]{36}$/);
+	const executionRunId = accepted.body.runId as string;
+	const events = await harness.composition.readEvents(executionRunId);
+	expect(events[0]).toMatchObject({
+		type: "run.created",
+		config: {
+			factory: { kind: "factory-execution", sourceRunId, prId: "pr-1" },
+		},
+	});
+	const created = events[0];
+	if (created?.type !== "run.created")
+		throw new Error("run-created event expected");
+	const executionConfig = ExecutionRunConfigSchema.parse(
+		created.config.factory,
+	);
+	const implementerRef = executionConfig.roleArtifacts.implementer;
+	if (!implementerRef) throw new Error("implementer role artifact expected");
+	const implementerSource = JSON.parse(
+		new TextDecoder().decode(
+			await harness.composition.store.readArtifact(implementerRef.sha256),
+		),
+	) as { addendum?: string; composedSha?: string };
+	expect(implementerSource.addendum).toBe(QUALITY_EXPECTATIONS);
+	expect(implementerSource.composedSha).toEqual(expect.any(String));
+	await waitFor(
+		async () =>
+			(await summary(harness, executionRunId)).execution?.status === "ended",
+	);
+	const result = await summary(harness, executionRunId);
+	expect(result.execution).toMatchObject({
+		runId: executionRunId,
+		sourceRunId,
+		prId: "pr-1",
+		status: "ended",
+		outcome: "reviewed",
+		stage: "Completed",
+		checks: [{ name: "unit", status: "passed" }],
+		review: {
+			lenses: expect.arrayContaining([
+				"plan-conformance",
+				"correctness",
+				"architecture",
+				"code-quality",
+				"tests",
+				"security",
+				"simplicity",
+				"compatibility",
+			]),
+			uncheckedLenses: [],
+			findings: 0,
+			unresolved: 0,
+		},
+	});
+
+	const duplicate = await request();
+	expect(duplicate.status).toBe(202);
+	expect(duplicate.body.runId).toBe(executionRunId);
+	expect(
+		(await harness.composition.store.listRunIds()).filter(
+			(id) => id !== sourceRunId,
+		),
+	).toEqual([executionRunId]);
+	const listed = await api(harness, "/api/v1/runs");
+	expect(listed.body.runs.map((run: RunSummary) => run.runId)).toContain(
+		executionRunId,
+	);
+});
+
+it("rejects implementation when no engine-owned check suite is configured", async () => {
+	const harness = await setup();
+	const sourceRunId = await startRun(harness);
+	await waitFor(
+		async () => (await summary(harness, sourceRunId)).stage === "Approval",
+	);
+	await approveRun(harness, sourceRunId);
+	const response = await api(harness, `/api/v1/runs/${sourceRunId}/implement`, {
+		method: "POST",
+		body: { prId: "pr-1" },
+	});
+	expect(response.status).toBe(400);
+	expect(response.body.message).toContain("nonempty [execution].checks");
+});
+
+it("serves plan history and rejects stale restore requests", async () => {
+	const harness = await setup();
+	const runId = await startRun(harness);
+	await waitFor(
+		async () => (await summary(harness, runId)).stage === "Approval",
+	);
+	expect(
+		(await api(harness, `/api/v1/runs/${runId}/plan-versions`, { token: null }))
+			.status,
+	).toBe(401);
+	const history = await api(harness, `/api/v1/runs/${runId}/plan-versions`);
+	expect(history.status).toBe(200);
+	expect(history.body.versions[0].number).toBe(1);
+	expect(
+		(await api(harness, `/api/v1/runs/${runId}/plan-versions/99`)).status,
+	).toBe(404);
+	const stale = await api(harness, `/api/v1/runs/${runId}/plan-restore`, {
+		method: "POST",
+		body: {
+			version: 1,
+			expectedVersion: 1,
+			expectedWorkingCopyHash: "0".repeat(64),
+		},
+	});
+	expect(stale.status).toBe(409);
+	expect((await summary(harness, runId)).stage).toBe("Approval");
 });
 
 it("reports plan data unavailable before a plan artifact exists", async () => {
@@ -686,6 +991,28 @@ it("returns events from fromSeq and streams ordered IDs until run.ended", async 
 	expect(new Set(ids).size).toBe(ids.length);
 });
 
+it("fails an event stream when polling fails instead of ending normally", async () => {
+	const harness = await setup();
+	const runId = await startRun(harness);
+	harness.composition.readEvents = async () => {
+		throw new Error("synthetic event read failure");
+	};
+
+	const response = await fetch(
+		`http://127.0.0.1:${harness.port}/api/v1/runs/${runId}/events/stream`,
+		{
+			headers: {
+				Authorization: `Bearer ${harness.token}`,
+				Accept: "text/event-stream",
+			},
+		},
+	);
+	expect(response.status).toBe(200);
+	const reader = response.body?.getReader();
+	if (!reader) throw new Error("missing body");
+	await expect(reader.read()).rejects.toThrow();
+});
+
 it("does not cancel a run when the start connection disconnects", async () => {
 	const harness = await setup();
 	const body = JSON.stringify({ ticketKey: "ABC-123" });
@@ -756,7 +1083,15 @@ it("rejects invalid commands and does not accept them with 202", async () => {
 
 it("returns 503 until recovery completes", async () => {
 	const dataDir = await mkdtemp(join(tmpdir(), "payo-http-"));
+	const configFile = join(dataDir, "config.toml");
+	writeFileSync(configFile, "");
 	const token = await ensureServerToken(dataDir);
+	const configSettings = createConfigSettingsService({
+		configFile,
+		env: {},
+		cwd: dataDir,
+		devFakes: true,
+	});
 	let port = 0;
 	const server = createServer(
 		createHandler({
@@ -764,6 +1099,7 @@ it("returns 503 until recovery completes", async () => {
 			webOrigins: [],
 			getPort: () => port,
 			getServices: () => null,
+			configSettings,
 		}),
 	);
 	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -774,6 +1110,13 @@ it("returns 503 until recovery completes", async () => {
 		});
 		expect(response.status).toBe(503);
 		expect((await response.json()).code).toBe("starting");
+
+		const settings = await fetch(
+			`http://127.0.0.1:${port}/api/v1/settings/config`,
+			{ headers: { Authorization: `Bearer ${token}` } },
+		);
+		expect(settings.status).toBe(503);
+		expect((await settings.json()).code).toBe("starting");
 	} finally {
 		await new Promise<void>((resolve) => server.close(() => resolve()));
 	}

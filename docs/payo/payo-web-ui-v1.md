@@ -1,17 +1,26 @@
 ---
 date: 2026-10-31
 title: Payo web UI direction
-status: draft
+status: historical proposal; implementation has landed
 ---
 
 # Payo web UI direction
 
 ## Current state
 
-- The agreed design calls for a local Vite + React SPA, TanStack Query, and HTTP/SSE; plans remain editable in the user's editor ([engine design](../../docs/payo/engine-design.md)).
-- The current factory resolves a Jira ticket or prompt, creates and reviews a plan, and ends the run on approval. An escalation requires an explicit resume ([usage](../../docs/payo/usage.md)).
-- The server exposes run summaries, events, a resumable event stream and gate commands, but not plan content, structured questions or review artifacts for the UI ([HTTP routes](../../payo/apps/server/src/http.ts), [factory contracts](../../payo/packages/contracts/src/factory.ts)).
-- The roadmap anticipates implementation, checks, implementation review and PRs per plan, followed by human PR review ([roadmap](../../docs/payo/implementation-roadmap.md)). Those capabilities do not exist yet.
+The main product direction in this proposal is now reflected in the running
+app; this document no longer tracks phase completion. The current console
+includes run creation/listing, a live run workspace, plan review and gate
+actions, prompt-driven plan revisions and version restore, and a Settings page.
+It has no freeform plan editor, so direct plan edits remain in the user's editor.
+The Payo workflow still stops at plan approval and does not implement code or
+create PRs. See the [usage guide](usage.md) for supported
+behavior and [`payo/apps/web/README.md`](../../payo/apps/web/README.md) for source
+layout and dependency boundaries.
+
+The design decisions below remain useful context, but the phases are historical,
+not a current task list. The server contracts and code are authoritative where
+this proposal differs.
 
 ## Product direction
 
@@ -55,7 +64,7 @@ Add server integration tests for authorized run-scoped reads, missing artifacts 
 
 ### 4. Validate and refine
 
-Exercise the full fake workflow, keyboard navigation, narrow layouts and connection failures. Compare the Payo activity view with `tools/swarm-viewer` before any retirement decision: the viewer also reads independent Pi swarm data, so Payo run coverage alone does not establish replacement. Document how to launch and use the UI in `docs/payo/usage.md`.
+Exercise the full fake workflow, keyboard navigation, narrow layouts and connection failures. Validate the Payo activity view against Payo run events; independent Pi swarms are outside its scope. Document how to launch and use the UI in `docs/payo/usage.md`.
 
 Run `pnpm -C payo check` and the web build; manually verify the flows above and record any gaps. A browser end-to-end smoke test is appropriate only if the implementation introduces a suitable existing test harness or a concrete integration gap warrants one.
 

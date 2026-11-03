@@ -1,9 +1,9 @@
 import type { RunEvent, RunSummary } from "@payo/contracts";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getRun } from "@web/features/runs/api.ts";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { getRunEvents } from "./api.ts";
-import { EventLog, streamRunEvents } from "./stream.ts";
+import { EventLog, MalformedEventError, streamRunEvents } from "./stream.ts";
 
 type ConnectionState =
 	| "loading"
@@ -11,6 +11,7 @@ type ConnectionState =
 	| "connected"
 	| "reconnecting"
 	| "unauthorized"
+	| "failed"
 	| "ended";
 
 const RECONNECT_INITIAL_MS = 250;
@@ -31,17 +32,24 @@ export function useRunActivity(token: string, runId: string) {
 		queryKey: ["events", token, runId],
 		queryFn: ({ signal }) => getRunEvents(token, runId, signal),
 		staleTime: Number.POSITIVE_INFINITY,
+		retry: 2,
 	});
 	const [connection, setConnection] = useState<ConnectionState>("loading");
 	const [connectionError, setConnectionError] = useState<string | null>(null);
 	const [events, setEvents] = useState<RunEvent[]>([]);
+	const logKey = `${token}:${runId}`;
+	const logRef = useRef<{ key: string; log: EventLog } | null>(null);
 	const hasRunSummary = run.data !== undefined;
 	const isRunEnded = run.data?.status === "ended";
 
 	useEffect(() => {
 		if (!hasRunSummary || !history.data) return;
-		const log = new EventLog(history.data);
-		setEvents(log.events);
+		const current = logRef.current;
+		const entry =
+			current?.key === logKey ? current : { key: logKey, log: new EventLog() };
+		logRef.current = entry;
+		const log = entry.log;
+		setEvents(log.merge(history.data));
 		if (isRunEnded) {
 			setConnection("ended");
 			return;
@@ -59,6 +67,10 @@ export function useRunActivity(token: string, runId: string) {
 				queryClient.invalidateQueries({ queryKey: summaryKey, exact: true }),
 				queryClient.invalidateQueries({
 					queryKey: ["review", token, runId],
+					exact: true,
+				}),
+				queryClient.invalidateQueries({
+					queryKey: ["plan-versions", token, runId],
 					exact: true,
 				}),
 				queryClient.invalidateQueries({
@@ -111,15 +123,19 @@ export function useRunActivity(token: string, runId: string) {
 						},
 						onEvent: (event) => {
 							const update = log.add(event);
-							if (update.added) {
-								setEvents(update.events);
-								if (event.type === "run.ended") {
-									if (summaryTimer) clearTimeout(summaryTimer);
-									setConnection("ended");
-									void refreshSummary();
-								} else {
-									scheduleSummaryRefresh();
-								}
+							if (!update.added) return;
+							setEvents(update.events);
+							if (event.type === "run.ended") {
+								if (summaryTimer) clearTimeout(summaryTimer);
+								setConnection("ended");
+								void refreshSummary();
+							} else if (
+								event.type === "step.started" ||
+								event.type === "step.finished" ||
+								event.type === "gate.raised" ||
+								event.type === "gate.resolved"
+							) {
+								scheduleSummaryRefresh();
 							}
 						},
 					});
@@ -135,6 +151,13 @@ export function useRunActivity(token: string, runId: string) {
 					);
 				} catch (error) {
 					if (controller.signal.aborted) return;
+					if (error instanceof MalformedEventError) {
+						setConnection("failed");
+						setConnectionError(
+							"Live stream sent an event the console could not read. Reload the page to try again.",
+						);
+						return;
+					}
 					if (
 						error instanceof Error &&
 						"status" in error &&
@@ -176,6 +199,7 @@ export function useRunActivity(token: string, runId: string) {
 		hasRunSummary,
 		history.data,
 		isRunEnded,
+		logKey,
 		queryClient,
 		runId,
 		summaryKey,

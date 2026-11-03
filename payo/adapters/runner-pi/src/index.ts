@@ -1,4 +1,9 @@
-import { execFile, type SpawnOptions, spawn } from "node:child_process";
+import {
+	type ChildProcess,
+	execFile,
+	type SpawnOptions,
+	spawn,
+} from "node:child_process";
 import { appendFile, mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type {
@@ -73,6 +78,8 @@ export function createPiRunner(options: PiRunnerOptions): AgentRunner {
 				}).catch(() => {});
 			}
 
+			if (spec.tools === "write" && process.platform === "win32")
+				throw new Error("writable Pi execution requires POSIX process groups");
 			const instructions = await instructionsWithInputs(
 				spec,
 				options.readArtifact,
@@ -88,6 +95,7 @@ export function createPiRunner(options: PiRunnerOptions): AgentRunner {
 					PAYO_ATTEMPT_ID: correlation.attemptId,
 				},
 				shell: false,
+				detached: spec.tools === "write",
 			};
 			const child = spawnFn(bin, args, spawnOptions);
 			const state: PiMapState = {
@@ -103,6 +111,7 @@ export function createPiRunner(options: PiRunnerOptions): AgentRunner {
 
 			let exited = false;
 			let terminated = false;
+			let termination: Promise<void> | undefined;
 			let spawnError: Error | null = null;
 			let exitCode: number | null = null;
 			const spawnFailure = (): Error | null => spawnError;
@@ -123,17 +132,25 @@ export function createPiRunner(options: PiRunnerOptions): AgentRunner {
 					resolve();
 				});
 			});
-			const terminate = () => {
-				if (exited || terminated) return;
+			const terminate = (): Promise<void> => {
+				if (spec.tools !== "write") {
+					if (!exited && !terminated) {
+						terminated = true;
+						child.kill("SIGTERM");
+						const timer = setTimeout(() => {
+							if (!exited) child.kill("SIGKILL");
+						}, KILL_GRACE_MS);
+						timer.unref();
+					}
+					return Promise.resolve();
+				}
+				if (termination) return termination;
 				terminated = true;
-				child.kill("SIGTERM");
-				const timer = setTimeout(() => {
-					if (!exited) child.kill("SIGKILL");
-				}, KILL_GRACE_MS);
-				timer.unref();
+				termination = terminateWriteProcessGroup(child, KILL_GRACE_MS);
+				return termination;
 			};
 			const onAbort = () => {
-				terminate();
+				void terminate().catch(() => {});
 				stdout?.destroy();
 				stderr?.destroy();
 			};
@@ -246,12 +263,74 @@ export function createPiRunner(options: PiRunnerOptions): AgentRunner {
 				throw error;
 			} finally {
 				signal.removeEventListener("abort", onAbort);
-				terminate();
+				await terminate();
 				stdout?.destroy();
 				stderr?.destroy();
+				if (spec.tools === "write") await closed;
 			}
 		},
 	};
+}
+
+async function terminateWriteProcessGroup(
+	child: ChildProcess,
+	graceMs: number,
+): Promise<void> {
+	const pid = child.pid;
+	if (pid === undefined) {
+		child.kill("SIGTERM");
+		return;
+	}
+	signalProcessGroup(pid, "SIGTERM", child);
+	if (await waitForGroupExit(pid, graceMs)) return;
+	signalProcessGroup(pid, "SIGKILL", child);
+	while (processGroupExists(pid)) await delay(25);
+}
+
+function signalProcessGroup(
+	pid: number,
+	signal: NodeJS.Signals,
+	child: ChildProcess,
+): void {
+	try {
+		process.kill(-pid, signal);
+	} catch (error) {
+		if (!isNoSuchProcess(error)) child.kill(signal);
+	}
+}
+
+async function waitForGroupExit(
+	pid: number,
+	timeoutMs: number,
+): Promise<boolean> {
+	const deadline = Date.now() + timeoutMs;
+	while (processGroupExists(pid)) {
+		if (Date.now() >= deadline) return false;
+		await delay(25);
+	}
+	return true;
+}
+
+function processGroupExists(pid: number): boolean {
+	try {
+		process.kill(-pid, 0);
+		return true;
+	} catch (error) {
+		return !isNoSuchProcess(error);
+	}
+}
+
+function isNoSuchProcess(error: unknown): boolean {
+	return (
+		typeof error === "object" &&
+		error !== null &&
+		"code" in error &&
+		error.code === "ESRCH"
+	);
+}
+
+function delay(ms: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export function mapPiRecord(record: unknown, state: PiMapState): AgentEvent[] {

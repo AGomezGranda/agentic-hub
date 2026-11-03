@@ -1,20 +1,38 @@
-import { homedir } from "node:os";
-import { describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterAll, describe, expect, it } from "vitest";
 import {
 	assertListenerPort,
+	assertRealModeModels,
 	DEFAULT_MAX_CONCURRENT_AGENTS,
-	loadConfig,
+	loadConfig as loadRawConfig,
 	PRODUCTION_PORT,
-	resolveDataDir,
+	resolveDataDir as resolveRawDataDir,
 } from "./config.ts";
 
 const cwd = "/repo";
+const testHome = mkdtempSync(join(tmpdir(), "payo-server-test-home-"));
+
+afterAll(() => rmSync(testHome, { recursive: true, force: true }));
+
+function loadConfig(
+	env: NodeJS.ProcessEnv = {},
+	argv: readonly string[] = [],
+	workingDirectory: string = cwd,
+) {
+	return loadRawConfig({ HOME: testHome, ...env }, argv, workingDirectory);
+}
+
+function resolveDataDir(env: NodeJS.ProcessEnv = {}): string {
+	return resolveRawDataDir({ HOME: testHome, ...env });
+}
 
 describe("server config", () => {
 	it("uses documented defaults", () => {
 		const config = loadConfig({}, [], cwd);
 		expect(config).toMatchObject({
-			dataDir: `${homedir()}/.payo`,
+			dataDir: join(testHome, ".payo"),
 			repo: cwd,
 			baseBranch: "main",
 			maxConcurrentAgents: DEFAULT_MAX_CONCURRENT_AGENTS,
@@ -133,8 +151,57 @@ describe("server config", () => {
 			expect(() => assertListenerPort(value)).toThrow(/between 0 and 65535/);
 	});
 
+	it("resolves shared server settings from TOML before environment overrides", () => {
+		const dir = mkdtempSync(join(tmpdir(), "payo-server-config-"));
+		const path = join(dir, "config.toml");
+		writeFileSync(
+			path,
+			`[server]
+port = 7444
+[paths]
+data_dir = "/tmp/from-file"
+repo = "/repo-from-file"
+base_branch = "develop"
+[execution]
+max_concurrent_agents = 2`,
+		);
+		try {
+			const config = loadConfig(
+				{
+					PAYO_CONFIG_FILE: path,
+					PAYO_DATA_DIR: "/tmp/from-env",
+					PAYO_PORT: "7555",
+				},
+				[],
+				cwd,
+			);
+			expect(config).toMatchObject({
+				dataDir: "/tmp/from-env",
+				repo: "/repo-from-file",
+				baseBranch: "develop",
+				maxConcurrentAgents: 2,
+				port: 7555,
+			});
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("requires models for every role only in real mode", () => {
+		const real = loadConfig({}, [], cwd);
+		expect(() => assertRealModeModels(real)).toThrow(
+			/planner.*reviewer.*verifier.*reviser/,
+		);
+		expect(() =>
+			assertRealModeModels(loadConfig({}, ["--dev-fakes"], cwd)),
+		).not.toThrow();
+		expect(() =>
+			assertRealModeModels(loadConfig({ PAYO_MODEL: "model" }, [], cwd)),
+		).not.toThrow();
+	});
+
 	it("resolves the data directory from the environment", () => {
 		expect(resolveDataDir({ PAYO_DATA_DIR: "/tmp/x" })).toBe("/tmp/x");
-		expect(resolveDataDir({})).toBe(`${homedir()}/.payo`);
+		expect(resolveDataDir({})).toBe(join(testHome, ".payo"));
 	});
 });

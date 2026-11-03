@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ExecutionSummary } from "./execution.ts";
 import {
 	Finding,
 	OpenQuestion,
@@ -45,11 +46,40 @@ export const StartRunRequest = z
 	}));
 export type StartRunRequest = z.infer<typeof StartRunRequest>;
 
+export const ImplementRequest = z.object({
+	prId: nonBlank,
+	base: nonBlank.optional(),
+});
+export type ImplementRequest = z.infer<typeof ImplementRequest>;
+
 export const AnswerRequest = z.object({
 	questionId: nonBlank,
 	text: nonBlank,
 });
 export type AnswerRequest = z.infer<typeof AnswerRequest>;
+
+const concurrency = {
+	expectedVersion: z.int().positive(),
+	expectedWorkingCopyHash: z.string().regex(/^[0-9a-f]{64}$/),
+};
+export const PlanUpdateRequest = z.object({ ...concurrency, prompt: nonBlank });
+export type PlanUpdateRequest = z.infer<typeof PlanUpdateRequest>;
+export const PlanRestoreRequest = z.object({
+	...concurrency,
+	version: z.int().positive(),
+});
+export type PlanRestoreRequest = z.infer<typeof PlanRestoreRequest>;
+export const PlanVersionDetail = z.object({
+	number: z.int().positive(),
+	source: z.enum(["agent", "human", "answer", "restore"]),
+	markdown: z.string(),
+	questions: z.array(OpenQuestion),
+	answers: z.record(z.string(), z.string()),
+});
+export type PlanVersionDetail = z.infer<typeof PlanVersionDetail>;
+export const PlanVersionList = z.object({
+	versions: z.array(PlanVersionDetail),
+});
 
 export const ApiError = z.object({ code: nonBlank, message: nonBlank });
 export type ApiError = z.infer<typeof ApiError>;
@@ -93,6 +123,7 @@ export const RunSummary = z.object({
 	startedAt: z.string().min(1),
 	updatedAt: z.string().min(1),
 	openGates: z.array(OpenGateSummary),
+	execution: ExecutionSummary.optional(),
 });
 export type RunSummary = z.infer<typeof RunSummary>;
 
@@ -114,6 +145,11 @@ export const RunReview = z.object({
 			markdown: z.string(),
 			editorPath: nonBlank.nullable(),
 			questions: z.array(OpenQuestion),
+			version: z.int().positive().optional(),
+			workingCopyHash: z
+				.string()
+				.regex(/^[0-9a-f]{64}$/)
+				.optional(),
 		}),
 	]),
 	answers: z.record(z.string(), z.string()),

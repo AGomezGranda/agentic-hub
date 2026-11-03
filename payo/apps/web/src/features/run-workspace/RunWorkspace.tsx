@@ -15,9 +15,7 @@ export function RunWorkspace({
 	runId: string;
 	onDisconnect: () => void;
 }) {
-	const [view, setView] = useState<"swarm" | "split" | "decision" | "activity">(
-		"swarm",
-	);
+	const [view, setView] = useState<"swarm" | "decision" | "activity">("swarm");
 	const { run, history, connection, connectionError, events } = useRunActivity(
 		token,
 		runId,
@@ -44,7 +42,11 @@ export function RunWorkspace({
 						? "Reconnecting…"
 						: connection === "unauthorized"
 							? "Unauthorized"
-							: "Ended";
+							: connection === "failed"
+								? "Stream error"
+								: "Ended";
+	const isConnectionAlert =
+		connection === "unauthorized" || connection === "failed";
 
 	return (
 		<div className="min-w-0 space-y-5">
@@ -68,7 +70,7 @@ export function RunWorkspace({
 					<div className="flex items-center gap-2">
 						<span
 							aria-live="polite"
-							className={`rounded-sm px-3 py-1.5 text-xs font-semibold ${connection === "connected" ? "bg-[#edf5f0] text-[var(--status-good)]" : connection === "unauthorized" ? "bg-[#fff1eb] text-[#8d421f]" : "bg-[#f1f4f1] text-[var(--muted)]"}`}
+							className={`rounded-sm px-3 py-1.5 text-xs font-semibold ${connection === "connected" ? "bg-[var(--success-surface)] text-[var(--status-good)]" : isConnectionAlert ? "bg-[var(--danger-surface)] text-[var(--danger)]" : "bg-[var(--surface-raised)] text-[var(--muted)]"}`}
 						>
 							{statusLabel}
 						</span>
@@ -92,8 +94,8 @@ export function RunWorkspace({
 				</div>
 				{connectionError ? (
 					<p
-						className={`mt-4 rounded-sm px-3 py-2.5 text-sm ${connection === "unauthorized" ? "border border-[#f1c6b3] bg-[#fff5ef] text-[#8d421f]" : "bg-[#f6f8f6] text-[var(--muted)]"}`}
-						role={connection === "unauthorized" ? "alert" : "status"}
+						className={`mt-4 rounded-sm px-3 py-2.5 text-sm ${isConnectionAlert ? "border border-[var(--danger-border)] bg-[var(--danger-surface)] text-[var(--danger)]" : "bg-[var(--surface-raised)] text-[var(--muted)]"}`}
+						role={isConnectionAlert ? "alert" : "status"}
 					>
 						{connectionError}
 					</p>
@@ -124,7 +126,6 @@ export function RunWorkspace({
 				{(
 					[
 						["swarm", "Swarm view"],
-						["split", "Split view"],
 						["decision", "Decision view"],
 						["activity", "Activity view"],
 					] as const
@@ -144,40 +145,65 @@ export function RunWorkspace({
 				history.isPending ? (
 					<WorkspaceMessage>Loading activity…</WorkspaceMessage>
 				) : history.error ? (
-					<WorkspaceMessage type="alert">
-						Could not load run activity: {history.error.message}
-					</WorkspaceMessage>
+					<HistoryError
+						error={history.error}
+						onRetry={() => void history.refetch()}
+					/>
 				) : (
-					<SwarmView events={events} onOpenWorkspace={() => setView("split")} />
+					<SwarmView
+						events={events}
+						onOpenWorkspace={() => setView("decision")}
+					/>
 				)
 			) : (
-				<div
-					className={
-						view === "split"
-							? "grid items-start gap-5 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]"
-							: ""
-					}
-				>
+				<>
 					<div hidden={view === "activity"}>
 						<PlanReview
 							token={token}
 							runId={runId}
-							onViewActivity={() => setView("split")}
+							onViewActivity={() => setView("activity")}
 						/>
 					</div>
 					<div hidden={view === "decision"}>
 						{history.isPending ? (
 							<WorkspaceMessage>Loading activity…</WorkspaceMessage>
 						) : history.error ? (
-							<WorkspaceMessage type="alert">
-								Could not load run activity: {history.error.message}
-							</WorkspaceMessage>
+							<HistoryError
+								error={history.error}
+								onRetry={() => void history.refetch()}
+							/>
 						) : (
 							<ActivityTimeline events={events} />
 						)}
 					</div>
-				</div>
+				</>
 			)}
+		</div>
+	);
+}
+
+function HistoryError({
+	error,
+	onRetry,
+}: {
+	error: Error;
+	onRetry: () => void;
+}) {
+	return (
+		<div
+			className="rounded-sm border border-[var(--danger-border)] bg-[var(--danger-surface)] px-4 py-3 text-sm text-[var(--danger)]"
+			role="alert"
+		>
+			<p>Could not load run activity: {error.message}</p>
+			<Button
+				className="mt-3 inline-flex"
+				size="small"
+				type="button"
+				variant="quiet"
+				onClick={onRetry}
+			>
+				Retry
+			</Button>
 		</div>
 	);
 }
@@ -191,7 +217,7 @@ function WorkspaceMessage({
 }) {
 	return (
 		<p
-			className={`rounded-sm border px-4 py-3 text-sm ${type === "alert" ? "border-[#f1c6b3] bg-[#fff5ef] text-[#8d421f]" : "border-[var(--line)] bg-white text-[var(--muted)]"}`}
+			className={`rounded-sm border px-4 py-3 text-sm ${type === "alert" ? "border-[var(--danger-border)] bg-[var(--danger-surface)] text-[var(--danger)]" : "border-[var(--line)] bg-[var(--surface)] text-[var(--muted)]"}`}
 			role={type}
 		>
 			{children}

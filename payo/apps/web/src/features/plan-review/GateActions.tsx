@@ -1,5 +1,6 @@
 import type { OpenQuestion, RunSummary } from "@payo/contracts";
 import { Button } from "@web/shared/ui/Button.tsx";
+import { useState } from "react";
 
 export type GateCommand = "approve" | "requestChanges" | "resume";
 
@@ -22,6 +23,9 @@ export function GateActions({
 	const escalation = run.openGates.find(
 		(gate) => gate.kind === "factory-escalation",
 	);
+	const [confirmingGate, setConfirmingGate] = useState<string | null>(null);
+	const confirming =
+		approval !== undefined && confirmingGate === approval.gateId;
 	if (!approval && !escalation) return null;
 
 	const unanswered = questions.filter(
@@ -52,25 +56,44 @@ export function GateActions({
 			</div>
 
 			{approval && unanswered.length > 0 ? (
-				<p className="mt-4 rounded-sm border border-[#ead9ad] bg-[#fff9e9] px-3 py-2.5 text-sm text-[#765b1d]">
+				<p className="mt-4 rounded-sm border border-[var(--warning-border)] bg-[var(--warning-surface)] px-3 py-2.5 text-sm text-[var(--status-warn)]">
 					Answer every open question before approving. {unanswered.length}{" "}
 					unanswered.
 				</p>
 			) : null}
 			{approval && !decisionAvailable ? (
-				<p className="mt-3 text-sm text-[#8d421f]">
+				<p className="mt-3 text-sm text-[var(--danger)]">
 					Refresh the plan and review before making a decision.
 				</p>
 			) : null}
 
 			<div className="mt-5 flex flex-wrap gap-2">
-				{canApprove ? (
+				{canApprove && confirming ? (
+					<>
+						<Button
+							disabled={busy || !decisionAvailable || unanswered.length > 0}
+							onClick={() => onCommand("approve")}
+							type="button"
+						>
+							{busy ? "Working…" : "Confirm approve and end the run"}
+						</Button>
+						<Button
+							disabled={busy}
+							onClick={() => setConfirmingGate(null)}
+							type="button"
+							variant="secondary"
+						>
+							Cancel
+						</Button>
+					</>
+				) : null}
+				{canApprove && !confirming ? (
 					<Button
 						disabled={busy || !decisionAvailable || unanswered.length > 0}
-						onClick={() => onCommand("approve")}
+						onClick={() => setConfirmingGate(approval?.gateId ?? null)}
 						type="button"
 					>
-						{busy ? "Working…" : "Approve and end the run"}
+						Approve and end the run
 					</Button>
 				) : null}
 				{canRequestChanges ? (
@@ -93,6 +116,12 @@ export function GateActions({
 					</Button>
 				) : null}
 			</div>
+			{canRequestChanges ? (
+				<p className="mt-3 text-xs text-[var(--muted)]">
+					Request changes saves your editor changes and answers, then reruns
+					review. Use Revise plan to give the agent new instructions.
+				</p>
+			) : null}
 			{approval ? (
 				<p className="mt-4 text-xs leading-5 text-[var(--muted)]">
 					Approval ends this run and removes its worktree. The server uses the
