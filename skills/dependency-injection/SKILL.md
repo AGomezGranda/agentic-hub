@@ -1,6 +1,6 @@
 ---
 name: dependency-injection
-description: 'Apply or audit dependency-injection practices in any language or framework. Use when implementing code that creates or consumes collaborators, choosing how to wire services/resources, or explicitly reviewing dependency injection. Prefer DI when it creates a useful seam for testing, substitution, configuration, or lifecycle management; do not impose it mechanically. Not dependency-version/security audits or cross-module architecture review (architecture-audit).'
+description: 'Apply or audit dependency-injection practices in any language or framework. Use when implementing code that creates or consumes collaborators, choosing how to wire services/resources, or explicitly reviewing dependency injection. Mandatory for side-effecting collaborators (database, HTTP, broker, filesystem, clock, randomness, env) in domain and application code, with one composition root per process; never needed for pure helpers. Not dependency-version/security audits or cross-module architecture review (architecture-audit).'
 argument-hint: '[implementation task | repo | path | diff/PR]'
 ---
 
@@ -16,27 +16,32 @@ or a class.
 1. Identify the collaborators the code actually needs, especially resources
    with side effects (network, storage, filesystem, clock, randomness),
    replaceable policies, or services with meaningful lifecycle/ownership.
-2. Decide whether making each dependency explicit buys something concrete:
-   isolated tests, a real alternative implementation, runtime configuration,
-   controlled resource lifetime, or clearer ownership. If not, keep the simple
-   direct call or construction.
+2. Side-effecting collaborators (database, HTTP, broker, filesystem,
+   clock, randomness/ID generation, env/settings) used by domain or
+   application code are always injected, even with one implementation: the
+   seam is for tests and lifecycle, not only substitution. For everything
+   else, inject only when it buys isolated tests, a real alternative,
+   runtime configuration, controlled lifetime, or clearer ownership;
+   otherwise keep the simple direct call.
 3. Choose the smallest idiomatic seam: a function argument for per-call
    variation, a constructor for a long-lived collaborator, a closure for a
    narrow callback, or a factory/provider when creation must be deferred or
    produce a fresh instance. Use the framework's injection mechanism when it
    owns the lifecycle or the project already relies on it.
-4. Keep object-graph assembly at the application/composition boundary. Pass a
-   consumer only the capabilities it needs; do not make business logic find
-   dependencies in a global registry or service locator.
+4. Assemble the object graph in one composition root per process (`main`,
+   app factory, worker bootstrap); only it reads env and builds clients.
+   Pass a consumer only the capabilities it needs (a port, not `settings`
+   or a container); business logic never finds dependencies in a global
+   registry, service locator, or lazy module singleton.
 5. Preserve ownership and lifecycle semantics: initialization, cleanup, scope,
    concurrency, and error behavior must remain correct after moving creation.
    Do not manually construct resources managed by a framework/container.
 
 ### Defaults
 
-- Prefer explicit dependencies when their identity, effects, or lifetime
-  matter. Benign values and stable, pure helpers do not need injection merely
-  to make every call configurable.
+- Dependencies with effects or lifetime are explicit, always. Benign
+  values and stable, pure helpers are not injected merely to make every
+  call configurable.
 - A consumer may receive a concrete dependency. Add an abstraction only when
   it expresses a useful contract or enables a real variation; DI and
   dependency inversion are related but not the same requirement.
@@ -54,17 +59,20 @@ or a class.
 
 ## When auditing
 
-**Audit, don't rewrite.** Match the repository's language/framework conventions
-and inspect both where dependencies are assembled and where they are consumed.
+**Audit, don't rewrite.** Match the language/framework idiom for corrections, but
+judge against the rules above, not the repository's habits. Inspect both where
+dependencies are assembled and where they are consumed.
 For the requested scope:
 
 - Trace important dependencies from their creation or lookup to the consumer.
   Check calls, constructors, configuration, lifecycle hooks, and relevant
   tests; do not infer a defect from one `new`/constructor call in isolation.
 - Look for dependencies hidden in globals, module state, service locators,
-  framework lookups, or consumer-owned construction. Verify whether that
-  actually impairs a needed test, alternate implementation, configuration,
-  resource lifetime, or ownership.
+  framework lookups, or consumer-owned construction. A side-effecting one
+  inside domain or application code is a finding outright, even when the
+  whole repo does it (one grouped finding). For others, verify it impairs a
+  needed test, alternate implementation, configuration, lifetime or
+  ownership.
 - Check that the composition boundary owns assembly and that the consumer gets
   only the capabilities it needs. Respect framework-managed scopes and
   lifetimes.

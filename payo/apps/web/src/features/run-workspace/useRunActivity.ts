@@ -73,10 +73,7 @@ export function useRunActivity(token: string, runId: string) {
 					queryKey: ["plan-versions", token, runId],
 					exact: true,
 				}),
-				queryClient.invalidateQueries({
-					queryKey: ["runs", token],
-					exact: true,
-				}),
+				queryClient.invalidateQueries({ queryKey: ["runs", token] }),
 			]);
 			return queryClient.getQueryData<RunSummary>(summaryKey);
 		};

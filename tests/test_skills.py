@@ -457,6 +457,8 @@ DIMENSION_RUBRIC_FILES = (
     "code-quality-audit/references/errors.md",
     "architecture-audit/references/boundaries.md",
     "architecture-audit/references/responsibilities.md",
+    "architecture-audit/references/structure.md",
+    "code-quality-audit/references/dependency-injection.md",
 )
 
 
@@ -564,3 +566,20 @@ def test_descriptions_have_anti_triggers() -> None:
         assert re.search(r"\bNot [^.]+\.\s*$", description), (
             f"{name}: description has no closing anti-trigger clause"
         )
+
+
+def test_audits_judge_against_standard_not_existing_structure() -> None:
+    """The repo's current layout is the subject of an architecture audit,
+    never its baseline: no fallback to inferring rules from the dominant
+    structure, and the standard defines the rule IDs findings cite."""
+    arch = re.sub(r"\s+", " ", _skill_text("architecture-audit"))
+    assert "infer rules from the dominant structure" not in arch
+    assert "not the baseline" in arch
+    standard = (
+        catalog.SKILLS_DIR / "architecture-audit" / "references" / "standard.md"
+    ).read_text(encoding="utf-8")
+    for rule in ("L1", "T1", "D1", "D2", "S1", "E1"):
+        assert f"**{rule}**" in standard, f"standard.md: missing rule {rule}"
+    cq = re.sub(r"\s+", " ", _skill_text("code-quality-audit"))
+    assert "repo's own standard first" not in cq
+    assert "never that the defect is acceptable" in cq

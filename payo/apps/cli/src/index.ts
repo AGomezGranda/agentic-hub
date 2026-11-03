@@ -150,8 +150,10 @@ export async function runCli(
 					);
 				return report.ok ? 0 : 1;
 			}
-			default:
-				return 2;
+			default: {
+				const unhandled: never = command;
+				throw new Error(`unhandled command: ${JSON.stringify(unhandled)}`);
+			}
 		}
 	} catch (error) {
 		if (error instanceof ClientError) {
@@ -203,7 +205,7 @@ export function formatSummary(summary: RunSummary): string {
 		if (summary.execution.review) {
 			const review = summary.execution.review;
 			lines.push(
-				`review: ${review.lenses.length}/8 lenses; ${review.findings} findings; ${review.unresolved} unresolved; round ${review.round} (${summary.execution.scope})`,
+				`review: ${review.lenses.length} lenses; ${review.findings} findings; ${review.unresolved} unresolved; round ${review.round} (${summary.execution.scope})`,
 			);
 			if (review.uncheckedLenses.length)
 				lines.push(`unchecked lenses: ${review.uncheckedLenses.join(", ")}`);

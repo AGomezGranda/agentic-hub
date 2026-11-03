@@ -115,6 +115,7 @@ export function createPiRunner(options: PiRunnerOptions): AgentRunner {
 			let spawnError: Error | null = null;
 			let exitCode: number | null = null;
 			const spawnFailure = (): Error | null => spawnError;
+			const exitCodeOf = (): number | null => exitCode;
 			const stdout = child.stdout;
 			const stderr = child.stderr;
 			let stderrTail = "";
@@ -246,7 +247,7 @@ export function createPiRunner(options: PiRunnerOptions): AgentRunner {
 					yield {
 						type: "error",
 						message:
-							`pi exited with code ${exitCode ?? "unknown"}` +
+							`pi exited with code ${exitCodeOf() ?? "unknown"}` +
 							(tail.length > 0 ? `: ${tail}` : ""),
 					};
 				}

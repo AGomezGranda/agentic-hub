@@ -99,6 +99,34 @@ describe("createExecutionWorkspace", () => {
 		);
 	});
 
+	it("removes the branch it created when preparation fails after worktree add", async () => {
+		const { repo, workspace, input } = await fixture();
+		await mkdir(input.worktreeRoot, { recursive: true });
+		await writeFile(join(input.worktreeRoot, ".meta"), "not a directory");
+		await expect(workspace.prepare(input, signal())).rejects.toThrow();
+		await expect(
+			git(repo, ["rev-parse", "--verify", "--quiet", input.branch]),
+		).rejects.toThrow();
+		await rm(join(input.worktreeRoot, ".meta"));
+		await expect(workspace.prepare(input, signal())).resolves.toMatchObject({
+			branch: input.branch,
+		});
+	});
+
+	it("reports an unknown prerequisite ref as absent but propagates aborts", async () => {
+		const { repo, baseCommit, workspace } = await fixture();
+		const prerequisites = [{ description: "dep", ref: "nope" }];
+		await expect(
+			workspace.verifyPrerequisites(repo, baseCommit, prerequisites, signal()),
+		).resolves.toMatchObject([
+			{ present: false, reason: "ref nope cannot be resolved" },
+		]);
+		const aborted = AbortSignal.abort();
+		await expect(
+			workspace.verifyPrerequisites(repo, baseCommit, prerequisites, aborted),
+		).rejects.toThrow();
+	});
+
 	it("refuses dirty reused worktrees without deleting their edits", async () => {
 		const { workspace, input } = await fixture();
 		const prepared = await workspace.prepare(input, signal());

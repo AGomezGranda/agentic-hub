@@ -1,10 +1,7 @@
+import type { SwarmAttempt } from "@payo/contracts";
 import { Markdown } from "@web/shared/ui/Markdown.tsx";
 import { useEffect, useRef } from "react";
-import {
-	activityLabel,
-	agentEventDetail,
-	type SwarmAttempt,
-} from "./swarmState.ts";
+import { activityLabel, agentEventDetail } from "./swarmState.ts";
 
 export function SwarmAgentDetails({
 	attempt,

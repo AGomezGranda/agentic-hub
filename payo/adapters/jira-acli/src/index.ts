@@ -33,7 +33,7 @@ export function createAcliTicketSource(
 			});
 			if (result.exitCode !== 0) {
 				throw new Error(
-					`acli jira workitem view ${key} failed (exit ${result.exitCode}): ${result.stderr.trim()}`,
+					`acli jira workitem view ${key} failed (exit ${result.exitCode}): ${excerpt(result.stderr || result.stdout)}`,
 				);
 			}
 			let raw: unknown;

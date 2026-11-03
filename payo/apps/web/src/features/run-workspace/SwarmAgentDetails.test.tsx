@@ -1,8 +1,8 @@
+import type { SwarmAttempt } from "@payo/contracts";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { SwarmAgentDetails } from "./SwarmAgentDetails.tsx";
-import type { SwarmAttempt } from "./swarmState.ts";
 
 beforeEach(() => {
 	HTMLDialogElement.prototype.showModal = function () {
@@ -20,7 +20,6 @@ it("renders markdown safely and closes by keyboard", async () => {
 		model: null,
 		status: "running",
 		startedAt: "2026-11-01",
-		activity: "Agent message",
 		events: [
 			{
 				seq: 1,
@@ -64,7 +63,6 @@ it("renders structured plan markdown and retains the full data", async () => {
 		model: null,
 		status: "running",
 		startedAt: "2026-11-01",
-		activity: "Agent message",
 		events: [
 			{
 				seq: 1,

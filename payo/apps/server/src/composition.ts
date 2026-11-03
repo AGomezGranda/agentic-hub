@@ -353,7 +353,11 @@ export async function createComposition(
 		async listRuns() {
 			const summaries = await Promise.all(
 				[...new Set([...handles.keys(), ...executionHandles.keys()])].map(
-					(runId) => summaryOf(runId).catch(() => null),
+					(runId) =>
+						summaryOf(runId).catch((error) => {
+							logFailure(`skipping unreadable run ${runId} in list`, error);
+							return null;
+						}),
 				),
 			);
 			return summaries
@@ -446,6 +450,7 @@ export async function createComposition(
 					pinnedBase,
 				);
 			} catch (error) {
+				logFailure("cannot load execution role sources", error);
 				throw new ApiFailure(
 					400,
 					"execution_roles_unavailable",
@@ -575,6 +580,7 @@ export async function createComposition(
 }
 
 function logFailure(prefix: string, error: unknown): void {
-	const message = error instanceof Error ? error.message : String(error);
+	const message =
+		error instanceof Error ? (error.stack ?? error.message) : String(error);
 	console.error(`payo: ${prefix}: ${message}`);
 }

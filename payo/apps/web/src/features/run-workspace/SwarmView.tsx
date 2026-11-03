@@ -1,7 +1,7 @@
-import type { RunEvent } from "@payo/contracts";
+import { projectSwarm, type RunEvent } from "@payo/contracts";
 import { useState } from "react";
 import { SwarmAgentDetails } from "./SwarmAgentDetails.tsx";
-import { projectSwarm } from "./swarmState.ts";
+import { attemptActivity } from "./swarmState.ts";
 
 export function SwarmView({
 	events,
@@ -81,7 +81,7 @@ export function SwarmView({
 														{attempt.model ?? "Model unknown"} ·{" "}
 														{attempt.status}
 													</p>
-													<p className="mt-1">{attempt.activity}</p>
+													<p className="mt-1">{attemptActivity(attempt)}</p>
 													<p className="mt-1 text-xs text-[var(--muted)]">
 														{elapsed(attempt.startedAt, attempt.finishedAt)}
 													</p>

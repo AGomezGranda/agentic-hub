@@ -1,19 +1,26 @@
 ---
 name: architecture-audit
-description: 'Audit software architecture through two lenses — boundaries (who may talk to whom) and responsibilities (who should own what) — for a repo, a module/bounded context, or a git diff/PR. Use when asked to review architecture, layering, module boundaries, coupling, DDD structure, or whether a change lands in the right place. Not class/function-level design such as SOLID, DRY, typing or error handling inside one module (code-quality-audit), over-engineering (ponytail-review/audit), tests (testing-strategy), security or performance.'
+description: 'Audit software architecture strictly against a target standard (layered/hexagonal, tactical DDD, dependency injection and composition root, package-by-context folder layout) through three lenses — boundaries (who may talk to whom), responsibilities (who should own what) and structure (where code lives) — for a repo, a module/bounded context, or a git diff/PR. Use when asked to review architecture, layering, folder structure, module boundaries, coupling, DDD, DI wiring, or whether a change lands in the right place. Not class/function-level design such as SOLID, DRY, typing or error handling inside one module (code-quality-audit), over-engineering (ponytail-review/audit), tests (testing-strategy), security or performance.'
 argument-hint: '[repo | path/bounded context | diff/PR ref]'
 ---
 
 # Architecture Audit
 
-Two questions, one lens each:
+Three questions, one lens each:
 
 - **Boundaries** — *who may talk to whom?* `references/boundaries.md`
 - **Responsibilities** — *who should own what?* `references/responsibilities.md`
+- **Structure** — *where does code live?* `references/structure.md`
+
+**The bar is the target standard, `references/standard.md`, not the repo.**
+The existing structure is what you are auditing; never infer the rules from
+it or excuse a violation because it is consistent. Prevalence only measures
+blast radius. A repo ADR overrides a standard rule only when it names the
+rule, the deviation and the reason.
 
 Testability, drift and ADR compliance are not lenses: testability is a
-*consequence* used for severity; declared rules (ADRs, import contracts)
-are an *input* both lenses judge against.
+*consequence* used for severity; the standard and declared rules (ADRs,
+import contracts) are the *input* every lens judges against.
 
 **Audit, don't rewrite.** Produce a report. Only change code if the user asks
 for that after seeing it.
@@ -27,12 +34,18 @@ it's here. A long class is SRP (there); a package every feature edits is a
 god module (here). A swallowed exception is error handling (there); an
 ORM exception surfacing in the domain API is a boundary leak (here).
 
-- "More layers/abstraction than it needs" → `ponytail-review`/`ponytail-audit`.
+- "More layers/abstraction than it needs" → `ponytail-review`/`ponytail-audit`,
+  except the seams the standard requires for the scope's Applicability
+  class (layers for domain and CRUD services; ports for side effects and a
+  composition root everywhere), which are never over-engineering.
+- DI: a constructor or function seam inside one module → `code-quality-audit`.
+  Here: composition-root wiring (D2), and D1 breaches whose correction
+  changes layer direction (e.g. domain importing a client module).
 - Test coverage → `testing-strategy`. Security, performance → out of scope.
 
 ## 1. Resolve scope
 
-- **Full repo** — build the evidence in step 2, then judge both lenses
+- **Full repo** — build the evidence in step 2, then judge every lens
   across the module graph. A small repo (a handful of modules) is judged by
   you directly; a large one delegates by module/bounded context when that
   minimises duplicate reads. A repository label alone does not justify
@@ -47,12 +60,13 @@ ORM exception surfacing in the domain API is a boundary leak (here).
 ### Fanning out
 
 Bundled agent for this skill: `arch-lens` (takes an explicit bounded scope,
-the evidence from step 2, and one or both lenses — see `agents/arch-lens.md`);
+the evidence from step 2, and one or more lenses — see `agents/arch-lens.md`);
 if it isn't installed, use a host-native child or do the check yourself.
 Each child's task text must carry everything it needs — don't depend on
-inherited context: the declared rules, import graph and co-change table from
-step 2, the lens rubric pasted verbatim from its `references/<lens>.md` file
-(absolute path, not just the lens name), the output/evidence rules from
+inherited context: the declared rules, scope classification, directory
+tree, import graph and co-change table from step 2, the lens rubric and
+the standard pasted verbatim from their `references/` files (absolute
+paths, not just the lens name), the output/evidence rules from
 "Child finding schema" below, and a read-only restriction. Children cannot
 run commands, so you compute the graph and co-change data and paste them.
 Cross-module edges between two delegated areas belong to you, not either
@@ -69,11 +83,11 @@ shape, one block per finding:
 finding ID: <stable ID, unique per finding even at the same location>
 severity: P0 | P1 | P2
 confidence: high | medium | low
-lens: boundaries | responsibilities
+lens: boundaries | responsibilities | structure
 location: path:line
 excerpt: verbatim quoted line(s), not a paraphrase
-evidence: the graph edge, co-change stat, or declared rule it rests on
-violated contract: the declared or inferred rule broken
+evidence: the graph edge, tree excerpt, co-change stat, or declared rule it rests on
+violated contract: the standard rule ID (e.g. L1, D1, S2) or declared ADR/contract broken
 consequence: concrete change/correctness effect if left as-is
 counterevidence considered: what was checked that could disprove it
 correction: smallest sufficient change
@@ -99,15 +113,21 @@ yourself for a small scope. Then collect, running commands yourself:
    `.dependency-cruiser.*`, ArchUnit tests, Nx/eslint boundary rules),
    README/CONTRIBUTING layering sections. Record each rule verbatim with
    `file:line`. If a checker is configured, run it — its failures are
-   pre-confirmed boundary findings. None found → say so; you'll infer rules
-   from the dominant structure and mark those findings lower confidence.
-2. **Import graph** — module-level edges, using an installed tool when
+   pre-confirmed boundary findings. None found → say so; the standard is
+   then the whole rule set, at full confidence. Note which standard rules
+   a configured checker enforces; the rest feed "Enforcement gaps" (E1).
+2. **Scope classification and tree** — classify the scope per the
+   standard's Applicability section, naming the invariants found or
+   searched for. Record the source tree to depth 4 with file counts
+   (`find <src> -type d -not -path '*/node_modules/*' -not -path '*/.*'`),
+   the composition root(s), and where env/settings are read.
+3. **Import graph** — module-level edges, using an installed tool when
    present (`import-linter`, `pydeps`, `madge`, `dependency-cruiser`,
    `go list -deps`) or a grep of import statements otherwise — normalised to
    the module level, keeping only internal edges (drop stdlib and
    third-party imports). Summarise as module → module edges with counts;
    list cycles.
-3. **Co-change table** (full repo or bounded context only) — which module
+4. **Co-change table** (full repo or bounded context only) — which module
    pairs change together:
 
    ```bash
@@ -121,19 +141,24 @@ yourself for a small scope. Then collect, running commands yourself:
    the repo's modules (e.g. `d=2` for `src/<module>/`). A pair co-changing in a large share of either
    module's commits is a change-locality lead; a pair that never co-changes
    despite a dependency edge is evidence the boundary holds.
-4. **Domain vocabulary** — what the core concepts are called in code vs.
+5. **Domain vocabulary** — what the core concepts are called in code vs.
    docs/tests, and whether a domain layer exists at all. A CRUD app with no
-   invariants has no aggregate findings; say so.
+   invariants has no tactical-DDD (T) findings; say so, with the evidence
+   from item 2.
 
-For a diff/PR, this step is just: the declared rules, and the imports and
-calls the diff adds or removes.
+For a diff/PR, this step is just: the declared rules, the scope
+classification, the imports and calls the diff adds or removes, and the
+files and folders it adds or moves.
 
 ## 3. Judge each lens
 
 Read the lens rubric (or paste it to a child per §1) and apply it to the
-evidence. Declared-rule violations first — they are highest confidence and
-don't depend on taste. Inferred-rule findings must name the dominant pattern
-they deviate from and how many modules follow it.
+evidence against the standard. ADR, contract and standard violations are
+all high confidence: they don't depend on taste. How many modules follow a
+pattern sets a finding's scope, never its validity — a dominant pattern
+that breaks the standard is one grouped systemic finding, not the baseline.
+Each finding cites a rule ID; a concern no rule covers is reported only if
+its consequence is concrete, and is marked "outside the standard".
 
 ## 4. Report
 
@@ -153,18 +178,22 @@ confirmed, rejected, or unresolved. Only confirmed findings enter the list;
 unresolved ones name the missing evidence and next probe; don't publish
 rejected candidates.
 
-1. **Scope and declared architecture** — what was audited, which rules were
-   declared vs. inferred, whether a domain layer exists.
+1. **Scope and classification** — what was audited, its Applicability class
+   with the invariants that justify it, ADR deviations accepted, whether a
+   domain layer and a composition root exist.
 2. **Findings** — confirmed findings ranked by severity, then
    consequence/confidence, each with finding ID, lens, severity, confidence,
    location and evidence, violated contract, consequence, counterevidence
    considered, and smallest sufficient correction. State effort separately.
-3. **Explicitly fine** — boundaries/ownership checked and found solid, one
+3. **Explicitly fine** — boundaries/ownership/layout checked and found solid, one
    bounded line each with evidence (e.g. "domain has zero imports from
    infra: graph shows no edge").
 4. **Out of scope, flagged anyway** — code-level, security, performance or
    over-engineering issues spotted along the way; point at the right skill.
-5. **Coverage ledger and unresolved** — each in-scope module × lens as
+5. **Enforcement gaps** — standard rules this repo breaks or could break
+   that no checker enforces (E1), each with the concrete contract to add
+   (import-linter/dependency-cruiser stanza, banned-api entry, layout test).
+6. **Coverage ledger and unresolved** — each in-scope module × lens as
    checked, not applicable (with reason), or unverified (with reason). An
    unverified area is never described as clean. Say what was sampled or
    excluded (e.g. co-change skipped for a PR).
@@ -178,12 +207,18 @@ rejected candidates.
   ownership break causing incorrect data or behaviour in production now
   (a cycle or layering break alone is never P0); P1 = boundary or ownership break that makes the affected
   change non-local or lets an invariant be bypassed; P2 = material,
-  nonblocking structural improvement. A layering "violation" with no
-  consequence is not a finding. Confidence is independent of severity.
+  nonblocking structural improvement. A standard or declared-rule
+  violation is always reported, at the severity the standard assigns
+  (P2 minimum); its consequence is the rule's rationale made concrete for
+  this repo. Taste outside the standard with no concrete consequence is not
+  a finding. Confidence is independent of severity.
 - **One finding per defect**, filed under the lens its correction belongs
   to: reading another module's internals/storage = boundaries; writing
-  another module's state = responsibilities.
+  another module's state = responsibilities; code in the wrong folder with no
+  import or ownership effect = structure.
 - **Systemic problems are grouped once** with representative instances and
   scope. Consistency does not excuse a harmful pattern.
-- **Don't invent a violation to fill a lens.** A small service with three
-  modules and clean edges gets an empty findings list and says why.
+- **Don't invent a violation to fill a lens, and don't soften one to keep
+  the report short.** A service that meets the standard gets an empty
+  findings list and says why; exemptions come only from the Applicability
+  class or an ADR, stated with evidence.

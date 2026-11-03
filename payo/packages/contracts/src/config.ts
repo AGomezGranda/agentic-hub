@@ -17,7 +17,7 @@ function isPortableAbsolutePath(value: string): boolean {
 	);
 }
 
-function isExactLoopbackOrigin(value: string): boolean {
+export function isExactLoopbackOrigin(value: string): boolean {
 	try {
 		const url = new URL(value);
 		return (

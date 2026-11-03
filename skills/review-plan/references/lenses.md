@@ -2,7 +2,7 @@
 
 | Lens | Focus |
 |---|---|
-| Architecture | modularity, coupling, scalability, tradeoffs |
+| Architecture | modularity, coupling, scalability, tradeoffs; new files, layers, ports and wiring placed per the target standard `skills/architecture-audit/references/standard.md` (DDD layers, DI/composition root, package-by-context layout), not just next to similar existing code |
 | Security | authn/authz, input handling, secrets, STRIDE/OWASP |
 | Test Coverage | test-first/TDD, pyramid balance, edge cases, isolation, right-level coverage |
 | Code Quality | design principles, error handling, complexity |

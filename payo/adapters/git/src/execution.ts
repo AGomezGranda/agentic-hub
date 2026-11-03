@@ -19,7 +19,12 @@ import {
 	type ExecutionWorkspaceSnapshot,
 	type PreparedExecutionWorkspace,
 } from "@payo/kernel";
-import { createGitExec, type GitExec, resolveBaseCommit } from "./index.ts";
+import {
+	BaseNotFoundError,
+	createGitExec,
+	type GitExec,
+	resolveBaseCommit,
+} from "./index.ts";
 
 export interface ExecutionGitOptions {
 	root: string;
@@ -224,6 +229,8 @@ export function createExecutionWorkspace(
 			} catch (error) {
 				// Only undo the worktree created by this invocation; never remove a pre-existing path.
 				await run(repo, ["worktree", "remove", path], signal).catch(() => {});
+				// The branch was created by the `worktree add -b` above; leaving it makes every retry collide.
+				await run(repo, ["branch", "-D", input.branch], signal).catch(() => {});
 				throw error;
 			}
 			return { path, branch: input.branch, baseCommit: input.baseCommit };
@@ -389,7 +396,9 @@ export function createExecutionWorkspace(
 						);
 						if (ancestor.exitCode !== 0)
 							reason = `ref ${prerequisite.ref} is not an ancestor of the pinned base`;
-					} catch {
+					} catch (error) {
+						// Only "not found" is a fact about the ref; timeouts, aborts and spawn errors propagate.
+						if (!(error instanceof BaseNotFoundError)) throw error;
 						reason = `ref ${prerequisite.ref} cannot be resolved`;
 					}
 				}

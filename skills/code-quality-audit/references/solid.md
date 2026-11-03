@@ -10,8 +10,8 @@ class/method count. OCP: applies where new cases should extend without editing
 stable branches — a new branch is not automatically a violation. LSP: check
 preconditions not narrowed, postconditions not weakened, and caller
 expectations of the base type preserved. ISP: callers forced to depend on
-methods they don't use. DIP: require an actual testing, lifecycle, ownership,
-or substitution problem.
+methods they don't use. DIP: high-level policy must not depend on a
+side-effecting low-level module; pure helpers are exempt.
 
 ## SRP
 
@@ -83,7 +83,7 @@ Correction: widen acceptance or split the type.
 Non-finding: a subtype that adds a new method without altering inherited
 behaviour.
 
-## DIP — severity depends on whether the dependency will ever change
+## DIP — side effects are always inverted; pure helpers never need to be
 
 ```python
 # ❌ high-level policy constructs its own low-level dependency
@@ -98,12 +98,12 @@ class PriceCalculator:
         self.prices = prices
 ```
 Consequence: without the seam, every `PriceCalculator` test needs a real
-database. Correction: inject the abstraction the policy owns. But **not every
-direct construction is a finding**: a one-off script that constructs
-`PostgresConnection()` directly, with no second implementation and no test
-needing a double, is a legitimate non-finding — report DIP only when it blocks
-a concrete test double, lifecycle/ownership need, or a real second
-implementation.
+database, and the policy owns a connection's lifecycle it can't manage.
+Correction: inject the port the policy owns. This holds with one
+implementation: "we'll never swap Postgres" is not an exemption, because the
+seam exists for tests and lifecycle. Non-finding: a pure helper (`round_money`,
+a value object) used directly, or a one-off script's entry point building its
+own connection.
 
 ## ISP
 

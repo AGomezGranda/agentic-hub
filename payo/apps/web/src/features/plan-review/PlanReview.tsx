@@ -108,7 +108,6 @@ export function PlanReview({
 			}),
 			queryClient.invalidateQueries({
 				queryKey: ["runs", token],
-				exact: true,
 			}),
 			queryClient.invalidateQueries({
 				queryKey: ["plan-versions", token, runId],
@@ -136,7 +135,10 @@ export function PlanReview({
 				throw conflict("The current run no longer accepts this answer.");
 			return answerQuestion(token, runId, input.question.id, input.text);
 		},
-		onSuccess: invalidateWorkspace,
+		onSuccess: () => {
+			clearErrors();
+			return invalidateWorkspace();
+		},
 	});
 
 	const command = useMutation({
@@ -178,7 +180,10 @@ export function PlanReview({
 					return resumeRun(token, runId);
 			}
 		},
-		onSuccess: invalidateWorkspace,
+		onSuccess: () => {
+			clearErrors();
+			return invalidateWorkspace();
+		},
 		onError: async (error) => {
 			if (isConflict(error)) await invalidateWorkspace();
 		},
@@ -208,12 +213,20 @@ export function PlanReview({
 			}
 			setView("review");
 			setDrafts({});
+			clearErrors();
 			await invalidateWorkspace();
 		},
 		onError: async (error) => {
 			if (isConflict(error)) await invalidateWorkspace();
 		},
 	});
+
+	// A mutation keeps its error until it runs again, so a later success must clear all three.
+	function clearErrors() {
+		answer.reset();
+		command.reset();
+		update.reset();
+	}
 
 	if (run.isPending || review.isPending)
 		return (
@@ -597,7 +610,10 @@ export function PlanReview({
 					<p>{actionMessage}</p>
 					<Button
 						className="mt-2"
-						onClick={() => void invalidateWorkspace()}
+						onClick={() => {
+							clearErrors();
+							void invalidateWorkspace();
+						}}
 						size="small"
 						type="button"
 						variant="secondary"

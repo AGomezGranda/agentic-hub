@@ -61,7 +61,7 @@ const cases: BoundaryCase[] = [
 	["packages/kernel/src/a/b/c.ts", `import "../../x.ts";`, undefined],
 	["packages/contracts/src/a.ts", `import "@payo/kernel";`, CONTRACTS],
 	["packages/contracts/src/a.ts", `import "zod";`, undefined],
-	["modules/factory/src/a.ts", `import "@payo/pr-review";`, MODULES],
+	["modules/factory/src/a.ts", `import "@payo/checks-process";`, MODULES],
 	["modules/factory/src/a.ts", `import "@payo/runner-fake";`, MODULES],
 	["modules/factory/src/a.ts", `import "@payo/kernel";`, undefined],
 	["modules/factory/src/a.ts", `import "@payo/kernel/testing";`, MODULES],
@@ -113,7 +113,7 @@ const cases: BoundaryCase[] = [
 	],
 	[
 		"modules/factory/src/a.ts",
-		`import "../../pr-review/src/index.ts";`,
+		`import "../../checks-process/src/index.ts";`,
 		RELATIVE_ESCAPE,
 	],
 	[

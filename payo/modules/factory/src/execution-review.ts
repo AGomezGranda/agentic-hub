@@ -31,9 +31,9 @@ import {
 import {
 	applyExecutionCheckpoint,
 	decideImplementationReview,
+	MAX_DIFF_BYTES,
 } from "./execution-state.ts";
 
-const MAX_DIFF_BYTES = 4 * 1024 * 1024;
 export const IMPLEMENTATION_REVIEW_LENSES = Object.keys(
 	IMPLEMENTATION_LENSES,
 ) as ImplementationLens[];

@@ -160,6 +160,8 @@ export function createGitWorkspace(options: GitWorkspaceOptions): Workspace {
 	};
 }
 
+export class BaseNotFoundError extends Error {}
+
 export async function resolveBaseCommit(
 	repo: string,
 	base: string,
@@ -178,7 +180,30 @@ export async function resolveBaseCommit(
 		const commit = result.stdout.trim();
 		if (result.exitCode === 0 && commit.length > 0) return commit;
 	}
-	throw new Error(`base ${base} not found in ${repo}`);
+	throw new BaseNotFoundError(`base ${base} not found in ${repo}`);
+}
+
+/**
+ * The file blob at `path` in `commit`. Returns null when git exits non-zero for
+ * `commit:path` (missing, or not a file such as a directory) or the content is blank.
+ * Rejects when git cannot run (spawn error, timeout, maxBuffer).
+ */
+export async function readBlobAt(
+	repo: string,
+	commit: string,
+	path: string,
+	exec: GitExec,
+): Promise<{ sha: string; content: string } | null> {
+	const spec = `${commit}:${path}`;
+	const sha = await exec(["-C", repo, "rev-parse", spec], {});
+	const content = await exec(["-C", repo, "cat-file", "blob", spec], {});
+	if (
+		sha.exitCode !== 0 ||
+		content.exitCode !== 0 ||
+		content.stdout.trim().length === 0
+	)
+		return null;
+	return { sha: sha.stdout.trim(), content: content.stdout };
 }
 
 export async function checkGit(options: {

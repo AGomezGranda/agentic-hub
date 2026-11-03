@@ -9,7 +9,11 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join } from "node:path";
-import { type ExecutionCheck, PayoConfigDocument } from "@payo/contracts";
+import {
+	type ExecutionCheck,
+	isExactLoopbackOrigin,
+	PayoConfigDocument,
+} from "@payo/contracts";
 import { parse, stringify } from "smol-toml";
 import type * as z from "zod";
 
@@ -74,7 +78,6 @@ export class ConfigRevisionConflictError extends Error {
 const DEFAULT_PORT = 7331;
 const DEFAULT_DATA_DIR = ".payo";
 const DEFAULT_MAX_CONCURRENT_AGENTS = 4;
-const LOOPBACK = new Set(["127.0.0.1", "localhost", "[::1]"]);
 
 const OVERRIDE_VARIABLES = [
 	"PAYO_PORT",
@@ -108,10 +111,7 @@ export function resolveConfigPath(
 			throw new Error("PAYO_CONFIG_FILE must be an absolute path");
 		return selected;
 	}
-	const configuredHome = env.HOME?.trim();
-	const home =
-		configuredHome && isAbsolute(configuredHome) ? configuredHome : homedir();
-	return join(home, ".config", "payo", "config.toml");
+	return join(homeDirectory(env), ".config", "payo", "config.toml");
 }
 
 export function loadPayoConfig(
@@ -147,16 +147,16 @@ export function resolvePayoConfigDocument(
 	const fileConfig = document;
 
 	const configuredDataDir =
-		envValue(env.PAYO_DATA_DIR) ?? fileConfig.paths?.data_dir;
+		optionalEnvValue(env.PAYO_DATA_DIR) ?? fileConfig.paths?.data_dir;
 	const dataDir =
 		configuredDataDir ?? join(homeDirectory(env), DEFAULT_DATA_DIR);
-	const repo = envValue(env.PAYO_REPO) ?? fileConfig.paths?.repo ?? cwd;
+	const repo = optionalEnvValue(env.PAYO_REPO) ?? fileConfig.paths?.repo ?? cwd;
 	if (!isAbsolute(dataDir))
 		throw new Error("PAYO_DATA_DIR/paths.data_dir must be absolute");
 	if (!isAbsolute(repo))
 		throw new Error("PAYO_REPO/paths.repo must be absolute");
 
-	const configuredBaseBranch = envValue(env.PAYO_BASE_BRANCH);
+	const configuredBaseBranch = optionalEnvValue(env.PAYO_BASE_BRANCH);
 	const baseBranch =
 		configuredBaseBranch ?? fileConfig.paths?.base_branch ?? "main";
 	const maxConcurrentAgents = environmentPositiveInteger(
@@ -400,10 +400,6 @@ function homeDirectory(env: NodeJS.ProcessEnv): string {
 		: homedir();
 }
 
-function envValue(value: string | undefined): string | undefined {
-	return optionalEnvValue(value);
-}
-
 function optionalEnvValue(value: string | undefined): string | undefined {
 	const trimmed = value?.trim();
 	return trimmed || undefined;
@@ -450,22 +446,6 @@ function environmentOrigins(
 				);
 			return new URL(origin).origin;
 		});
-}
-
-function isExactLoopbackOrigin(value: string): boolean {
-	try {
-		const url = new URL(value);
-		return (
-			(url.protocol === "http:" || url.protocol === "https:") &&
-			LOOPBACK.has(url.hostname) &&
-			url.pathname === "/" &&
-			url.search === "" &&
-			url.hash === "" &&
-			url.origin === value
-		);
-	} catch {
-		return false;
-	}
 }
 
 function environmentExecutable(

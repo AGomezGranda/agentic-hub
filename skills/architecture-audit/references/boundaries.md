@@ -1,10 +1,12 @@
 # Boundaries — who may talk to whom?
 
-Check procedure: start from the declared rules (ADRs, import contracts); if
-none exist, infer the dominant direction from the import graph and state it.
+Check procedure: start from the declared rules (ADRs, import contracts) and
+the target standard (`standard.md`, L and S5); never adopt the dominant
+direction in the import graph as the rule.
 Then check every module-level edge against it. Evidence needed: the edge
 (`a → b`, count), one importing `path:line` with verbatim excerpt, the rule
-it breaks (declared `file:line`, or "inferred: N of M modules follow it"),
+it breaks (declared `file:line` or standard rule ID; "N of M modules do
+this" is scope, not a defence),
 and the change or test that the edge makes harder.
 
 Check, in order:
@@ -38,9 +40,9 @@ storage edits the domain. Correction: the domain declares the port it needs
 (`PriceRepository` protocol in `domain/`), infrastructure implements it —
 the edge flips to `db → domain`.
 
-Non-finding: a small script or CRUD service with no domain layer, where
-handlers talk to the ORM directly, has no direction to violate. Say "no
-layering declared or implied" rather than inventing one.
+Non-finding: a script or CLI tool classified as such (standard.md,
+Applicability) whose entry point talks to storage directly. A CRUD service
+still gets layers (L): its handlers call a use case, not the ORM.
 
 ## Cycle
 
@@ -53,14 +55,14 @@ an edit on either side can break import order at startup. Correction: move
 the shared type to the side that owns it and have the other depend one way,
 or invert one edge with an event/callback the owner publishes.
 
-Non-finding: a `TYPE_CHECKING`-only import for annotations, where runtime
-code has no cycle and neither side uses the other's behaviour — note it,
-don't rank it.
+A `TYPE_CHECKING`-only import for annotations, where runtime code has no
+cycle, is still L5: report it at P2, since the types still couple both sides.
 
 ## Reaching into internals
 
-A module with no declared surface (everything importable, callers pick
-arbitrary internals) is a finding only when the graph shows callers actually
+Cross-context imports past the package root are always S5 findings. Within
+a context, a module with no declared surface (everything importable,
+callers pick arbitrary internals) is a finding only when the graph shows callers actually
 reaching into internals *and* that blocks a concrete change. A module that
 merely lacks an `__all__` is not.
 
@@ -79,7 +81,7 @@ Correction: the port speaks domain types and domain errors
 Non-finding: framework types at the *edge* where they belong — a FastAPI
 handler taking a `Request`, a CLI command taking `click.Context`.
 
-## Bounded-context leak
+## Bounded-context leak (T6, S5)
 
 ```python
 # ❌ billing reads shipping's internal table and status codes

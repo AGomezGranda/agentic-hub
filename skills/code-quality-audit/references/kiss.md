@@ -7,7 +7,9 @@ simpler shape that preserves behaviour.
 
 Own unnecessary indirection and speculative abstraction directly here — do not
 route the finding elsewhere. Before proposing deletion, check current consumers
-and protected invariants.
+and protected invariants. Not a finding: a port in front of a side-effecting
+collaborator, a composition root, or (in a domain or CRUD service) a
+domain/application/adapters split. The architecture standard requires them.
 
 ## Generic solution for one concrete case
 

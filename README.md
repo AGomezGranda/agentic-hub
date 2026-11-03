@@ -73,7 +73,7 @@ Install with `agentic-hub install <name>`, or `agentic-hub sync` for everything.
 
 | Skill | Use it to |
 |---|---|
-| `architecture-audit` | Review boundaries and responsibilities in a repo, module, or diff |
+| `architecture-audit` | Review boundaries, responsibilities, and folder structure in a repo, module, or diff, strictly against a DDD/DI target standard |
 | `code-quality-audit` | Check SOLID, DRY, KISS, typing, and error handling in classes and functions |
 | `create-plan` | Build an implementation plan interactively before writing code |
 | `implement-plan` | Execute an approved plan phase by phase, with checkpoints |
@@ -202,6 +202,15 @@ worktrees are retained on all outcomes, and cleanup belongs to the operator
 once active processes stop. The full walkthrough, including check configuration,
 gates, recovery, and fake-mode scenarios, is in
 [docs/payo/usage.md](docs/payo/usage.md).
+
+Quick setup from the repo root installs both workspaces, writes the payo config
+if none exists (never overwrites; honours an absolute `PAYO_CONFIG_FILE`), and
+runs the payo preflight (`pnpm --dir payo preflight`). Re-running it reinstalls
+dependencies and reports what is still missing:
+
+```
+uv run scripts/setup.py
+```
 
 The TypeScript workspace in `payo/` requires Node 24 and pnpm (the workspace pins
 pnpm 10.9). `pnpm check` runs Biome, `tsc --noEmit`, and Vitest, and also enforces

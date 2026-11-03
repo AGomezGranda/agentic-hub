@@ -428,7 +428,10 @@ async function stream(
 				return;
 			}
 			pollTimer = setTimeout(() => void poll(), 250);
-		} catch {
+		} catch (error) {
+			console.error(
+				`payo: event stream failed for ${runId}: ${error instanceof Error ? error.message : String(error)}`,
+			);
 			stop();
 			res.destroy();
 		}

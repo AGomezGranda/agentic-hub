@@ -15,6 +15,7 @@ import {
 	checkGit,
 	createGitExec,
 	createGitWorkspace,
+	readBlobAt,
 	resolveBaseCommit,
 } from "./index.ts";
 
@@ -261,5 +262,31 @@ describe("checkGit", () => {
 		});
 
 		expect(check.ok).toBe(false);
+	});
+});
+
+describe("readBlobAt", () => {
+	it("reads a file at a commit and returns null for a missing path", async () => {
+		const { repo, commit } = await makeRepo();
+		const exec = createGitExec();
+		expect(await readBlobAt(repo, commit, "file.txt", exec)).toMatchObject({
+			content: "hello",
+		});
+		expect(await readBlobAt(repo, commit, "missing.txt", exec)).toBeNull();
+	});
+
+	it("returns null for an empty or blank file and for a directory", async () => {
+		const { repo } = await makeRepo();
+		await writeFile(join(repo, "empty.txt"), "");
+		await writeFile(join(repo, "blank.txt"), "\n");
+		await mkdir(join(repo, "dir"));
+		await writeFile(join(repo, "dir", "inner.txt"), "x");
+		await git(repo, ["add", "."]);
+		await git(repo, ["commit", "-m", "more"]);
+		const head = (await git(repo, ["rev-parse", "HEAD"])).trim();
+		const exec = createGitExec();
+		expect(await readBlobAt(repo, head, "empty.txt", exec)).toBeNull();
+		expect(await readBlobAt(repo, head, "blank.txt", exec)).toBeNull();
+		expect(await readBlobAt(repo, head, "dir", exec)).toBeNull();
 	});
 });

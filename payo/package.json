@@ -12,6 +12,7 @@
 		"web:build": "pnpm --dir apps/web build",
 		"web:dev": "pnpm --dir apps/web dev",
 		"payo": "node apps/cli/src/index.ts",
+		"preflight": "node apps/server/src/main.ts --check",
 		"smoke": "PAYO_LIVE=1 vitest run apps/server/src/live.test.ts"
 	},
 	"devDependencies": {

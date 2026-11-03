@@ -52,7 +52,7 @@ it("renders linked execution status and engine-owned check results", () => {
 	expect(output).toContain("execution gate: review-unavailable");
 	expect(output).toContain("checks: unit=passed");
 	expect(output).toContain(
-		"review: 2/8 lenses; 2 findings; 1 unresolved; round 2 (phase)",
+		"review: 2 lenses; 2 findings; 1 unresolved; round 2 (phase)",
 	);
 	expect(output).toContain("unchecked lenses: tests");
 	expect(output).toContain("accepted findings: architecture:1");

@@ -71,6 +71,7 @@ it("shows parallel agents for the run and keeps details selected when activity a
 	);
 	expect(screen.getByRole("button", { name: "security" })).toBeTruthy();
 	expect(screen.queryByText("private output")).toBeNull();
+	expect(screen.getByText("Agent message")).toBeTruthy();
 	await user.tab();
 	await user.keyboard("{Enter}");
 	expect(screen.getByText("private output")).toBeTruthy();

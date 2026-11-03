@@ -6,3 +6,4 @@ export * from "./factory.ts";
 export * from "./line-diff.ts";
 export * from "./primitives.ts";
 export * from "./run.ts";
+export * from "./swarm.ts";

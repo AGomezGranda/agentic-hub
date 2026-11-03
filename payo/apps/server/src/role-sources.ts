@@ -7,7 +7,7 @@ import {
 	planLensResourcePaths,
 	type RoleSource,
 } from "@payo/factory";
-import { type GitExec, resolveBaseCommit } from "@payo/git";
+import { type GitExec, readBlobAt, resolveBaseCommit } from "@payo/git";
 
 const planningResources = [
 	...architectureRubricPaths,
@@ -135,7 +135,7 @@ export async function loadExecutionRoleSources(
 	const missing: string[] = [];
 	for (const file of required) {
 		const relative = repoPath(file);
-		const blob = await readBlob(repo, commit, relative, exec);
+		const blob = await readBlobAt(repo, commit, relative, exec);
 		if (blob === null) missing.push(relative);
 		else blobs.set(relative, blob);
 	}
@@ -212,7 +212,7 @@ async function loadAt(
 	const missing: string[] = [];
 	for (const path of required) {
 		const relative = repoPath(path);
-		const blob = await readBlob(repo, commit, relative, exec);
+		const blob = await readBlobAt(repo, commit, relative, exec);
 		if (blob === null) missing.push(relative);
 		else blobs.set(relative, blob);
 	}
@@ -239,24 +239,6 @@ async function loadAt(
 		};
 	}
 	return sources;
-}
-
-async function readBlob(
-	repo: string,
-	commit: string,
-	path: string,
-	exec: GitExec,
-): Promise<{ sha: string; content: string } | null> {
-	const spec = `${commit}:${path}`;
-	const sha = await exec(["-C", repo, "rev-parse", spec], {});
-	const content = await exec(["-C", repo, "show", spec], {});
-	if (
-		sha.exitCode !== 0 ||
-		content.exitCode !== 0 ||
-		content.stdout.trim().length === 0
-	)
-		return null;
-	return { sha: sha.stdout.trim(), content: content.stdout };
 }
 
 function repoPath(path: string): string {

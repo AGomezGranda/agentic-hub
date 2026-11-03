@@ -7,6 +7,9 @@ import {
 	type VerifiedOutput,
 } from "@payo/contracts";
 
+export const MAX_DIFF_BYTES = 4 * 1024 * 1024;
+export const MAX_VALIDATION_CYCLES = 3;
+
 // Same-stage writes record in-flight/status detail; Review may start the next phase.
 const transitions: Record<ExecutionStage, readonly ExecutionStage[]> = {
 	Prepare: ["Prepare", "Implement", "Escalated"],
@@ -201,7 +204,7 @@ export function decideImplementationReview(
 		.flatMap((verdict) => verdict.sourceIds);
 	if (blockerIds.length === 0)
 		return { decision: "Accepted", blockerIds: [], reason: null };
-	if (round >= 3)
+	if (round >= MAX_VALIDATION_CYCLES)
 		return escalate(
 			`implementation repair budget exhausted with blockers: ${blockerIds.join(", ")}`,
 			blockerIds,

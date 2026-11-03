@@ -123,8 +123,11 @@ Before scoring anything, establish:
   the team/docs/tests talk about them. Mismatches predict typing and DRY
   findings.
 - **Existing conventions** — the codebase's own typing strictness, error
-  handling idiom. Judge against the repo's own
-  standard first, the textbook standard second.
+  handling idiom and wiring style. Conventions are evidence, not the bar:
+  judge against the rubrics (and, for DI, the D rules of the
+  `architecture-audit` standard). A convention tells you how widespread a
+  defect is and which correction fits the codebase's idiom, never that the
+  defect is acceptable.
 
 For a diff/PR, this is just: what contract did the changed function/class
 already have, and what does the surrounding domain call it.
@@ -204,7 +207,7 @@ sampled.
   principle restated. Advice that would read the same for any repo is not a
   finding. Positive findings require a bounded claim and evidence; there is
   no quota for strengths or defects.
-- **Treat repository conventions as context.** Group a systemic problem once
+- **Repository conventions are context, not the bar.** Group a systemic problem once
   with representative instances and affected scope, while keeping independent
   root causes separate. Consistency does not excuse harmful practices. A repo
   that's consistently loose with typing gets one grouped finding with scope,
@@ -215,8 +218,10 @@ sampled.
   material, nonblocking maintainability or reliability improvement.
   Preference-only suggestions are not defects. Confidence is independent of
   severity; low-confidence concerns remain unresolved rather than being
-  inflated or disguised as P2. A DIP violation with one concrete dependency
-  that will never change is a non-issue; the same violation blocking a needed
-  test double or a real second implementation is a real finding.
+  inflated or disguised as P2. Domain or application code that constructs,
+  imports as a singleton, or looks up a side-effecting collaborator
+  (database, HTTP, broker, filesystem, clock, randomness, env) is always a
+  DI finding, even with one implementation: the seam is for tests and
+  lifecycle. A pure, stable helper called directly is a non-issue.
 - **Don't invent a violation to fill a dimension.** If SOLID has nothing to
   say about a 40-line script, the table is empty. Say so.

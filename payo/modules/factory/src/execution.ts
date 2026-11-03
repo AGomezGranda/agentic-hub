@@ -22,6 +22,7 @@ import {
 	allChecksPassed,
 	type CheckCommand,
 	type CheckResult,
+	type CheckStatus,
 	type Checks,
 	commit,
 	ExecutionDiffTooLargeError,
@@ -60,6 +61,8 @@ import {
 	accountRepair,
 	applyExecutionCheckpoint,
 	initialExecutionCheckpoint,
+	MAX_DIFF_BYTES,
+	MAX_VALIDATION_CYCLES,
 	validateExecutionManifest,
 } from "./execution-state.ts";
 import { validateRunId } from "./plans.ts";
@@ -67,9 +70,13 @@ import { loadCheckpoint } from "./state.ts";
 
 export type { ExecutionDeps, ExecutionHandle } from "./execution-handle.ts";
 
-const MAX_DIFF_BYTES = 4 * 1024 * 1024;
-const MAX_VALIDATION_CYCLES = 3;
-const checkStatuses = new Set([
+const VALIDATION_STAGES: readonly ExecutionStage[] = [
+	"Check",
+	"Review",
+	"Repair",
+	"Finalize",
+];
+const checkStatuses = new Set<CheckStatus>([
 	"passed",
 	"failed",
 	"timed_out",
@@ -457,9 +464,7 @@ async function runExecution(
 			if (!(await implementPhase(state, config, deps, signal))) return;
 			continue;
 		}
-		if (
-			["Check", "Review", "Repair", "Finalize"].includes(state.checkpoint.stage)
-		) {
+		if (VALIDATION_STAGES.includes(state.checkpoint.stage)) {
 			await validatePhase(state, config, deps, signal);
 			if (state.checkpoint.stage === "Escalated") return;
 			if (state.checkpoint.stage === "Completed") return;
@@ -641,22 +646,29 @@ async function prepareManifest(
 			approved.plan.markdown,
 			pr,
 		);
-		const results = await deps.workspace.verifyPrerequisites(
-			state.log.current().repo,
-			config.baseCommit,
-			manifest.prerequisites,
-			signal,
-		);
-		const missing = results.filter((item) => !item.present);
-		if (missing.length > 0)
-			throw new Error(
-				`unavailable prerequisites: ${missing.map((item) => `${item.description} (${item.reason})`).join("; ")}`,
-			);
 	} catch (error) {
 		await raiseExecutionGate(
 			state,
 			"Prepare",
 			`approved plan cannot be executed safely: ${describeError(error)}`,
+			[stepId],
+			"manifest-invalid",
+		);
+		return false;
+	}
+	// Outside the try: abort or infrastructure errors are not plan defects, so they reach the resumable execution-failed gate.
+	const results = await deps.workspace.verifyPrerequisites(
+		state.log.current().repo,
+		config.baseCommit,
+		manifest.prerequisites,
+		signal,
+	);
+	const missing = results.filter((item) => !item.present);
+	if (missing.length > 0) {
+		await raiseExecutionGate(
+			state,
+			"Prepare",
+			`approved plan cannot be executed safely: unavailable prerequisites: ${missing.map((item) => `${item.description} (${item.reason})`).join("; ")}`,
 			[stepId],
 			"manifest-invalid",
 		);
@@ -1070,17 +1082,18 @@ async function validatePhase(
 		const snapshot = current
 			? await deps.workspace.inspect(current.path, signal)
 			: null;
+		const mutated = review.reason?.includes("mutated") === true;
 		await raiseExecutionGateWithEvidence(
 			state,
 			"Review",
 			review.reason ?? "implementation review could not be accepted",
 			openGateSteps(state),
-			review.reason?.includes("mutated")
+			mutated
 				? "workspace-mutated-during-review"
 				: review.reason?.includes("budget exhausted")
 					? "review-repair-budget-exhausted"
 					: "implementation-review-failed",
-			snapshot && review.reason?.includes("mutated")
+			snapshot && mutated
 				? { diff: null, checks: null, review: null }
 				: {
 						diff: review.diffRef,
@@ -2108,6 +2121,7 @@ export async function resumeExecution(
 			try {
 				snapshot = await deps.workspace.inspect(workspace.path, input.signal);
 			} catch (error) {
+				if (input.signal.aborted) throw error;
 				throw conflict(
 					`execution workspace is unavailable; edits were retained: ${describeError(error)}`,
 				);

@@ -12,6 +12,10 @@ import { createHandler } from "./http.ts";
 import { createConfigSettingsService } from "./settings.ts";
 
 async function main(): Promise<void> {
+	if (process.argv.includes("--check")) {
+		process.exitCode = await preflight();
+		return;
+	}
 	let config: ServerConfig;
 	try {
 		config = loadConfig();
@@ -89,6 +93,38 @@ async function main(): Promise<void> {
 	process.on("SIGTERM", () => void stop("SIGTERM"));
 }
 
+/** Prints config, model and doctor checks without listening; port, token and composition stay serve-only. */
+async function preflight(): Promise<number> {
+	let config: ServerConfig;
+	try {
+		config = loadConfig();
+	} catch (error) {
+		console.error(`payo check: FAIL config: ${errorMessage(error)}`);
+		return 1;
+	}
+	if (config.devFakes) {
+		console.log("payo check: dev fakes selected; real-mode checks skipped");
+		return 0;
+	}
+	try {
+		assertRealModeModels(config);
+	} catch (error) {
+		console.error(`payo check: FAIL models: ${errorMessage(error)}`);
+		return 1;
+	}
+	const report = await runDoctor(config);
+	const blocking = new Set(startupBlockingFailures(report));
+	for (const check of report.checks) {
+		const label = check.ok ? "ok" : blocking.has(check) ? "FAIL" : "warn";
+		console.log(`${label.padEnd(4)} ${check.name}: ${check.detail}`);
+	}
+	return blocking.size === 0 ? 0 : 1;
+}
+
+function errorMessage(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
+}
+
 async function shutdown(
 	server: Server,
 	services: Composition | null,
@@ -100,8 +136,7 @@ async function shutdown(
 }
 
 function fail(error: unknown): void {
-	const message = error instanceof Error ? error.message : String(error);
-	console.error(`payo serve: ${message}`);
+	console.error(`payo serve: ${errorMessage(error)}`);
 	process.exitCode = 1;
 }
 

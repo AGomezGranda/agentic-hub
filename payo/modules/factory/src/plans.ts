@@ -9,6 +9,7 @@ import {
 	writeFile,
 } from "node:fs/promises";
 import { join } from "node:path";
+import { CommandError } from "./errors.ts";
 
 const start = "<!-- factory answers start -->";
 const end = "<!-- factory answers end -->";
@@ -28,7 +29,7 @@ export function renderAnswers(
 		starts > 1 ||
 		(starts === 1 && markdown.indexOf(start) > markdown.indexOf(end))
 	)
-		throw new Error("ambiguous answer delimiters");
+		throw new CommandError(409, "conflict", "ambiguous answer delimiters");
 	if (
 		Object.entries(answers).some(([id, answer]) =>
 			[id, answer].some(
@@ -36,7 +37,11 @@ export function renderAnswers(
 			),
 		)
 	)
-		throw new Error("ambiguous answer delimiters");
+		throw new CommandError(
+			400,
+			"invalid_request",
+			"ambiguous answer delimiters",
+		);
 	const section = Object.entries(answers)
 		.map(([id, answer]) => `- **${id}:** ${answer}`)
 		.join("\n");
