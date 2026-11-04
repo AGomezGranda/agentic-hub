@@ -75,7 +75,7 @@ export interface ExecutionWorkspace {
 		path: string,
 		signal: AbortSignal,
 	): Promise<ExecutionWorkspaceSnapshot>;
-	/** Capture a diff, failing with `ExecutionDiffTooLargeError` when it exceeds the optional byte cap. */
+	/** Capture a diff, failing with `ExecutionDiffTooLargeError` when it exceeds the optional byte cap. Also fails for untracked entries that are not regular files, so the caller must treat that as a gate. */
 	diff(
 		path: string,
 		baseCommit: string,

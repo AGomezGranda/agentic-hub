@@ -252,6 +252,22 @@ it("returns unchecked lenses and null verdicts for an input-only review artifact
 	expect(result.review.uncheckedLenses.length).toBeGreaterThan(0);
 });
 
+it("pauses at plan review when the verifier throws instead of escaping the run", async () => {
+	const { handle } = await setup([
+		envelope(plan),
+		...Array.from({ length: 7 }, () => envelope({ findings: [] })),
+		[{ kind: "throw" as const, message: "verifier crashed" }],
+	]);
+	expect(handle.checkpoint.stage).toBe("Escalated");
+	expect([...handle.log.current().gates.values()]).toContainEqual(
+		expect.objectContaining({
+			kind: "factory-escalation",
+			status: "open",
+			reason: "verifier crashed",
+		}),
+	);
+});
+
 it("does not fall back to a plan snapshot when the gate file is missing or unsafe", async () => {
 	const { handle, dataDir } = await setup(finalReviewScripts);
 	const planPath = join(dataDir, "runs", "run", "plan.md");

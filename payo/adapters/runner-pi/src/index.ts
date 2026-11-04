@@ -97,6 +97,8 @@ export function createPiRunner(options: PiRunnerOptions): AgentRunner {
 				shell: false,
 				detached: spec.tools === "write",
 			};
+			// Input loading awaits above; the abort listener is only registered after spawn.
+			if (signal.aborted) return;
 			const child = spawnFn(bin, args, spawnOptions);
 			const state: PiMapState = {
 				signal,

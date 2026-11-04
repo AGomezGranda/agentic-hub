@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { isAbsolute } from "node:path";
-import { ConfigRevisionConflictError } from "@payo/config";
+import { ConfigRevisionConflictError, PayoConfigPathError } from "@payo/config";
 import {
 	AnswerRequest,
 	type ApiError,
@@ -8,6 +8,7 @@ import {
 	DoctorReport,
 	EventsResponse,
 	ImplementRequest,
+	PickDirectoryResponse,
 	PlanRestoreRequest,
 	PlanUpdateRequest,
 	PlanVersionDetail,
@@ -29,7 +30,15 @@ import {
 	isOriginAllowed,
 } from "./auth.ts";
 import type { Composition } from "./composition.ts";
-import { ApiFailure, conflict, notFound } from "./errors.ts";
+import type { DirectoryPicker } from "./directory-picker.ts";
+import {
+	ApiFailure,
+	ApplicationError,
+	type ApplicationErrorCode,
+	conflict,
+	FolderDialogUnavailable,
+	notFound,
+} from "./errors.ts";
 import type { ConfigSettingsService } from "./settings.ts";
 
 const JSON_LIMIT = 64 * 1024;
@@ -40,6 +49,7 @@ export interface HandlerOptions {
 	getPort(): number;
 	getServices(): Composition | null;
 	configSettings: ConfigSettingsService;
+	pickDirectory: DirectoryPicker;
 }
 
 export function createHandler(
@@ -123,11 +133,29 @@ async function handle(
 			} catch (error) {
 				if (error instanceof ConfigRevisionConflictError)
 					throw conflict("config file changed since it was loaded");
+				if (error instanceof PayoConfigPathError)
+					throw new ApiFailure(400, "config_path_invalid", error.message);
 				throw error;
 			}
 			return;
 		}
 		throw new ApiFailure(405, "method_not_allowed", "method not allowed");
+	}
+
+	if (segments[2] === "system") {
+		if (segments.length !== 4 || segments[3] !== "pick-directory")
+			throw notFound("unknown route");
+		if (req.method !== "POST")
+			throw new ApiFailure(405, "method_not_allowed", "method not allowed");
+		try {
+			const path = await options.pickDirectory();
+			json(res, 200, PickDirectoryResponse.parse({ path }), cors);
+		} catch (error) {
+			if (error instanceof FolderDialogUnavailable)
+				throw new ApiFailure(501, "unsupported", error.message);
+			throw error;
+		}
+		return;
 	}
 
 	if (segments[2] === "doctor") {
@@ -351,6 +379,26 @@ function json(
 	res.end(text);
 }
 
+/** The only place application error codes become HTTP status and wire code. */
+const APPLICATION_ERROR_RESPONSES: Record<
+	ApplicationErrorCode,
+	{ status: number; code: string }
+> = {
+	not_found: { status: 404, code: "not_found" },
+	busy: { status: 409, code: "busy" },
+	invalid_request: { status: 400, code: "invalid_request" },
+	execution_unavailable: { status: 503, code: "execution_unavailable" },
+	// Shares the wire code with execution_unavailable but keeps its 400 status.
+	execution_platform_unsupported: {
+		status: 400,
+		code: "execution_unavailable",
+	},
+	execution_base_unavailable: {
+		status: 400,
+		code: "execution_base_unavailable",
+	},
+};
+
 function respondFailure(
 	res: ServerResponse,
 	error: unknown,
@@ -368,6 +416,11 @@ function respondFailure(
 			not_found: 404,
 		}[error.code];
 		json(res, status, { code: error.code, message: error.message }, cors);
+		return;
+	}
+	if (error instanceof ApplicationError) {
+		const { status, code } = APPLICATION_ERROR_RESPONSES[error.code];
+		json(res, status, { code, message: error.message }, cors);
 		return;
 	}
 	if (error instanceof ApiFailure) {

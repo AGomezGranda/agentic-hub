@@ -7,6 +7,7 @@ import {
 	loadConfig,
 	type ServerConfig,
 } from "./config.ts";
+import { pickDirectory } from "./directory-picker.ts";
 import { runDoctor, startupBlockingFailures } from "./doctor.ts";
 import { createHandler } from "./http.ts";
 import { createConfigSettingsService } from "./settings.ts";
@@ -55,6 +56,7 @@ async function main(): Promise<void> {
 			getPort: () => port,
 			getServices: () => services,
 			configSettings,
+			pickDirectory,
 		}),
 	);
 

@@ -310,6 +310,33 @@ it("shows server startup errors from a rejected start request", async () => {
 	);
 });
 
+it("shows a failed run list in the sidebar instead of the empty-state message", async () => {
+	vi.stubGlobal(
+		"fetch",
+		vi.fn(async (input: RequestInfo | URL) => {
+			const url = String(input);
+			if (url.endsWith("/doctor"))
+				return jsonResponse(200, { ok: true, checks: [] });
+			if (url.endsWith("/runs"))
+				return jsonResponse(500, {
+					code: "internal_error",
+					message: "run store unavailable",
+				});
+			throw new Error(`unexpected request ${url}`);
+		}),
+	);
+	const user = userEvent.setup();
+	render(<App />);
+	await connect(user);
+	const sidebar = screen.getByRole("complementary", { name: "Your work" });
+	expect(
+		await within(sidebar).findByText(
+			"Payo server error (500): run store unavailable",
+		),
+	).toBeInTheDocument();
+	expect(screen.queryByText("No runs yet")).toBeNull();
+});
+
 it("opens a directly addressed run, switches runs, and follows browser back", async () => {
 	const RUN_B = "7f1f1b1e-2b4c-4f7a-9d3e-2f4a5b6c7d8e";
 	window.history.pushState({}, "", `/runs/${RUN_ID}`);

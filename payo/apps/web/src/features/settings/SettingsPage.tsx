@@ -5,6 +5,7 @@ import {
 	PayoConfigDocument as PayoConfigDocumentSchema,
 } from "@payo/contracts";
 import { DEFAULT_SERVER_PORT, PayoApiError } from "@web/shared/api/client.ts";
+import { BrowseButton } from "@web/shared/ui/BrowseButton.tsx";
 import { Button } from "@web/shared/ui/Button.tsx";
 import { type FormEvent, useEffect, useState } from "react";
 import { getConfigSettings, saveConfigSettings } from "./api.ts";
@@ -314,6 +315,7 @@ export function SettingsPage({
 							error={fieldErrors.repo}
 							value={form.repo}
 							onChange={(value) => update("repo", value)}
+							browseToken={token}
 						/>
 						<TextField
 							id="settings-base-branch"
@@ -511,6 +513,7 @@ function TextField({
 	error,
 	value,
 	onChange,
+	browseToken,
 	type = "text",
 	min,
 	max,
@@ -521,6 +524,8 @@ function TextField({
 	error: string | undefined;
 	value: string;
 	onChange: (value: string) => void;
+	/** When set, shows a native folder picker button. */
+	browseToken?: string;
 	type?: "text" | "number";
 	min?: number;
 	max?: number;
@@ -530,17 +535,22 @@ function TextField({
 			<label htmlFor={id} className="block text-sm font-semibold">
 				{label}
 			</label>
-			<input
-				id={id}
-				className={`${inputClass} ${error ? "border-[var(--danger)]" : ""}`}
-				type={type}
-				min={min}
-				max={max}
-				value={value}
-				aria-invalid={error ? true : undefined}
-				aria-describedby={describedBy(id, hint, error)}
-				onChange={(event) => onChange(event.currentTarget.value)}
-			/>
+			<div className="flex flex-wrap gap-2">
+				<input
+					id={id}
+					className={`${inputClass} min-w-0 flex-1 ${error ? "border-[var(--danger)]" : ""}`}
+					type={type}
+					min={min}
+					max={max}
+					value={value}
+					aria-invalid={error ? true : undefined}
+					aria-describedby={describedBy(id, hint, error)}
+					onChange={(event) => onChange(event.currentTarget.value)}
+				/>
+				{browseToken ? (
+					<BrowseButton token={browseToken} onPick={onChange} />
+				) : null}
+			</div>
 			<p id={`${id}-hint`} className="text-xs text-[var(--muted)]">
 				{hint}
 			</p>

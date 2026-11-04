@@ -1,0 +1,7 @@
+[tools]
+python = "3.15.2"
+uv = "0.12.5"
+
+[tasks."payo:dev"]
+description = "Start the Payo server and web UI, then print the token (PAYO_DEV_FAKES=1 for offline fakes)"
+run = "scripts/payo-dev.sh"

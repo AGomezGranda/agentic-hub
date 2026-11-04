@@ -1499,6 +1499,74 @@ describe("execution lifecycle", () => {
 		]);
 	});
 
+	it("escalates implementation output that fails the schema on both attempts", async () => {
+		const store = createMemoryRunStore();
+		await sourceRun(store);
+		const invalidImplementation = { summary: "Implemented the boundary." };
+		const fixture = await executionSetup(store, [
+			manifestOutput,
+			invalidImplementation,
+			invalidImplementation,
+		]);
+		const handle = await beginExecution(fixture.deps, fixture.input);
+		const escalated = await executeExecution(handle, {
+			signal: new AbortController().signal,
+		});
+		expect(
+			fixture.calls.filter((call) => call.role === "implementer"),
+		).toHaveLength(2);
+		expect(escalated.checkpoint).toMatchObject({
+			stage: "Escalated",
+			statusDetail: "implementation-report-invalid",
+			escalation: {
+				reason:
+					"implementation report could not be validated; edits are preserved for reconciliation",
+			},
+		});
+	});
+
+	it("escalates repair output that fails the schema on both attempts", async () => {
+		const store = createMemoryRunStore();
+		await sourceRun(store);
+		const failedChecks: Checks = {
+			run: async (_cwd, commands) =>
+				commands.map((command) => ({
+					name: command.name,
+					status: "failed" as const,
+					exitCode: 1,
+					stdout: "",
+					stderr: "failure",
+					truncated: false,
+				})),
+		};
+		// A function output is required: the scripted runner replaces object outputs for repair with a valid report.
+		const invalidRepair = (_spec: AgentSpec, _signal: AbortSignal) =>
+			(async function* () {
+				yield {
+					type: "result",
+					text: JSON.stringify({ summary: "fixed" }),
+				} as const;
+			})();
+		const fixture = await executionSetup(
+			store,
+			[manifestOutput, implementationOutput, invalidRepair, invalidRepair],
+			{ checks: failedChecks },
+		);
+		const handle = await beginExecution(fixture.deps, fixture.input);
+		const escalated = await executeExecution(handle, {
+			signal: new AbortController().signal,
+		});
+		expect(
+			fixture.calls.filter(
+				(call) => call.outputContract === "factory-execution-repair-v1",
+			),
+		).toHaveLength(2);
+		expect(escalated.checkpoint).toMatchObject({
+			stage: "Escalated",
+			statusDetail: "repair-report-invalid",
+		});
+	});
+
 	it("does not accept failed checks as completion evidence", async () => {
 		const store = createMemoryRunStore();
 		await sourceRun(store);
@@ -1568,6 +1636,51 @@ describe("execution lifecycle", () => {
 			resumeExecution(escalated, { signal: new AbortController().signal }),
 		).rejects.toThrow(/workspace is unavailable/);
 		expect([...escalated.log.current().gates.values()][0]?.status).toBe("open");
+	});
+
+	it("gates a resumed execution whose reconciliation diff throws instead of rejecting", async () => {
+		const store = createMemoryRunStore();
+		await sourceRun(store);
+		const workspace = workspacePort();
+		const controller = new AbortController();
+		const cancelAfterEdit = (_spec: AgentSpec, _signal: AbortSignal) => {
+			workspace.mutate();
+			controller.abort();
+			return (async function* () {})();
+		};
+		const fixture = await executionSetup(
+			store,
+			[manifestOutput, cancelAfterEdit],
+			{ workspace },
+		);
+		const handle = await beginExecution(fixture.deps, fixture.input);
+		const escalated = await executeExecution(handle, {
+			signal: controller.signal,
+		});
+		expect(escalated.checkpoint).toMatchObject({
+			stage: "Escalated",
+			statusDetail: "execution-cancelled",
+		});
+		workspace.port.diff = async () => {
+			throw new Error("diff unavailable");
+		};
+
+		const reopened = await openExecution(
+			fixture.deps,
+			handle.log.current().runId,
+		);
+		const resumed = await resumeExecution(reopened, {
+			signal: new AbortController().signal,
+		});
+		expect(resumed.checkpoint).toMatchObject({
+			stage: "Escalated",
+			statusDetail: "execution-failed",
+			escalation: { reason: "execution failed safely: diff unavailable" },
+		});
+		const openGates = [...resumed.log.current().gates.values()].filter(
+			(gate) => gate.status === "open",
+		);
+		expect(openGates).toHaveLength(1);
 	});
 
 	it("repairs a check failure, reruns checks, and proceeds through independent review", async () => {
@@ -1751,6 +1864,116 @@ describe("execution lifecycle", () => {
 				)
 			).changedPaths,
 		).toContain("partial.ts");
+	});
+
+	it("records an operator cancel during implementation as cancelled, not invalid output", async () => {
+		const store = createMemoryRunStore();
+		await sourceRun(store);
+		const controller = new AbortController();
+		const cancelDuringWrite = (_spec: AgentSpec, _signal: AbortSignal) => {
+			controller.abort();
+			return (async function* () {})();
+		};
+		const fixture = await executionSetup(store, [
+			manifestOutput,
+			cancelDuringWrite,
+		]);
+		const handle = await beginExecution(fixture.deps, fixture.input);
+		const escalated = await executeExecution(handle, {
+			signal: controller.signal,
+		});
+		expect(escalated.checkpoint).toMatchObject({
+			stage: "Escalated",
+			statusDetail: "execution-cancelled",
+			escalation: {
+				reason:
+					"execution cancelled during Implement; inspect the retained workspace and resume",
+			},
+		});
+	});
+
+	it("records an operator cancel during manifest preparation as cancelled, not invalid output", async () => {
+		const store = createMemoryRunStore();
+		await sourceRun(store);
+		const controller = new AbortController();
+		const cancelDuringPreparer = (_spec: AgentSpec, _signal: AbortSignal) => {
+			controller.abort();
+			return (async function* () {})();
+		};
+		const fixture = await executionSetup(store, [cancelDuringPreparer]);
+		const handle = await beginExecution(fixture.deps, fixture.input);
+		const escalated = await executeExecution(handle, {
+			signal: controller.signal,
+		});
+		expect(escalated.checkpoint).toMatchObject({
+			stage: "Escalated",
+			statusDetail: "execution-cancelled",
+			escalation: {
+				reason:
+					"execution cancelled during Prepare; inspect the retained workspace and resume",
+			},
+		});
+	});
+
+	it("rejects a pre-aborted execution before any writer or failure gate", async () => {
+		const store = createMemoryRunStore();
+		await sourceRun(store);
+		const fixture = await executionSetup(store, [
+			manifestOutput,
+			implementationOutput,
+		]);
+		const handle = await beginExecution(fixture.deps, fixture.input);
+		const controller = new AbortController();
+		controller.abort();
+
+		await expect(
+			executeExecution(handle, { signal: controller.signal }),
+		).rejects.toThrow(/execution cancelled/);
+		expect(handle.checkpoint.stage).not.toBe("Escalated");
+		expect(handle.log.current().gates.size).toBe(0);
+		expect(fixture.calls).toEqual([]);
+	});
+
+	it("records an operator cancel during repair as cancelled, not invalid output", async () => {
+		const store = createMemoryRunStore();
+		await sourceRun(store);
+		const failedChecks: Checks = {
+			run: async (_cwd, commands) =>
+				commands.map((command) => ({
+					name: command.name,
+					status: "failed" as const,
+					exitCode: 1,
+					stdout: "",
+					stderr: "failure",
+					truncated: false,
+				})),
+		};
+		const controller = new AbortController();
+		const cancelDuringRepair = (_spec: AgentSpec, _signal: AbortSignal) => {
+			controller.abort();
+			return (async function* () {})();
+		};
+		const fixture = await executionSetup(
+			store,
+			[manifestOutput, implementationOutput, cancelDuringRepair],
+			{ checks: failedChecks },
+		);
+		const handle = await beginExecution(fixture.deps, fixture.input);
+		const escalated = await executeExecution(handle, {
+			signal: controller.signal,
+		});
+		expect(fixture.calls).toHaveLength(3);
+		expect(fixture.calls[2]?.outputContract).toBe(
+			"factory-execution-repair-v1",
+		);
+		expect(escalated.checkpoint).toMatchObject({
+			stage: "Escalated",
+			statusDetail: "execution-cancelled",
+			escalation: {
+				reason:
+					"execution cancelled during Repair; inspect the retained workspace and resume",
+			},
+		});
 	});
 
 	it("reconciles a worktree created before preparation checkpoint persistence", async () => {

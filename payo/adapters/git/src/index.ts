@@ -1,4 +1,3 @@
-import { execFile } from "node:child_process";
 import {
 	mkdir,
 	readFile,
@@ -10,19 +9,16 @@ import {
 import { basename, isAbsolute, join, resolve, sep } from "node:path";
 import type { DoctorCheck } from "@payo/contracts";
 import type { Workspace } from "@payo/kernel";
+import { createGitExec, type GitExec, resolveBaseCommit } from "./exec.ts";
 
+export {
+	BaseNotFoundError,
+	createGitExec,
+	type GitExec,
+	resolveBaseCommit,
+} from "./exec.ts";
 export type { ExecutionGitOptions } from "./execution.ts";
 export { createExecutionWorkspace } from "./execution.ts";
-
-export type GitExec = (
-	args: string[],
-	options: {
-		cwd?: string;
-		timeoutMs?: number;
-		signal?: AbortSignal;
-		maxBuffer?: number;
-	},
-) => Promise<{ stdout: string; stderr: string; exitCode: number }>;
 
 export interface GitWorkspaceOptions {
 	root: string;
@@ -31,42 +27,8 @@ export interface GitWorkspaceOptions {
 	timeoutMs?: number;
 }
 
-const DEFAULT_TIMEOUT_MS = 30000;
 const MAX_DETAIL = 512;
 const RUN_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
-
-export function createGitExec(options?: {
-	bin?: string;
-	timeoutMs?: number;
-}): GitExec {
-	const bin = options?.bin ?? "git";
-	const defaultTimeout = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-	return (args, { cwd, timeoutMs, signal, maxBuffer } = {}) =>
-		new Promise((resolvePromise, reject) => {
-			execFile(
-				bin,
-				args,
-				{
-					cwd,
-					timeout: timeoutMs ?? defaultTimeout,
-					maxBuffer: maxBuffer ?? 16 * 1024 * 1024,
-					shell: false,
-					signal,
-				},
-				(error, stdout, stderr) => {
-					if (error === null) {
-						resolvePromise({ stdout, stderr, exitCode: 0 });
-						return;
-					}
-					if (typeof error.code === "number") {
-						resolvePromise({ stdout, stderr, exitCode: error.code });
-						return;
-					}
-					reject(error);
-				},
-			);
-		});
-}
 
 export function createGitWorkspace(options: GitWorkspaceOptions): Workspace {
 	const exec =
@@ -158,29 +120,6 @@ export function createGitWorkspace(options: GitWorkspaceOptions): Workspace {
 			await rm(metaPath, { force: true });
 		},
 	};
-}
-
-export class BaseNotFoundError extends Error {}
-
-export async function resolveBaseCommit(
-	repo: string,
-	base: string,
-	exec: GitExec,
-	signal?: AbortSignal,
-): Promise<string> {
-	for (const ref of [
-		`refs/heads/${base}^{commit}`,
-		`refs/remotes/origin/${base}^{commit}`,
-		`${base}^{commit}`,
-	]) {
-		const result = await exec(
-			["-C", repo, "rev-parse", "--verify", "--quiet", ref],
-			{ signal },
-		);
-		const commit = result.stdout.trim();
-		if (result.exitCode === 0 && commit.length > 0) return commit;
-	}
-	throw new BaseNotFoundError(`base ${base} not found in ${repo}`);
 }
 
 /**

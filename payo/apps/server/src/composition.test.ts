@@ -14,6 +14,7 @@ import type { ServerConfig } from "./config.ts";
 import {
 	createFakeRunner,
 	envelope,
+	fakeExecutionWorkspace,
 	fakeWorkItems,
 	fakeWorkspace,
 } from "./factory-fixtures.ts";
@@ -256,6 +257,142 @@ it("allows planning without an implementer model but rejects implementation acti
 	await expect(composition.implement(runId, { prId: "pr" })).rejects.toThrow(
 		/\[roles\.implementer\]\.model/,
 	);
+	await composition.shutdown();
+});
+
+it("reports a failed execution role-source load as unavailable", async () => {
+	const store = createMemoryRunStore();
+	const model = { provider: "anthropic", id: "test-model" };
+	const composition = await createComposition({
+		config: config({
+			devFakes: false,
+			scenario: null,
+			checks: [{ name: "unit", command: "true", args: [], timeout_ms: 1000 }],
+			roles: {
+				planner: { model, timeoutMs: 1000 },
+				reviewer: { model, timeoutMs: 1000 },
+				verifier: { model, timeoutMs: 1000 },
+				reviser: { model, timeoutMs: 1000 },
+				implementer: { model, timeoutMs: 1000 },
+			},
+		}),
+		store,
+		adapters: {
+			...injected(() => createFakeRunner(cleanScript())),
+			executionWorkspace: fakeExecutionWorkspace("/workspaces"),
+			checks: { run: async () => [] },
+			loadExecutionRoleSources: async () => {
+				throw new Error("skills checkout is unreadable");
+			},
+		},
+	});
+	const runId = await composition.start({
+		workItemRequest: { source: "jira", key: "T" },
+		repo: "/repo",
+		baseBranch: "main",
+	});
+	await composition.waitForIdle();
+	await composition.approve(runId);
+	await expect(
+		composition.implement(runId, { prId: "pr" }),
+	).rejects.toMatchObject({
+		name: "ApplicationError",
+		code: "execution_unavailable",
+	});
+	await composition.shutdown();
+});
+
+it("reports a failed stored execution base resolution as unavailable", async () => {
+	const store = createMemoryRunStore();
+	const model = { provider: "anthropic", id: "test-model" };
+	const composition = await createComposition({
+		config: config({
+			devFakes: false,
+			scenario: null,
+			checks: [{ name: "unit", command: "true", args: [], timeout_ms: 1000 }],
+			roles: {
+				planner: { model, timeoutMs: 1000 },
+				reviewer: { model, timeoutMs: 1000 },
+				verifier: { model, timeoutMs: 1000 },
+				reviser: { model, timeoutMs: 1000 },
+				implementer: { model, timeoutMs: 1000 },
+			},
+		}),
+		store,
+		adapters: {
+			...injected(() => createFakeRunner(cleanScript())),
+			executionWorkspace: {
+				...fakeExecutionWorkspace("/workspaces"),
+				resolveBase: async () => {
+					throw new Error("base branch is missing");
+				},
+			},
+			checks: { run: async () => [] },
+			loadExecutionRoleSources: async () => {
+				throw new Error("role sources must not be loaded");
+			},
+		},
+	});
+	const runId = await composition.start({
+		workItemRequest: { source: "jira", key: "T" },
+		repo: "/repo",
+		baseBranch: "main",
+	});
+	await composition.waitForIdle();
+	await composition.approve(runId);
+	await expect(
+		composition.implement(runId, { prId: "pr" }),
+	).rejects.toMatchObject({
+		name: "ApplicationError",
+		code: "execution_unavailable",
+	});
+	await composition.shutdown();
+});
+
+it("reports a failed requested execution base resolution as bad request", async () => {
+	const store = createMemoryRunStore();
+	const model = { provider: "anthropic", id: "test-model" };
+	const composition = await createComposition({
+		config: config({
+			devFakes: false,
+			scenario: null,
+			checks: [{ name: "unit", command: "true", args: [], timeout_ms: 1000 }],
+			roles: {
+				planner: { model, timeoutMs: 1000 },
+				reviewer: { model, timeoutMs: 1000 },
+				verifier: { model, timeoutMs: 1000 },
+				reviser: { model, timeoutMs: 1000 },
+				implementer: { model, timeoutMs: 1000 },
+			},
+		}),
+		store,
+		adapters: {
+			...injected(() => createFakeRunner(cleanScript())),
+			executionWorkspace: {
+				...fakeExecutionWorkspace("/workspaces"),
+				resolveBase: async () => {
+					throw new Error("base branch is missing");
+				},
+			},
+			checks: { run: async () => [] },
+			loadExecutionRoleSources: async () => {
+				throw new Error("role sources must not be loaded");
+			},
+		},
+	});
+	const runId = await composition.start({
+		workItemRequest: { source: "jira", key: "T" },
+		repo: "/repo",
+		baseBranch: "main",
+	});
+	await composition.waitForIdle();
+	await composition.approve(runId);
+	await expect(
+		composition.implement(runId, { prId: "pr", base: "release" }),
+	).rejects.toMatchObject({
+		name: "ApplicationError",
+		code: "execution_base_unavailable",
+	});
 	await composition.shutdown();
 });
 

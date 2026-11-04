@@ -419,10 +419,21 @@ export async function executeExecution(
 		throw conflict("execution is escalated; resume before executing");
 	state.busy = true;
 	try {
-		await runExecution(state, input.signal);
+		await runOrGate(state, input.signal);
 		return handle;
+	} finally {
+		state.busy = false;
+	}
+}
+
+async function runOrGate(
+	state: MutableExecutionHandle,
+	signal: AbortSignal,
+): Promise<void> {
+	try {
+		await runExecution(state, signal);
 	} catch (error) {
-		if (input.signal.aborted) throw error;
+		if (signal.aborted) throw error;
 		const failedStage = state.checkpoint.stage as ExecutionStage;
 		if (failedStage !== "Escalated")
 			await raiseExecutionGate(
@@ -432,9 +443,6 @@ export async function executeExecution(
 				state.checkpoint.inFlight?.stepIds ?? [],
 				"execution-failed",
 			);
-		return handle;
-	} finally {
-		state.busy = false;
 	}
 }
 
@@ -638,13 +646,15 @@ async function prepareManifest(
 		},
 	);
 	if (result.outcome !== "succeeded") {
-		await raiseExecutionGate(
-			state,
-			"Prepare",
-			"approved plan preparation failed; no writer was started",
-			[stepId],
-			"manifest-preparation-failed",
-		);
+		if (signal.aborted) await raiseCancelledGate(state, "Prepare", [stepId]);
+		else
+			await raiseExecutionGate(
+				state,
+				"Prepare",
+				"approved plan preparation failed; no writer was started",
+				[stepId],
+				"manifest-preparation-failed",
+			);
 		return false;
 	}
 	let manifest: ExecutionManifest;
@@ -667,7 +677,7 @@ async function prepareManifest(
 	manifest.phases.forEach((phase, index) => {
 		phase.title = pr.phases[index] ?? phase.title;
 	});
-	// Outside the try: abort or infrastructure errors are not plan defects, so they reach the resumable execution-failed gate.
+	// Outside the try: abort errors propagate to the caller, while infrastructure errors are not plan defects and reach the resumable execution-failed gate.
 	const results = await deps.workspace.verifyPrerequisites(
 		state.log.current().repo,
 		config.baseCommit,
@@ -813,13 +823,15 @@ async function implementPhase(
 		},
 	);
 	if (result.outcome !== "succeeded") {
-		await raiseExecutionGate(
-			state,
-			"Implement",
-			"implementation report could not be validated; edits are preserved for reconciliation",
-			[stepId],
-			"implementation-report-invalid",
-		);
+		if (signal.aborted) await raiseCancelledGate(state, "Implement", [stepId]);
+		else
+			await raiseExecutionGate(
+				state,
+				"Implement",
+				"implementation report could not be validated; edits are preserved for reconciliation",
+				[stepId],
+				"implementation-report-invalid",
+			);
 		return false;
 	}
 	const after = await deps.workspace.inspect(workspaceIdentity.path, signal);
@@ -1391,13 +1403,15 @@ async function repairScope(
 		},
 	);
 	if (result.outcome !== "succeeded") {
-		await raiseExecutionGate(
-			state,
-			"Repair",
-			"repair report could not be validated; retained edits require reconciliation",
-			[stepId],
-			"repair-report-invalid",
-		);
+		if (signal.aborted) await raiseCancelledGate(state, "Repair", [stepId]);
+		else
+			await raiseExecutionGate(
+				state,
+				"Repair",
+				"repair report could not be validated; retained edits require reconciliation",
+				[stepId],
+				"repair-report-invalid",
+			);
 		return false;
 	}
 	const output = RepairOutputSchema.parse(result.value);
@@ -2194,7 +2208,7 @@ export async function resumeExecution(
 			},
 			events,
 		);
-		await runExecution(state, input.signal);
+		await runOrGate(state, input.signal);
 		return handle;
 	} finally {
 		state.busy = false;
@@ -2314,6 +2328,21 @@ async function raiseExecutionGate(
 		ownedStepIds,
 		statusDetail,
 		{},
+	);
+}
+
+// The kernel reports an operator cancel as a failed step, so callers check the signal before a report gate.
+async function raiseCancelledGate(
+	state: MutableExecutionHandle,
+	operation: ExecutionStage,
+	ownedStepIds: readonly string[],
+): Promise<void> {
+	await raiseExecutionGate(
+		state,
+		operation,
+		`execution cancelled during ${operation}; inspect the retained workspace and resume`,
+		ownedStepIds,
+		"execution-cancelled",
 	);
 }
 

@@ -75,6 +75,13 @@ export class ConfigRevisionConflictError extends Error {
 	}
 }
 
+export class PayoConfigPathError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = "PayoConfigPathError";
+	}
+}
+
 const DEFAULT_PORT = 7331;
 const DEFAULT_DATA_DIR = ".payo";
 const DEFAULT_MAX_CONCURRENT_AGENTS = 4;
@@ -152,9 +159,11 @@ export function resolvePayoConfigDocument(
 		configuredDataDir ?? join(homeDirectory(env), DEFAULT_DATA_DIR);
 	const repo = optionalEnvValue(env.PAYO_REPO) ?? fileConfig.paths?.repo ?? cwd;
 	if (!isAbsolute(dataDir))
-		throw new Error("PAYO_DATA_DIR/paths.data_dir must be absolute");
+		throw new PayoConfigPathError(
+			"PAYO_DATA_DIR/paths.data_dir must be absolute",
+		);
 	if (!isAbsolute(repo))
-		throw new Error("PAYO_REPO/paths.repo must be absolute");
+		throw new PayoConfigPathError("PAYO_REPO/paths.repo must be absolute");
 
 	const configuredBaseBranch = optionalEnvValue(env.PAYO_BASE_BRANCH);
 	const baseBranch =
@@ -346,7 +355,7 @@ function assertHostAbsolutePaths(document: PayoConfigDocument): void {
 		["paths.repo", document.paths?.repo],
 	] as const) {
 		if (value !== undefined && !isAbsolute(value))
-			throw new Error(`${name} must be an absolute path`);
+			throw new PayoConfigPathError(`${name} must be an absolute path`);
 	}
 }
 

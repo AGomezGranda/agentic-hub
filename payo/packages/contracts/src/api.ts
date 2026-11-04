@@ -192,6 +192,10 @@ export type StartRunResponse = z.infer<typeof StartRunResponse>;
 export const EventsResponse = z.object({ events: z.array(RunEventSchema) });
 export type EventsResponse = z.infer<typeof EventsResponse>;
 
+/** `path` is null when the user cancels the folder dialog. */
+export const PickDirectoryResponse = z.object({ path: z.string().nullable() });
+export type PickDirectoryResponse = z.infer<typeof PickDirectoryResponse>;
+
 export const RunIdResponse = z.object({ runId: RunId });
 export type RunIdResponse = z.infer<typeof RunIdResponse>;
 

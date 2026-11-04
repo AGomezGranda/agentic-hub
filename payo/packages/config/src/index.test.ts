@@ -15,6 +15,7 @@ import {
 	ConfigRevisionConflictError,
 	loadPayoConfig as loadSharedConfig,
 	MISSING_CONFIG_REVISION,
+	PayoConfigPathError,
 	readPayoConfigDocument,
 	resolveConfigPath,
 	resolvePayoConfigDocument,
@@ -565,10 +566,10 @@ it("rejects invalid candidates without changing existing bytes", async () => {
 				{ paths: { data_dir: "C:\\tmp\\payo" } },
 				revision,
 			),
-		).rejects.toThrow(/absolute/);
+		).rejects.toBeInstanceOf(PayoConfigPathError);
 		expect(() =>
 			resolvePayoConfigDocument({ paths: { repo: "C:\\repo" } }, {}, cwd),
-		).toThrow(/absolute/);
+		).toThrow(PayoConfigPathError);
 	}
 	expect(readFileSync(path)).toEqual(before);
 });

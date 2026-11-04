@@ -575,6 +575,42 @@ describe("createPiRunner", () => {
 		expect(stub.calls[0]?.kills).toContain("SIGTERM");
 	});
 
+	it("does not spawn pi when aborted while input artifacts are read", async () => {
+		const root = await tempDir();
+		const stub = spawnStub({ stdout: fixture("valid") });
+		const controller = new AbortController();
+		const runner = createPiRunner({
+			sessionRoot: root,
+			spawn: stub.spawn,
+			readArtifact: async () => {
+				controller.abort();
+				return new TextEncoder().encode("{}");
+			},
+		});
+
+		const events = await collect(
+			runner.run(
+				specFor({
+					inputs: [
+						{
+							name: "work-item",
+							ref: {
+								sha256: "b".repeat(64),
+								size: 2,
+								kind: "factory-work-item-v1",
+								mediaType: "application/json",
+							},
+						},
+					],
+				}),
+				controller.signal,
+			),
+		);
+
+		expect(events).toEqual([]);
+		expect(stub.calls).toEqual([]);
+	});
+
 	it("reports a non-zero exit that never settles", async () => {
 		const root = await tempDir();
 		const stub = spawnStub({

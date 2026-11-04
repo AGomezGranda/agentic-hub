@@ -19,6 +19,8 @@ import type { AdapterSet } from "./adapters.ts";
 import { ensureServerToken } from "./auth.ts";
 import { type Composition, createComposition } from "./composition.ts";
 import { loadConfig, type ServerConfig } from "./config.ts";
+import type { DirectoryPicker } from "./directory-picker.ts";
+import { ApplicationError, FolderDialogUnavailable } from "./errors.ts";
 import {
 	createFakeRunner,
 	envelope,
@@ -42,6 +44,7 @@ async function setup(
 	env: NodeJS.ProcessEnv = {},
 	adapters?: AdapterSet,
 	configContents = "",
+	pickDirectory: DirectoryPicker = async () => null,
 ): Promise<Harness> {
 	const dataDir = await mkdtemp(join(tmpdir(), "payo-http-"));
 	const configFile = env.PAYO_CONFIG_FILE ?? join(dataDir, "config.toml");
@@ -79,6 +82,7 @@ async function setup(
 			getPort: () => port,
 			getServices: () => composition,
 			configSettings,
+			pickDirectory,
 		}),
 	);
 	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -402,6 +406,36 @@ it("serves the doctor report behind the token and rejects other methods", async 
 	expect((await api(harness, "/api/v1/doctor/anything")).status).toBe(404);
 });
 
+it("returns the picked directory, or null on cancel, behind the token", async () => {
+	let answer: string | null = "/repos/app";
+	const harness = await setup({}, undefined, "", async () => answer);
+	const path = "/api/v1/system/pick-directory";
+	const picked = await api(harness, path, { method: "POST" });
+	expect(picked.status).toBe(200);
+	expect(picked.body).toEqual({ path: "/repos/app" });
+	answer = null;
+	expect((await api(harness, path, { method: "POST" })).body).toEqual({
+		path: null,
+	});
+	expect((await api(harness, path)).status).toBe(405);
+	expect(
+		(await api(harness, path, { method: "POST", token: null })).status,
+	).toBe(401);
+});
+
+it("reports a machine without a folder dialog as 501 unsupported", async () => {
+	const message =
+		"no folder dialog is available on this machine; type the path instead";
+	const harness = await setup({}, undefined, "", async () => {
+		throw new FolderDialogUnavailable(message);
+	});
+	const picked = await api(harness, "/api/v1/system/pick-directory", {
+		method: "POST",
+	});
+	expect(picked.status).toBe(501);
+	expect(picked.body).toEqual({ code: "unsupported", message });
+});
+
 it("serves and saves the selected config document behind the token", async () => {
 	const harness = await setup({ PAYO_BASE_BRANCH: "release" });
 	const initial = await api(harness, "/api/v1/settings/config");
@@ -445,6 +479,25 @@ it("serves and saves the selected config document behind the token", async () =>
 	expect(readPayoConfigDocument(harness.configFile).document).toEqual({
 		server: { port: 7444 },
 	});
+});
+
+it("maps a host-invalid config path to 400 without changing the file", async () => {
+	if (process.platform === "win32") return;
+	const harness = await setup({ PAYO_REPO: undefined });
+	const snapshot = await api(harness, "/api/v1/settings/config");
+	const saved = await api(harness, "/api/v1/settings/config", {
+		method: "PUT",
+		body: {
+			revision: snapshot.body.revision,
+			document: { paths: { repo: "C:\\repo" } },
+		},
+	});
+	expect(saved.status).toBe(400);
+	expect(saved.body).toEqual({
+		code: "config_path_invalid",
+		message: "PAYO_REPO/paths.repo must be absolute",
+	});
+	expect(readPayoConfigDocument(harness.configFile).document).toEqual({});
 });
 
 it("validates settings requests and rejects unsupported methods", async () => {
@@ -759,6 +812,27 @@ it("rejects implementation when no engine-owned check suite is configured", asyn
 	expect(response.status).toBe(400);
 	expect(response.body.message).toContain("nonempty [execution].checks");
 });
+
+it.each([
+	["execution_unavailable", 503, "execution_unavailable"],
+	["execution_platform_unsupported", 400, "execution_unavailable"],
+	["execution_base_unavailable", 400, "execution_base_unavailable"],
+] as const)(
+	"maps implement failure %s to status %i with code %s",
+	async (code, status, wireCode) => {
+		const harness = await setup();
+		const runId = await startRun(harness);
+		harness.composition.implement = async () => {
+			throw new ApplicationError(code, "x");
+		};
+		const response = await api(harness, `/api/v1/runs/${runId}/implement`, {
+			method: "POST",
+			body: { prId: "pr-1" },
+		});
+		expect(response.status).toBe(status);
+		expect(response.body).toEqual({ code: wireCode, message: "x" });
+	},
+);
 
 it("serves plan history and rejects stale restore requests", async () => {
 	const harness = await setup();
@@ -1100,6 +1174,7 @@ it("returns 503 until recovery completes", async () => {
 			getPort: () => port,
 			getServices: () => null,
 			configSettings,
+			pickDirectory: async () => null,
 		}),
 	);
 	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));

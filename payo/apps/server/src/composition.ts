@@ -53,7 +53,7 @@ import type { AdapterSet } from "./adapters.ts";
 import { createAdapterSet } from "./adapters.ts";
 import type { ServerConfig } from "./config.ts";
 import { runDoctor } from "./doctor.ts";
-import { ApiFailure, busy, notFound } from "./errors.ts";
+import { ApplicationError } from "./errors.ts";
 
 export interface Composition {
 	readonly config: ServerConfig;
@@ -250,7 +250,8 @@ export async function createComposition(
 
 	function handleOf(runId: string): FactoryHandle {
 		const handle = handles.get(runId);
-		if (!handle) throw notFound(`run ${runId} not found`);
+		if (!handle)
+			throw new ApplicationError("not_found", `run ${runId} not found`);
 		return handle;
 	}
 
@@ -281,13 +282,16 @@ export async function createComposition(
 	async function summaryOf(runId: string): Promise<RunSummary> {
 		const factory = handles.get(runId);
 		const execution = executionHandles.get(runId);
-		if (!factory && !execution) throw notFound(`run ${runId} not found`);
+		if (!factory && !execution)
+			throw new ApplicationError("not_found", `run ${runId} not found`);
 		const state = (factory ?? execution)?.log.current();
-		if (!state) throw notFound(`run ${runId} not found`);
+		if (!state)
+			throw new ApplicationError("not_found", `run ${runId} not found`);
 		const events = await store.read(runId);
 		const first = events[0]?.at;
 		const last = events.at(-1)?.at;
-		if (!first || !last) throw notFound(`run ${runId} not found`);
+		if (!first || !last)
+			throw new ApplicationError("not_found", `run ${runId} not found`);
 		const workItem = factory?.checkpoint.workItem;
 		const executionSummary = execution
 			? await readExecutionSummary(execution)
@@ -346,7 +350,8 @@ export async function createComposition(
 			return readPlanVersion(handleOf(runId), number);
 		},
 		async planUpdate(runId, input) {
-			if (stopping) throw busy("server is shutting down");
+			if (stopping)
+				throw new ApplicationError("busy", "server is shutting down");
 			const handle = handleOf(runId);
 			await track(() => acceptPlanUpdate(handle, input));
 			schedule((signal) => executeFactory(handle, { signal }));
@@ -373,7 +378,7 @@ export async function createComposition(
 
 		async readEvents(runId, fromSeq) {
 			if (!handles.has(runId) && !executionHandles.has(runId))
-				throw notFound(`run ${runId} not found`);
+				throw new ApplicationError("not_found", `run ${runId} not found`);
 			return store.read(runId, fromSeq);
 		},
 
@@ -389,7 +394,8 @@ export async function createComposition(
 		},
 
 		async implement(sourceRunId, input) {
-			if (stopping) throw busy("server is shutting down");
+			if (stopping)
+				throw new ApplicationError("busy", "server is shutting down");
 			const deps = executionDeps();
 			const existing = await findExistingExecution(deps, {
 				sourceRunId,
@@ -403,33 +409,28 @@ export async function createComposition(
 				return runId;
 			}
 			if (config.checks.length === 0)
-				throw new ApiFailure(
-					400,
+				throw new ApplicationError(
 					"invalid_request",
 					"implement requires a nonempty [execution].checks suite",
 				);
 			if (process.platform === "win32")
-				throw new ApiFailure(
-					400,
-					"execution_unavailable",
+				throw new ApplicationError(
+					"execution_platform_unsupported",
 					"writable execution requires POSIX process-group cleanup",
 				);
 			const implementer = config.roles.implementer;
 			if (!config.devFakes && !implementer?.model)
-				throw new ApiFailure(
-					400,
+				throw new ApplicationError(
 					"invalid_request",
 					"implement requires [roles.implementer].model; configure the writer model before accepting execution",
 				);
 			if (!adapters.executionWorkspace || !adapters.checks)
-				throw new ApiFailure(
-					503,
+				throw new ApplicationError(
 					"execution_unavailable",
 					"execution workspace and engine-check adapters are not configured",
 				);
 			if (!adapters.loadExecutionRoleSources)
-				throw new ApiFailure(
-					503,
+				throw new ApplicationError(
 					"execution_unavailable",
 					"execution role-source loader is not configured",
 				);
@@ -439,7 +440,10 @@ export async function createComposition(
 			let pinnedBase: string;
 			const sourceEvents = await store.read(sourceRunId);
 			if (sourceEvents.length === 0)
-				throw notFound(`source run ${sourceRunId} not found`);
+				throw new ApplicationError(
+					"not_found",
+					`source run ${sourceRunId} not found`,
+				);
 			const sourceState = fold(sourceEvents);
 			try {
 				pinnedBase = await adapters.executionWorkspace.resolveBase(
@@ -447,15 +451,23 @@ export async function createComposition(
 					input.base ?? sourceState.baseBranch,
 					new AbortController().signal,
 				);
+			} catch (error) {
+				logFailure("cannot resolve execution base", error);
+				const message = `cannot resolve execution base: ${error instanceof Error ? error.message : String(error)}`;
+				// Without a caller base, the base is the stored run's server-side state, not bad input.
+				throw input.base === undefined
+					? new ApplicationError("execution_unavailable", message)
+					: new ApplicationError("execution_base_unavailable", message);
+			}
+			try {
 				sources = await adapters.loadExecutionRoleSources(
 					sourceState.repo,
 					pinnedBase,
 				);
 			} catch (error) {
 				logFailure("cannot load execution role sources", error);
-				throw new ApiFailure(
-					400,
-					"execution_roles_unavailable",
+				throw new ApplicationError(
+					"execution_unavailable",
 					`cannot load execution role sources: ${error instanceof Error ? error.message : String(error)}`,
 				);
 			}
@@ -519,7 +531,8 @@ export async function createComposition(
 		},
 
 		async start(input) {
-			if (stopping) throw busy("server is shutting down");
+			if (stopping)
+				throw new ApplicationError("busy", "server is shutting down");
 			const runId = randomUUID();
 			const handle = await beginFactory(depsForRun(), {
 				runId,
@@ -536,14 +549,16 @@ export async function createComposition(
 
 		async answer(runId, input) {
 			const handle = handleOf(runId);
-			if (handle.busy) throw busy("factory command busy");
+			if (handle.busy)
+				throw new ApplicationError("busy", "factory command busy");
 			await track(() => answerRun(handle, input));
 			return summaryOf(runId);
 		},
 
 		async approve(runId) {
 			const handle = handleOf(runId);
-			if (handle.busy) throw busy("factory command busy");
+			if (handle.busy)
+				throw new ApplicationError("busy", "factory command busy");
 			await track(() => approveRun(handle));
 			return summaryOf(runId);
 		},

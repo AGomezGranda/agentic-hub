@@ -1,5 +1,12 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+	mkdir,
+	mkdtemp,
+	readFile,
+	rm,
+	symlink,
+	writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ExecutionDiffTooLargeError } from "@payo/kernel";
@@ -179,6 +186,26 @@ describe("createExecutionWorkspace", () => {
 		expect(after.changedPaths.sort()).toEqual(["new file.txt", "tracked.txt"]);
 		expect(diff).toContain("modified");
 		expect(diff).toContain("untracked content");
+	});
+
+	it("rejects a diff that contains an untracked symlink instead of omitting it", async () => {
+		const { workspace, input } = await fixture();
+		const prepared = await workspace.prepare(input, signal());
+		await symlink("tracked.txt", join(prepared.path, "link.txt"));
+
+		await expect(
+			workspace.diff(prepared.path, input.baseCommit, signal()),
+		).rejects.toThrow("untracked entry is not a regular file: link.txt");
+	});
+
+	it("rejects a diff that contains an untracked nested repository instead of omitting it", async () => {
+		const { workspace, input } = await fixture();
+		const prepared = await workspace.prepare(input, signal());
+		await git(prepared.path, ["init", "nested"]);
+
+		await expect(
+			workspace.diff(prepared.path, input.baseCommit, signal()),
+		).rejects.toThrow("untracked entry is not a regular file: nested/");
 	});
 
 	it("caps diff subprocess output before assembling an oversized diff", async () => {

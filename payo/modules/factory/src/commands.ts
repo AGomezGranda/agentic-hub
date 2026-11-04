@@ -288,7 +288,14 @@ async function run(handle: MutableFactoryHandle, signal: AbortSignal) {
 				required(handle.checkpoint.workspace, "workspace"),
 				config.roles[role],
 				inputs,
-			);
+			).catch(async (error: unknown) => {
+				await pause(
+					handle,
+					error instanceof Error ? error.message : String(error),
+				);
+				return null;
+			});
+			if (!spec) return;
 			if (
 				handle.checkpoint.pendingPlanUpdate?.kind === "prompt" &&
 				!handle.checkpoint.pendingPlanUpdate.result
@@ -398,7 +405,14 @@ async function run(handle: MutableFactoryHandle, signal: AbortSignal) {
 				],
 				signal,
 				config.roles,
-			);
+			).catch(async (error: unknown) => {
+				await pause(
+					handle,
+					error instanceof Error ? error.message : String(error),
+				);
+				return null;
+			});
+			if (!result) return;
 			if (result.decision === "Escalated") {
 				await checkpoint(handle, { review: result.ref });
 				await pause(handle, "review could not converge");

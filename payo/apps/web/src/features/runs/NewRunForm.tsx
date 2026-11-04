@@ -1,13 +1,16 @@
 import type { WorkItemRequest } from "@payo/contracts";
+import { BrowseButton } from "@web/shared/ui/BrowseButton.tsx";
 import { Button } from "@web/shared/ui/Button.tsx";
 import { type FormEvent, type ReactNode, useState } from "react";
 import type { NewRunInput } from "./api.ts";
 
 export function NewRunForm({
+	token,
 	isPending,
 	error,
 	onStart,
 }: {
+	token: string;
 	isPending: boolean;
 	error: unknown;
 	onStart: (input: NewRunInput) => void;
@@ -104,14 +107,17 @@ export function NewRunForm({
 					htmlFor="repo-path"
 					hint="Absolute path on this machine."
 				>
-					<input
-						className={inputClass}
-						id="repo-path"
-						name="repo"
-						onChange={(event) => setRepo(event.currentTarget.value)}
-						placeholder="/path/to/repository"
-						value={repo}
-					/>
+					<div className="flex flex-wrap gap-2">
+						<input
+							className={`${inputClass} min-w-0 flex-1`}
+							id="repo-path"
+							name="repo"
+							onChange={(event) => setRepo(event.currentTarget.value)}
+							placeholder="/path/to/repository"
+							value={repo}
+						/>
+						<BrowseButton token={token} onPick={setRepo} />
+					</div>
 				</Field>
 				<Field
 					label="Base branch override (optional)"

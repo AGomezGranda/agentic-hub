@@ -24,7 +24,7 @@ import {
 	createGitExec,
 	type GitExec,
 	resolveBaseCommit,
-} from "./index.ts";
+} from "./exec.ts";
 
 export interface ExecutionGitOptions {
 	root: string;
@@ -746,7 +746,8 @@ async function untrackedDiffs(
 		const target = resolve(root, path);
 		assertInside(root, target);
 		const info = await lstat(target);
-		if (!info.isFile()) continue;
+		if (!info.isFile())
+			throw new Error(`untracked entry is not a regular file: ${path}`);
 		const separatorBytes = hasDiff ? 1 : 0;
 		const remaining =
 			maxBytes === undefined

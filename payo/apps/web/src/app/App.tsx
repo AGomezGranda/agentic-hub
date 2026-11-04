@@ -223,6 +223,11 @@ function PayoConsole() {
 						<RunList
 							runs={runs.data ?? []}
 							isPending={runs.isPending}
+							errorMessage={
+								runs.error
+									? connectionMessage(runs.error, serverPort)
+									: undefined
+							}
 							selectedRunId={selectedRunId ?? undefined}
 							onSelect={navigateToRun}
 						/>
@@ -317,6 +322,7 @@ function PayoConsole() {
 										</span>
 									</div>
 									<NewRunForm
+										token={token}
 										isPending={start.isPending}
 										error={start.error}
 										onStart={(input) => start.mutate(input)}

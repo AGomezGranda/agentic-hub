@@ -4,6 +4,7 @@ import { useState } from "react";
 export interface RunListProps {
 	runs: RunSummary[];
 	isPending: boolean;
+	errorMessage?: string;
 	selectedRunId?: string;
 	onSelect: (runId: string) => void;
 }
@@ -19,6 +20,7 @@ function repositoryName(repo: string) {
 export function RunList({
 	runs,
 	isPending,
+	errorMessage,
 	selectedRunId,
 	onSelect,
 }: RunListProps) {
@@ -130,7 +132,9 @@ export function RunList({
 				</p>
 			) : (
 				<div className="min-w-0 space-y-4">
-					{runs.length === 0 ? (
+					{errorMessage ? (
+						<p className="text-sm text-[var(--danger)]">{errorMessage}</p>
+					) : runs.length === 0 ? (
 						<p className="text-sm text-[var(--muted)]">No runs yet</p>
 					) : null}
 					{groups.map(({ label, runs: groupRuns }) => (
