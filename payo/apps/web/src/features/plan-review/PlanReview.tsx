@@ -14,6 +14,7 @@ import {
 	submitPlanUpdate,
 } from "./api.ts";
 import { GateActions, type GateCommand } from "./GateActions.tsx";
+import { ImplementPrForm } from "./ImplementPrForm.tsx";
 import { PlanHistory } from "./PlanHistory.tsx";
 
 function isConflict(error: unknown): boolean {
@@ -59,10 +60,12 @@ export function PlanReview({
 	token,
 	runId,
 	onViewActivity,
+	onSelectRun,
 }: {
 	token: string;
 	runId: string;
 	onViewActivity?: () => void;
+	onSelectRun?: (runId: string) => void;
 }) {
 	const queryClient = useQueryClient();
 	const runKey = ["run", token, runId] as const;
@@ -162,6 +165,13 @@ export function PlanReview({
 				if (!latestReview.plan.available || !latestReview.review.available)
 					throw new Error(
 						"Refresh the unavailable plan and review before deciding.",
+					);
+				if (
+					requested === "approve" &&
+					latestReview.plan.implementation?.some((pr) => pr.issues.length)
+				)
+					throw new Error(
+						"Resolve the implementation issues before approving.",
 					);
 				if (
 					requested === "approve" &&
@@ -270,6 +280,16 @@ export function PlanReview({
 	const approval =
 		run.data.stage === "Approval" &&
 		run.data.openGates.some((gate) => gate.kind === "approval");
+	const approved =
+		run.data.status === "ended" && run.data.outcome === "approved";
+	const implementation = data.plan.available
+		? (data.plan.implementation ??
+			data.plan.prStrategy?.map((pr) => ({
+				...pr,
+				phases: pr.phases.map((title) => ({ title, line: null })),
+				issues: pr.phases.length ? [] : ["No phases assigned."],
+			})))
+		: undefined;
 	const actionMessage = actionError
 		? isConflict(actionError)
 			? "The run state changed. The latest server state has been refreshed; review it before trying again."
@@ -323,6 +343,22 @@ export function PlanReview({
 				/>
 			) : (
 				<>
+					{(approved || approval) &&
+						(implementation?.length ? (
+							<ImplementPrForm
+								token={token}
+								runId={runId}
+								units={implementation}
+								approved={approved}
+								defaultBase={run.data.baseBranch}
+								onSelectRun={onSelectRun}
+							/>
+						) : approved ? (
+							<p>
+								PR choices are unavailable because the approved strategy could
+								not be loaded.
+							</p>
+						) : null)}
 					<div className="grid gap-6 min-[1400px]:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]">
 						<section className="border-b border-[var(--line)] pb-6">
 							<div className="flex flex-wrap items-start justify-between gap-3">
@@ -362,7 +398,7 @@ export function PlanReview({
 							{data.plan.available ? (
 								<>
 									<div className="mt-5 rounded-sm border border-[var(--line)] bg-[var(--surface)] p-4 sm:p-6">
-										<Markdown>{data.plan.markdown}</Markdown>
+										<Markdown headingAnchors>{data.plan.markdown}</Markdown>
 									</div>
 									{data.plan.editorPath ? (
 										<p className="mt-3 text-xs leading-5 text-[var(--muted)]">
@@ -627,6 +663,9 @@ export function PlanReview({
 					answers={data.answers}
 					busy={command.isPending || answer.isPending || update.isPending}
 					decisionAvailable={decisionAvailable}
+					implementationBlocked={
+						implementation?.some((pr) => pr.issues.length) ?? false
+					}
 					onCommand={(requested) => command.mutate(requested)}
 					questions={data.plan.available ? data.plan.questions : []}
 					run={run.data}

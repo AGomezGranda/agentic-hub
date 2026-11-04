@@ -80,7 +80,6 @@ Install with `agentic-hub install <name>`, or `agentic-hub sync` for everything.
 | `mucho-texto` | Write a visual, mid-length summary of a plan, report, or RFC; the source is kept |
 | `remove-comment-slop` | Compress verbose comments and docstrings in Python `src/` and `tests/` without changing behavior |
 | `research-codebase` | Answer how something works, with cited `file:line` evidence (read-only) |
-| `dependency-injection` | Apply or audit dependency injection where it creates useful seams |
 | `review-plan` | Review a plan through lenses such as architecture, security, and tests |
 | `review-implementation` | Review the local git diff against its plan phase, then run the audit swarm |
 | `testing-strategy` | Audit a service's tests against the test pyramid and prioritise gaps |
@@ -266,7 +265,7 @@ credentials and provider endpoints in Pi's configuration, not in TOML.
 
 | TOML setting | Default | Meaning |
 |---|---|---|
-| `[server].port` / `web_origins` | `7331` / `[]` | Port range `1..65535`; CORS allows exact loopback origins only. Binding is fixed to `127.0.0.1`. |
+| `[server].port` / `web_origins` | `7331` / starter config allows `http://127.0.0.1:5173` and `http://localhost:5173` | Port range `1..65535`; CORS allows exact loopback origins only. Binding is fixed to `127.0.0.1`. |
 | `[paths].data_dir` / `repo` / `base_branch` | `~/.payo` / server startup directory / `main` | Data and repository paths must be absolute. |
 | `[execution].max_concurrent_agents` | `4` | Positive concurrency cap. |
 | `[execution].checks` | unset | Ordered operator-owned `{ name, command, args, timeout_ms }` suite; required to accept execution, invoked with argument arrays (no shell). |

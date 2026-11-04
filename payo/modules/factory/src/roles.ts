@@ -156,6 +156,11 @@ export async function roleSpec(
 			...(source.addendum ? [source.addendum] : []),
 			"Use read-only tools. Do not converse with the user or spawn agents. Return only the JSON envelope required by the output contract. The engine owns artifacts.",
 			output[role],
+			...(role === "planner" || role === "reviser"
+				? [
+						"Use a unique Markdown heading '## Phase N — Title' per implementation phase. Assign every phase to exactly one PR, in execution order, including single-PR plans. Each prStrategy phase string must copy the full heading text without the leading hashes. Update the mapping when revising the plan.",
+					]
+				: []),
 			"Question IDs must remain stable; use a new ID when a question's meaning changes.",
 			...(lens
 				? [`Review the plan through the ${lens} lens: ${lenses[lens]}.`]

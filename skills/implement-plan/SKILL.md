@@ -26,7 +26,9 @@ testing skill needed:
    before you write code tests nothing. A pre-existing passing test stays
    useful as regression coverage, but it never proves a new test exercised
    the missing behaviour.
-3. Implement the smallest sufficient change. Rerun the test, then the phase's
+3. Implement the smallest sufficient change. Wire side-effecting collaborators
+   at startup, pass each consumer only what it uses, and call pure helpers
+   directly. Rerun the test, then the phase's
    full automated success criteria (tests/lint/build from the plan).
 4. Refactor while green, with the tests as a safety net.
 5. Repeat for the next behaviour.

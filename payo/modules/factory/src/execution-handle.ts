@@ -22,6 +22,7 @@ export interface ExecutionReviewRoleSnapshots {
 }
 
 export interface ExecutionDeps {
+	newId: () => string;
 	store: RunStore;
 	runner?: AgentRunner;
 	limiter?: Limiter;

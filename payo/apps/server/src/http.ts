@@ -360,7 +360,17 @@ function respondFailure(
 		res.end();
 		return;
 	}
-	if (error instanceof ApiFailure || error instanceof CommandError) {
+	if (error instanceof CommandError) {
+		const status = {
+			busy: 409,
+			conflict: 409,
+			invalid_request: 400,
+			not_found: 404,
+		}[error.code];
+		json(res, status, { code: error.code, message: error.message }, cors);
+		return;
+	}
+	if (error instanceof ApiFailure) {
 		const body: ApiError = { code: error.code, message: error.message };
 		json(res, error.status, body, cors);
 		return;

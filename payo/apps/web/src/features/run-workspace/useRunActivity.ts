@@ -43,13 +43,13 @@ export function useRunActivity(token: string, runId: string) {
 	const isRunEnded = run.data?.status === "ended";
 
 	useEffect(() => {
-		if (!hasRunSummary || !history.data) return;
+		if (!hasRunSummary) return;
 		const current = logRef.current;
 		const entry =
 			current?.key === logKey ? current : { key: logKey, log: new EventLog() };
 		logRef.current = entry;
 		const log = entry.log;
-		setEvents(log.merge(history.data));
+		setEvents(log.merge(history.data ?? []));
 		if (isRunEnded) {
 			setConnection("ended");
 			return;
@@ -127,6 +127,8 @@ export function useRunActivity(token: string, runId: string) {
 								setConnection("ended");
 								void refreshSummary();
 							} else if (
+								(event.type === "artifact.recorded" &&
+									event.artifact.kind === "factory-execution-checkpoint-v1") ||
 								event.type === "step.started" ||
 								event.type === "step.finished" ||
 								event.type === "gate.raised" ||

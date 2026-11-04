@@ -3,7 +3,8 @@
 
 [server]
 port = 7331
-web_origins = []
+# Local Vite dev-server origins; the server still binds only to loopback.
+web_origins = ["http://127.0.0.1:5173", "http://localhost:5173"]
 
 [execution]
 max_concurrent_agents = 4
@@ -18,8 +19,8 @@ acli = "acli"
 git = "git"
 
 [model]
-provider = "anthropic"
-id = "claude-sonnet-4-5"
+provider = "openai"
+id = "gpt-6-luna"
 
 # Optional execution role; planning startup does not require it.
 # [roles.implementer]

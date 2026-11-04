@@ -270,6 +270,7 @@ function PayoConsole() {
 							token={token}
 							runId={selectedRunId}
 							onDisconnect={disconnect}
+							onSelectRun={navigateToRun}
 						/>
 					) : invalidRunRoute ? (
 						<div

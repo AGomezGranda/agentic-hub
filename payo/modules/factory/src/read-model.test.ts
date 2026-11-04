@@ -10,7 +10,7 @@ import {
 	sha256Hex,
 } from "@payo/kernel";
 import { expect, it } from "vitest";
-import { beginFactory, executeFactory, start } from "./commands.ts";
+import { approve, beginFactory, executeFactory, start } from "./commands.ts";
 import {
 	readPlanVersion,
 	readPlanVersions,
@@ -94,6 +94,7 @@ async function setup(scripts: readonly FakeStep[][], execute = true) {
 		resources: {},
 	};
 	const deps = {
+		newId: () => crypto.randomUUID(),
 		store,
 		runner: createFakeRunner(scripts),
 		limiter: createLimiter(1),
@@ -192,6 +193,9 @@ it("projects the checked working plan, answers, and validated review findings", 
 	expect(result.plan).toEqual({
 		available: true,
 		markdown: "# External edit\n",
+		implementation: [
+			{ ...plan.prStrategy[0], issues: ["No phases assigned to this PR."] },
+		],
 		editorPath: planPath,
 		questions: plan.openQuestions,
 		version: 1,
@@ -347,4 +351,50 @@ it("reads ordered versions and rejects missing or corrupt artifacts", async () =
 	await expect(readPlanVersions(corrupt.handle)).rejects.toThrow(
 		"artifact bytes do not match reference",
 	);
+});
+
+it("rechecks the editable outline on approval and freezes it for launch", async () => {
+	const strategy = [{ id: "first", title: "First", phases: ["Build", "Test"] }];
+	const snapshot = {
+		...plan,
+		markdown: "## Phase 3 — Build\n## Phase 4 — Test\n",
+		prStrategy: strategy,
+		openQuestions: [],
+	};
+	const { handle, backing, deps } = await setup([
+		envelope(snapshot),
+		...finalReviewScripts.slice(1),
+	]);
+	const preview = (await readRunReview(handle)).plan;
+	expect(preview).toMatchObject({
+		implementation: [
+			{
+				phases: [
+					{ title: "Phase 3 — Build", line: 1 },
+					{ title: "Phase 4 — Test", line: 2 },
+				],
+				issues: [],
+			},
+		],
+	});
+	const path = join(
+		deps.dataDir,
+		"runs",
+		handle.log.current().runId,
+		"plan.md",
+	);
+	await writeFile(path, "## Phase 3 — Build\n");
+	await expect(approve(handle)).rejects.toThrow(/Test/);
+	await writeFile(path, snapshot.markdown);
+	await approve(handle);
+	expect((await readRunReview(handle)).plan).toMatchObject({
+		prStrategy: strategy,
+	});
+	const ref = handle.checkpoint.plan;
+	if (!ref) throw new Error("missing plan");
+	backing.artifacts.delete(ref.sha256);
+	expect((await readRunReview(handle)).plan).toEqual({
+		available: false,
+		reason: "missing",
+	});
 });

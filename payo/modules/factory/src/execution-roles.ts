@@ -60,8 +60,8 @@ export async function executionPreparerSpec(
 		instructions: [
 			renderSource(source),
 			"Operate read-only. Do not implement or modify files, revise the approved plan, invent scope, or delegate.",
-			`Prepare PR ${pr.id} (${pr.title}) from the supplied approved plan. Map its ${pr.phases.length} strategy phase string(s) one-to-one, in order, to phase records with deterministic IDs phase-1, phase-2, etc.`,
-			"Each phase planExcerpt and every acceptance criterion must be an exact nonempty substring of the approved markdown. Do not paraphrase excerpts. Keep each record limited to its matching PR phase.",
+			`Prepare PR ${pr.id} (${pr.title}) from the supplied approved plan. Map its ${pr.phases.length} strategy phase string(s) ${JSON.stringify(pr.phases)} one-to-one, in order, to phase records with deterministic IDs phase-1, phase-2, etc.`,
+			"Use the supplied phase string as its title. Include that exact phase string in its planExcerpt. Each phase planExcerpt and every acceptance criterion must be an exact nonempty substring of the approved markdown. Do not paraphrase excerpts. Keep each record limited to its matching PR phase.",
 			"Return the selected PR id/title, ordered phases, prerequisites, and issues. For each prerequisite, provide a verifiable ref or one or more paths; description-only or uncertain prerequisites belong in issues. Flag stale strategy, missing/ambiguous phases, conflicting instructions, and unsupported requirements. Do not silently repair an inconsistent approved plan.",
 			"Return only the JSON envelope required by factory-execution-manifest-v1.",
 		].join("\n\n"),

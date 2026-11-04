@@ -68,6 +68,14 @@ def test_real_template_renders(tmp_path: Path) -> None:
     assert tomllib.loads(text)["model"]["provider"] == "anthropic"
 
 
+def test_setup_template_allows_local_web_origins(tmp_path: Path) -> None:
+    text = hub_setup.render_config(hub_setup.TEMPLATE.read_text(), tmp_path)
+    assert tomllib.loads(text)["server"]["web_origins"] == [
+        "http://127.0.0.1:5173",
+        "http://localhost:5173",
+    ]
+
+
 @pytest.mark.parametrize(
     ("env", "expected"),
     [({}, "pi"), ({"PAYO_PI_BIN": " /opt/pi "}, "/opt/pi")],

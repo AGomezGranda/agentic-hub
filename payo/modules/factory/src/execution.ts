@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { join, resolve } from "node:path";
 import {
 	type ArtifactRef,
@@ -9,10 +8,10 @@ import {
 	type ExecutionRunConfig,
 	ExecutionRunConfig as ExecutionRunConfigSchema,
 	type ExecutionStage,
-	FactoryRunConfig as FactoryRunConfigSchema,
 	ImplementationOutput as ImplementationOutputSchema,
 	jsonEnvelope,
 	PhaseReceipt as PhaseReceiptSchema,
+	type PlanOutput,
 	PlanVersion,
 	RepairOutput as RepairOutputSchema,
 	type RunEventBody,
@@ -63,8 +62,10 @@ import {
 	initialExecutionCheckpoint,
 	MAX_DIFF_BYTES,
 	MAX_VALIDATION_CYCLES,
+	sourceEligibility,
 	validateExecutionManifest,
 } from "./execution-state.ts";
+import { resolveImplementation } from "./phase-outline.ts";
 import { validateRunId } from "./plans.ts";
 import { loadCheckpoint } from "./state.ts";
 
@@ -108,11 +109,10 @@ export interface BeginExecutionInput {
 	maxConcurrentAgents: number;
 }
 
-const busy = () => new CommandError(409, "busy", "execution command busy");
-const conflict = (message: string) =>
-	new CommandError(409, "conflict", message);
+const busy = () => new CommandError("busy", "execution command busy");
+const conflict = (message: string) => new CommandError("conflict", message);
 const invalid = (message: string) =>
-	new CommandError(400, "invalid_request", message);
+	new CommandError("invalid_request", message);
 
 async function checkpoint(
 	handle: MutableExecutionHandle,
@@ -132,18 +132,23 @@ async function checkpoint(
 	handle.checkpoint = next;
 }
 
-function validateSelectedPr(
-	strategy: readonly { id: string; phases: readonly string[] }[],
-	prId: string,
-): void {
-	const pr = strategy.find((item) => item.id === prId);
+function selectedPr(plan: PlanOutput, prId: string) {
+	const pr = resolveImplementation(plan.markdown, plan.prStrategy).find(
+		(item) => item.id === prId,
+	);
 	if (!pr)
 		throw new CommandError(
-			404,
 			"not_found",
 			`PR ${prId} is not in the approved plan`,
 		);
-	if (pr.phases.length === 0) throw conflict(`PR ${prId} has no phases`);
+	if (!pr.phases.length)
+		throw conflict(`PR ${prId} has no phases: ${pr.issues.join(", ")}`);
+	if (pr.issues.length) throw conflict(pr.issues.join("\n"));
+	return {
+		id: pr.id,
+		title: pr.title,
+		phases: pr.phases.map((phase) => phase.title),
+	};
 }
 
 function executionId(
@@ -187,13 +192,11 @@ async function source(
 	const events = await deps.store.read(sourceRunId);
 	if (events.length === 0) throw invalid(`source run ${sourceRunId} not found`);
 	const state = fold(events);
-	if (state.status !== "ended" || state.outcome !== "approved")
+	const eligibility = sourceEligibility(state);
+	if (eligibility === "unapproved")
 		throw conflict(`source run ${sourceRunId} has not been approved`);
-	try {
-		FactoryRunConfigSchema.parse(state.config.factory);
-	} catch {
+	if (eligibility === "not_planning")
 		throw conflict(`source run ${sourceRunId} is not a planning run`);
-	}
 	return { state, plan: await approvedPlan(deps.store, events) };
 }
 
@@ -228,7 +231,6 @@ async function beginExecutionLocked(
 	if (!input.prId.trim()) throw invalid("PR id is required");
 	if (input.checks.length === 0) throw invalid("execution checks are required");
 	const approved = await source(deps, input.sourceRunId);
-	validateSelectedPr(approved.plan.version.plan.prStrategy, input.prId);
 
 	const runId = executionId(
 		input.sourceRunId,
@@ -262,6 +264,7 @@ async function beginExecutionLocked(
 		return openExecution(deps, runId, { recover: false });
 	}
 
+	selectedPr(approved.plan.version.plan, input.prId);
 	const baseBranch = input.baseBranch ?? approved.state.baseBranch;
 	const baseCommit = await selectedBaseCommit(
 		deps,
@@ -340,14 +343,17 @@ export async function findExistingExecution(
 ): Promise<ExecutionHandle | null> {
 	validateRunId(input.sourceRunId);
 	const approved = await source(deps, input.sourceRunId);
-	validateSelectedPr(approved.plan.version.plan.prStrategy, input.prId);
+
 	const runId = executionId(
 		input.sourceRunId,
 		approved.plan.ref.sha256,
 		input.prId,
 	);
 	const events = await deps.store.read(runId);
-	if (events.length === 0) return null;
+	if (events.length === 0) {
+		selectedPr(approved.plan.version.plan, input.prId);
+		return null;
+	}
 	const config = ExecutionRunConfigSchema.parse(fold(events).config.factory);
 	if (input.explicitBase) {
 		const requestedCommit = await selectedBaseCommit(
@@ -510,7 +516,7 @@ async function prepareWorkspace(
 ): Promise<boolean> {
 	if (state.checkpoint.workspace) return true;
 	const run = state.log.current();
-	const stepId = randomUUID();
+	const stepId = state.deps.newId();
 	await checkpoint(
 		state,
 		{
@@ -585,12 +591,14 @@ async function prepareManifest(
 	signal: AbortSignal,
 ): Promise<boolean> {
 	const approved = await readApprovedVersion(state.deps.store, config.plan);
-	const pr = approved.plan.prStrategy.find((item) => item.id === config.prId);
-	if (!pr) {
+	let pr: ReturnType<typeof selectedPr>;
+	try {
+		pr = selectedPr(approved.plan, config.prId);
+	} catch (error) {
 		await raiseExecutionGate(
 			state,
 			"Prepare",
-			"selected PR is absent from the pinned approved plan",
+			describeError(error),
 			[],
 			"manifest-invalid",
 		);
@@ -600,7 +608,7 @@ async function prepareManifest(
 	const roleRef = config.roleArtifacts.preparer;
 	if (!settings || !roleRef)
 		throw new Error("execution preparer role snapshot is missing");
-	const stepId = randomUUID();
+	const stepId = state.deps.newId();
 	await checkpoint(state, {
 		stage: "Prepare",
 		inFlight: { operation: "Prepare", stepIds: [stepId] },
@@ -615,7 +623,7 @@ async function prepareManifest(
 		{
 			stepId,
 			stepName: "prepare approved execution manifest",
-			attemptIds: [randomUUID(), randomUUID()],
+			attemptIds: [state.deps.newId(), state.deps.newId()],
 			runner: deps.runner,
 			spec: await executionPreparerSpec(
 				state.deps.store,
@@ -656,6 +664,9 @@ async function prepareManifest(
 		);
 		return false;
 	}
+	manifest.phases.forEach((phase, index) => {
+		phase.title = pr.phases[index] ?? phase.title;
+	});
 	// Outside the try: abort or infrastructure errors are not plan defects, so they reach the resumable execution-failed gate.
 	const results = await deps.workspace.verifyPrerequisites(
 		state.log.current().repo,
@@ -763,7 +774,7 @@ async function implementPhase(
 	const settings = config.roles.implementer;
 	if (!roleRef || !settings)
 		throw new Error("execution implementer role snapshot is missing");
-	const stepId = randomUUID();
+	const stepId = state.deps.newId();
 	await checkpoint(state, {
 		stage: "Implement",
 		workspace: makeWorkspaceIdentity(
@@ -781,7 +792,7 @@ async function implementPhase(
 			stepName: recovery
 				? "reconcile interrupted phase implementation"
 				: `implement ${phase.id}`,
-			attemptIds: [randomUUID(), randomUUID()],
+			attemptIds: [state.deps.newId(), state.deps.newId()],
 			runner: deps.runner,
 			spec: await executionImplementerSpec(state.deps.store, roleRef, {
 				plan: config.plan,
@@ -1133,7 +1144,7 @@ async function runCheckCycle(
 		identity.branch,
 		identity.head ?? config.baseCommit,
 	);
-	const stepId = randomUUID();
+	const stepId = state.deps.newId();
 	await checkpoint(
 		state,
 		{
@@ -1342,7 +1353,7 @@ async function repairScope(
 			},
 			"factory-execution-repair-input-v1",
 		));
-	const stepId = randomUUID();
+	const stepId = state.deps.newId();
 	await checkpoint(state, {
 		stage: "Repair",
 		round: input.cycle,
@@ -1357,7 +1368,7 @@ async function repairScope(
 		{
 			stepId,
 			stepName: `repair ${scope} validation cycle ${input.cycle}`,
-			attemptIds: [randomUUID(), randomUUID()],
+			attemptIds: [state.deps.newId(), state.deps.newId()],
 			runner: deps.runner,
 			spec: await executionRepairSpec(state.deps.store, roleRef, {
 				plan: config.plan,
@@ -1678,7 +1689,7 @@ async function commitReviewedWorkspace(
 		acceptedCriteria: details.acceptedCriteria,
 		deviations: details.deviations,
 	};
-	const stepId = randomUUID();
+	const stepId = state.deps.newId();
 	await checkpoint(
 		state,
 		{
@@ -2314,7 +2325,7 @@ async function raiseExecutionGateWithEvidence(
 	statusDetail: string,
 	evidence: Partial<ExecutionCheckpoint["evidence"]>,
 ): Promise<void> {
-	const gateStepId = randomUUID();
+	const gateStepId = state.deps.newId();
 	const stepIds = [...new Set([...ownedStepIds, gateStepId])];
 	await checkpoint(
 		state,

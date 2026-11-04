@@ -95,7 +95,10 @@ function scriptsFor(scenario: Scenario): FakeStep[][] {
 				envelope(plan),
 				...cleanReview(),
 				envelope({
-					plan: { ...plan, markdown: "# Revised plan\n" },
+					plan: {
+						...plan,
+						markdown: plan.markdown.replace("# Plan", "# Revised plan"),
+					},
 					unreconciledFindingIds: [],
 				}),
 				...cleanReview(),

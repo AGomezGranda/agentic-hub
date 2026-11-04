@@ -1,4 +1,5 @@
 import {
+	ImplementRequest,
 	PlanRestoreRequest,
 	PlanUpdateRequest,
 	PlanVersionDetail,
@@ -121,5 +122,19 @@ export async function resumeRun(
 		token,
 		"POST",
 		(data) => RunIdResponse.parse(data),
+	);
+}
+
+export async function implementRun(
+	token: string,
+	runId: string,
+	input: ImplementRequest,
+): Promise<{ runId: string }> {
+	return getJson(
+		`/runs/${encodeURIComponent(runId)}/implement`,
+		token,
+		"POST",
+		(data) => RunIdResponse.parse(data),
+		ImplementRequest.parse(input),
 	);
 }

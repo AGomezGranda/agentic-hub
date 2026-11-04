@@ -22,8 +22,8 @@ import {
 } from "./factory-fixtures.ts";
 
 const plan = {
-	markdown: "# Agent plan\n",
-	prStrategy: [{ id: "pr", title: "One", phases: [] }],
+	markdown: "# Agent plan\n## Phase 1 — One phase\n",
+	prStrategy: [{ id: "pr", title: "One", phases: ["One phase"] }],
 	openQuestions: [{ id: "q", question: "Why?" }],
 };
 const clean = () => [
@@ -61,6 +61,7 @@ async function setup(scripts = [envelope(plan), ...clean()]) {
 		signal: new AbortController().signal,
 	};
 	const deps = {
+		newId: () => crypto.randomUUID(),
 		store,
 		runner: createFakeRunner(scripts),
 		limiter: createLimiter(1),
@@ -214,7 +215,7 @@ it("reopens edited approval and retains its original and final artifacts", async
 	let handle = await start(deps, input);
 	const agentRef = handle.checkpoint.lastAgentPlan;
 	if (!agentRef) throw new Error("missing agent plan");
-	await writeFile(path, "# Human edit\n");
+	await writeFile(path, "# Human edit\n## Phase 1 — One phase\n");
 	await answer(handle, { questionId: "q", text: "Because" });
 	await deps.store.close();
 	deps.store = await createSqliteRunStore({ dataDir: deps.dataDir });
@@ -429,7 +430,7 @@ it("reopens an accepted phase receipt and gates before the next writer", async (
 		roleProvenance[role] = { path: sourceRole.path, sha: sourceRole.sha };
 	}
 	const execution = await beginExecution(
-		{ store: deps.store },
+		{ store: deps.store, newId: () => crypto.randomUUID() },
 		{
 			sourceRunId: "run",
 			prId: "pr-multi",
@@ -549,7 +550,10 @@ it("reopens an accepted phase receipt and gates before the next writer", async (
 
 	const reopenedStore = await createSqliteRunStore({ dataDir: deps.dataDir });
 	try {
-		const reopened = await openExecution({ store: reopenedStore }, runId);
+		const reopened = await openExecution(
+			{ store: reopenedStore, newId: () => crypto.randomUUID() },
+			runId,
+		);
 		expect(reopened.checkpoint).toMatchObject({
 			stage: "Escalated",
 			phaseIndex: 1,

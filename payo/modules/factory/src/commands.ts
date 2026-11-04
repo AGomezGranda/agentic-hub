@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import {
 	type AgentInput,
 	type ArtifactRef,
@@ -27,6 +26,7 @@ import {
 } from "./artifacts.ts";
 import { CommandError } from "./errors.ts";
 import { approvalDiff } from "./metrics.ts";
+import { resolveImplementation } from "./phase-outline.ts";
 import { readPlan, renderAnswers, validateRunId, writePlan } from "./plans.ts";
 import { QUALITY_EXPECTATIONS } from "./quality.ts";
 import { review } from "./review.ts";
@@ -42,16 +42,14 @@ import {
 	type StartInput,
 } from "./types.ts";
 
-const id = () => randomUUID();
 const refOf = (event: RunEventBody): ArtifactRef => {
 	if (event.type !== "artifact.recorded") throw new Error("artifact expected");
 	return event.artifact;
 };
-const busy = () => new CommandError(409, "busy", "factory command busy");
-const conflict = (message: string) =>
-	new CommandError(409, "conflict", message);
+const busy = () => new CommandError("busy", "factory command busy");
+const conflict = (message: string) => new CommandError("conflict", message);
 const invalid = (message: string) =>
-	new CommandError(400, "invalid_request", message);
+	new CommandError("invalid_request", message);
 const configOf = (handle: MutableFactoryHandle) =>
 	FactoryRunConfig.parse(handle.log.current().config.factory);
 const hash = (value: string) => sha256Hex(new TextEncoder().encode(value));
@@ -132,7 +130,7 @@ async function savePlan(
 	return { events, ref };
 }
 async function pause(handle: MutableFactoryHandle, reason: string) {
-	const stepId = id();
+	const stepId = handle.deps.newId();
 	const operation = handle.checkpoint.inFlight;
 	if (!operation) throw new Error("missing in-flight operation");
 	await checkpoint(
@@ -182,7 +180,7 @@ async function run(handle: MutableFactoryHandle, signal: AbortSignal) {
 				hash(current) !== pending.expectedWorkingCopyHash &&
 				current !== saved.plan.markdown
 			) {
-				await marker(handle, "PlanReview", [id()]);
+				await marker(handle, "PlanReview", [handle.deps.newId()]);
 				await pause(
 					handle,
 					"working plan changed during update; resume to review the edited file",
@@ -202,7 +200,7 @@ async function run(handle: MutableFactoryHandle, signal: AbortSignal) {
 		}
 		const stage = handle.checkpoint.stage;
 		if (stage === "ResolveWorkItem" || stage === "FetchTicket") {
-			const stepId = id();
+			const stepId = handle.deps.newId();
 			await marker(handle, stage, [stepId]);
 			await log.write([
 				{
@@ -250,7 +248,7 @@ async function run(handle: MutableFactoryHandle, signal: AbortSignal) {
 			continue;
 		}
 		if (stage === "Plan" || stage === "Revise") {
-			const stepId = id();
+			const stepId = handle.deps.newId();
 			await marker(handle, stage, [stepId]);
 			const role = stage === "Plan" ? "planner" : "reviser";
 			const workItem = await artifact(
@@ -382,7 +380,9 @@ async function run(handle: MutableFactoryHandle, signal: AbortSignal) {
 			continue;
 		}
 		if (stage === "PlanReview") {
-			const ids = Array.from({ length: Object.keys(lenses).length + 1 }, id);
+			const ids = Array.from({ length: Object.keys(lenses).length + 1 }, () =>
+				handle.deps.newId(),
+			);
 			await marker(handle, stage, ids);
 			const workItem = await artifact(
 				handle,
@@ -423,7 +423,7 @@ async function run(handle: MutableFactoryHandle, signal: AbortSignal) {
 					log.current().runId,
 					(await version(handle)).plan.markdown,
 				);
-				const stepId = id();
+				const stepId = handle.deps.newId();
 				await checkpoint(
 					handle,
 					{
@@ -597,7 +597,7 @@ export async function openFactory(
 		!(current.stage === "Escalated" && current.inFlight) &&
 		(current.inFlight || !openGate)
 	) {
-		const stepId = id();
+		const stepId = handle.deps.newId();
 		const operation = current.inFlight ?? {
 			stage: current.stage,
 			stepIds: [],
@@ -804,7 +804,7 @@ export async function acceptPlanUpdate(
 		if ("prompt" in input && !input.prompt.trim())
 			throw invalid("prompt must not be blank");
 		if ("version" in input && !selected)
-			throw new CommandError(404, "not_found", "plan version not found");
+			throw new CommandError("not_found", "plan version not found");
 		const markdown = await readPlan(
 			state.deps.dataDir,
 			state.log.current().runId,
@@ -1030,6 +1030,11 @@ export async function approve(handle: FactoryHandle): Promise<FactoryHandle> {
 			state.log.current().runId,
 		);
 		const markdown = renderAnswers(workingCopy, state.checkpoint.answers);
+		const issues = resolveImplementation(
+			markdown,
+			current.plan.prStrategy,
+		).flatMap((pr) => pr.issues.map((issue) => `${pr.id}: ${issue}`));
+		if (issues.length) throw conflict(issues.join("\n"));
 		const saved = await savePlan(state, { ...current.plan, markdown }, "human");
 		const agent = PlanVersion.parse(
 			JSON.parse(

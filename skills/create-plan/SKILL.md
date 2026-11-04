@@ -75,11 +75,13 @@ phase:
   - **Manual**: what a human needs to click/check
 - **What we're NOT doing** — explicit non-goals
 
-If the plan has grown to many phases (roughly 5+, or any phase that's large on
-its own), add a **PR Strategy** section: group phases into shippable PRs —
-some phases combined into one PR, others standing alone — each an
-independently reviewable, mergeable, revertable unit. Note ordering/dependencies
-between them.
+Give every executable phase a unique numbered heading in the form
+`## Phase 1 — Add the execution contract`. Keep its number stable on revision.
+Include a **PR Strategy** even for one PR. List PRs in delivery order and give
+each a title and its ordered phase headings, copied verbatim without the
+Markdown hashes. Assign every phase exactly once. Group phases when they ship
+together and note dependencies between PRs. After edits, check the mapping
+against the final headings before presenting the plan.
 
 No blocking questions in the final plan — resolve every one before writing it
 down. For the rest, record reasonable nonblocking assumptions with a

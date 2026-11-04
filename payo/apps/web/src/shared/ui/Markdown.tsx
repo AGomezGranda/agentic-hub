@@ -1,4 +1,8 @@
-import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
+import { createElement } from "react";
+import ReactMarkdown, {
+	type Components,
+	defaultUrlTransform,
+} from "react-markdown";
 
 function safeMarkdownUrl(url: string, key: string): string {
 	const transformed = defaultUrlTransform(url);
@@ -8,13 +12,37 @@ function safeMarkdownUrl(url: string, key: string): string {
 	return transformed;
 }
 
-export function Markdown({ children }: { children: string }) {
+const anchoredHeading: NonNullable<Components["h1"]> = ({ node, children }) => {
+	const line = node?.position?.start.line;
+	return createElement(
+		node?.tagName ?? "h2",
+		{ id: line ? `plan-line-${line}` : undefined },
+		children,
+	);
+};
+const headingComponents = {
+	h1: anchoredHeading,
+	h2: anchoredHeading,
+	h3: anchoredHeading,
+	h4: anchoredHeading,
+	h5: anchoredHeading,
+	h6: anchoredHeading,
+};
+
+export function Markdown({
+	children,
+	headingAnchors = false,
+}: {
+	children: string;
+	headingAnchors?: boolean;
+}) {
 	return (
 		<div className="plan-markdown">
 			<ReactMarkdown
 				skipHtml
 				urlTransform={safeMarkdownUrl}
 				components={{
+					...(headingAnchors ? headingComponents : {}),
 					a: ({ node: _node, href, children: linkChildren, ...props }) =>
 						href ? (
 							<a

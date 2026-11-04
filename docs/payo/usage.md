@@ -75,6 +75,15 @@ pnpm payo implement <run-id> --pr pr-1  # requires configured [execution].checks
 pnpm payo status <execution-run-id>      # phase, gates, branch, and result
 ```
 
+In the browser, review the Implementation outline before approving. Expand each
+PR to inspect its ordered phases and follow phase links into the plan.
+Missing or ambiguous assignments must be resolved before approval. Approved
+runs open on Implementation, where each PR has a local start action and the
+effective base can be changed. The Execution view keeps completed, current,
+and upcoming phase names visible, with final PR review as a separate step.
+It also links back to the source and shows the retained branch, worktree, and
+result commit when reviewed.
+
 `PAYO_SCENARIO` selects another script:
 
 | Scenario | Behaviour |
@@ -134,10 +143,13 @@ prompt-driven plan revision or restore a saved version, which starts review
 again. The token stays in page memory, so reloads require entering it again. The server port is kept in `sessionStorage` for the browser
 session; the host is always `127.0.0.1`.
 
-From `payo/`, start the server with the exact Vite origin allowed:
+The starter config created by setup already allows the Vite origins
+`http://127.0.0.1:5173` and `http://localhost:5173`. Existing config files are
+never overwritten by setup; if yours predates these defaults, add the exact
+origin you use to `[server].web_origins` or set `PAYO_WEB_ORIGINS` (which
+replaces that setting). From `payo/`, start the server:
 
 ```
-export PAYO_WEB_ORIGINS=http://127.0.0.1:5173
 pnpm payo serve --dev-fakes
 ```
 
@@ -303,7 +315,7 @@ the final filesystem check and replacement by an unrelated editor.
 
 A stopped or crashed server never resumes work on its own. Restart `payo serve`
 and inspect `status`: interrupted work appears as an `Escalated` run with a
-`factory-escalation` gate. Then:
+`factory-escalation` gate for planning or an `execution-escalation` gate for execution. Then:
 
 ```
 pnpm payo edit <run-id>     # optional, when the stage is PlanReview or Revise
@@ -322,6 +334,14 @@ receipts remain complete and are not replayed. A missing worktree, unexpected
 HEAD/history, or mismatched commit remains gated. A pinned plan conflict cannot
 be changed by resume; create and approve a corrected planning run, then start a
 new execution.
+
+To rehearse execution recovery, start the fake server with
+`PAYO_SCENARIO=execution-interruption pnpm payo serve --dev-fakes`, approve a
+plan, and launch its PR with configured execution checks. Stop the server while
+phase two is paused, then restart it with the same data directory and scenario.
+Open the execution in the browser, inspect the gate reason, and select **Resume**.
+The first phase remains complete; compare the reviewed result commit with
+`pnpm payo status <execution-run-id>`.
 
 Planning approval removes only the planning worktree. Execution worktrees and
 branches are retained after success, interruption, and escalation; Payo never
@@ -384,7 +404,7 @@ untrusted config: `[tools]` selects executable programs.
 | TOML key | Default | Meaning |
 |---|---|---|
 | `[server].port` | `7331` | Listener port, valid range `1..65535`; bind remains fixed to `127.0.0.1`. |
-| `[server].web_origins` | `[]` | Exact `http(s)` loopback origins allowed by CORS. |
+| `[server].web_origins` | `[]` when unset; starter config allows `http://127.0.0.1:5173` and `http://localhost:5173` | Exact `http(s)` loopback origins allowed by CORS. |
 | `[paths].data_dir` | `~/.payo` | Absolute path for database, artifacts, plans, token, sessions and worktrees. |
 | `[paths].repo` | Server startup directory | Absolute target repo; `payo start --repo` overrides per run. |
 | `[paths].base_branch` | `main` | Base branch; `payo start --base` overrides per run. |

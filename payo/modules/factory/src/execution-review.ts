@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import {
 	type ArtifactRef,
 	type ExecutionCheckpoint,
@@ -206,11 +205,11 @@ export async function reviewMutableImplementation(
 		!verifierSettings
 	)
 		throw new Error("implementation review role snapshots are incomplete");
-	const scoutId = randomUUID();
+	const scoutId = state.deps.newId();
 	const lensStepIds = new Map(
-		IMPLEMENTATION_REVIEW_LENSES.map((lens) => [lens, randomUUID()]),
+		IMPLEMENTATION_REVIEW_LENSES.map((lens) => [lens, state.deps.newId()]),
 	);
-	const verifierId = randomUUID();
+	const verifierId = state.deps.newId();
 	await writeReviewCheckpoint(state, {
 		stage: "Review",
 		inFlight: {
@@ -224,7 +223,7 @@ export async function reviewMutableImplementation(
 		{
 			stepId: scoutId,
 			stepName: `scope implementation review (${scope})`,
-			attemptIds: [randomUUID(), randomUUID()],
+			attemptIds: [state.deps.newId(), state.deps.newId()],
 			runner,
 			spec: await executionScoutSpec(deps.store, scoutRef, {
 				plan: config.plan,
@@ -270,7 +269,7 @@ export async function reviewMutableImplementation(
 					{
 						stepId,
 						stepName: `implementation-review:${lens}`,
-						attemptIds: [randomUUID(), randomUUID()],
+						attemptIds: [state.deps.newId(), state.deps.newId()],
 						runner,
 						spec: await executionReviewSpec(deps.store, reviewerRef, {
 							lens,
@@ -345,7 +344,7 @@ export async function reviewMutableImplementation(
 			{
 				stepId: verifierId,
 				stepName: "verify implementation review evidence",
-				attemptIds: [randomUUID(), randomUUID()],
+				attemptIds: [state.deps.newId(), state.deps.newId()],
 				runner,
 				spec: await executionVerifierSpec(deps.store, verifierRef, {
 					plan: config.plan,

@@ -2,6 +2,7 @@ import {
 	ExecutionCheckpoint,
 	ExecutionManifest,
 	type ExecutionStage,
+	FactoryRunConfig,
 	type Finding,
 	type RepairOutput,
 	type VerifiedOutput,
@@ -234,4 +235,16 @@ export function accountRepair(
 		addressed: [...output.addressedFindingIds],
 		unresolved: [...output.unresolvedFindingIds],
 	};
+}
+
+export function sourceEligibility(state: {
+	status: string;
+	outcome: string | null;
+	config: { factory?: unknown };
+}): "unapproved" | "not_planning" | null {
+	if (state.status !== "ended" || state.outcome !== "approved")
+		return "unapproved";
+	return FactoryRunConfig.safeParse(state.config.factory).success
+		? null
+		: "not_planning";
 }

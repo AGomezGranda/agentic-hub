@@ -687,6 +687,7 @@ async function executionSetup(
 	const scripted = scriptedRunner(outputs, store);
 	const refs = await roleRefs(store);
 	const deps = {
+		newId: () => crypto.randomUUID(),
 		store,
 		runner: scripted.runner,
 		limiter: createLimiter(2),
@@ -713,7 +714,10 @@ describe("execution acceptance", () => {
 		const store = createMemoryRunStore();
 		const source = await sourceRun(store);
 		const before = await store.read(source.runId);
-		const handle = await beginExecution({ store }, input());
+		const handle = await beginExecution(
+			{ store, newId: () => crypto.randomUUID() },
+			input(),
+		);
 		const runId = handle.log.current().runId;
 
 		expect(runId).toMatch(
@@ -762,7 +766,10 @@ describe("execution acceptance", () => {
 		const laterEvent = later[1];
 		if (laterEvent?.type !== "artifact.recorded")
 			throw new Error("plan version artifact expected");
-		const handle = await beginExecution({ store }, input());
+		const handle = await beginExecution(
+			{ store, newId: () => crypto.randomUUID() },
+			input(),
+		);
 
 		const config = await executionConfig(store, handle.log.current().runId);
 		expect(config.plan.sha256).toBe(source.ref.sha256);
@@ -778,8 +785,14 @@ describe("execution acceptance", () => {
 	it("returns the existing execution for a duplicate identity", async () => {
 		const store = createMemoryRunStore();
 		await sourceRun(store);
-		const first = await beginExecution({ store }, input());
-		const second = await beginExecution({ store }, input());
+		const first = await beginExecution(
+			{ store, newId: () => crypto.randomUUID() },
+			input(),
+		);
+		const second = await beginExecution(
+			{ store, newId: () => crypto.randomUUID() },
+			input(),
+		);
 
 		expect(second.log.current().runId).toBe(first.log.current().runId);
 		expect((await store.listRunIds()).sort()).toEqual(
@@ -787,18 +800,18 @@ describe("execution acceptance", () => {
 		);
 		const runId = first.log.current().runId;
 		const implicit = await beginExecution(
-			{ store },
+			{ store, newId: () => crypto.randomUUID() },
 			{ ...input(), baseCommit: "advanced" },
 		);
 		expect(implicit.log.current().runId).toBe(runId);
 		expect((await executionConfig(store, runId)).baseCommit).toBe("abc123");
 		await expect(
 			beginExecution(
-				{ store },
+				{ store, newId: () => crypto.randomUUID() },
 				{ ...input(), baseCommit: "other", explicitBase: true },
 			),
 		).rejects.toMatchObject({
-			status: 409,
+			code: "conflict",
 			message: expect.stringContaining(runId),
 		});
 	});
@@ -807,8 +820,8 @@ describe("execution acceptance", () => {
 		const store = createMemoryRunStore();
 		await sourceRun(store);
 		const [first, second] = await Promise.all([
-			beginExecution({ store }, input()),
-			beginExecution({ store }, input()),
+			beginExecution({ store, newId: () => crypto.randomUUID() }, input()),
+			beginExecution({ store, newId: () => crypto.randomUUID() }, input()),
 		]);
 		expect(second.log.current().runId).toBe(first.log.current().runId);
 		expect(
@@ -819,36 +832,60 @@ describe("execution acceptance", () => {
 	it("rejects missing, unapproved, unknown, and empty PR sources", async () => {
 		const store = createMemoryRunStore();
 		await expect(
-			beginExecution({ store }, input("missing")),
-		).rejects.toMatchObject({ status: 400 });
+			beginExecution(
+				{ store, newId: () => crypto.randomUUID() },
+				input("missing"),
+			),
+		).rejects.toMatchObject({ code: "invalid_request" });
 
 		await sourceRun(store, { runId: "active", ended: false });
-		await expect(beginExecution({ store }, input("active"))).rejects.toThrow(
-			/not been approved/,
-		);
+		await expect(
+			beginExecution(
+				{ store, newId: () => crypto.randomUUID() },
+				input("active"),
+			),
+		).rejects.toThrow(/not been approved/);
 
 		await sourceRun(store, { runId: "escalated", outcome: "escalated" });
-		await expect(beginExecution({ store }, input("escalated"))).rejects.toThrow(
-			/not been approved/,
-		);
+		await expect(
+			beginExecution(
+				{ store, newId: () => crypto.randomUUID() },
+				input("escalated"),
+			),
+		).rejects.toThrow(/not been approved/);
 
 		await sourceRun(store, { runId: "approved" });
 		await expect(
-			beginExecution({ store }, { ...input("approved"), prId: "missing" }),
-		).rejects.toMatchObject({ status: 404 });
+			beginExecution(
+				{ store, newId: () => crypto.randomUUID() },
+				{ ...input("approved"), prId: "missing" },
+			),
+		).rejects.toMatchObject({ code: "not_found" });
 		await expect(
-			beginExecution({ store }, { ...input("approved"), prId: "pr-empty" }),
+			beginExecution(
+				{ store, newId: () => crypto.randomUUID() },
+				{ ...input("approved"), prId: "pr-empty" },
+			),
 		).rejects.toThrow(/no phases/);
 		await expect(
-			beginExecution({ store }, { ...input("approved"), checks: [] }),
-		).rejects.toMatchObject({ status: 400 });
+			beginExecution(
+				{ store, newId: () => crypto.randomUUID() },
+				{ ...input("approved"), checks: [] },
+			),
+		).rejects.toMatchObject({ code: "invalid_request" });
 	});
 
 	it("accepts an ordered multi-phase PR unit", async () => {
 		const store = createMemoryRunStore();
-		await sourceRun(store, { phases: ["Phase 1", "Phase 2"] });
+		await sourceRun(store, {
+			markdown: `${markdown}\n## Phase 2 — Review\n`,
+			phases: ["Phase 1", "Phase 2"],
+		});
 
-		const handle = await beginExecution({ store }, input());
+		const handle = await beginExecution(
+			{ store, newId: () => crypto.randomUUID() },
+			input(),
+		);
 
 		expect(handle.checkpoint.stage).toBe("Prepare");
 		expect(handle.log.current().status).toBe("active");
@@ -857,9 +894,9 @@ describe("execution acceptance", () => {
 	it("opens only execution runs", async () => {
 		const store = createMemoryRunStore();
 		await sourceRun(store);
-		await expect(openExecution({ store }, "source-run")).rejects.toThrow(
-			/not an execution run/,
-		);
+		await expect(
+			openExecution({ store, newId: () => crypto.randomUUID() }, "source-run"),
+		).rejects.toThrow(/not an execution run/);
 	});
 });
 
@@ -917,9 +954,13 @@ describe("execution lifecycle", () => {
 		});
 		expect(await readExecutionSummary(completed)).toMatchObject({
 			phaseCount: 2,
+			phases: [
+				{ id: "phase-1", title: "Phase 1" },
+				{ id: "phase-2", title: "Phase 2" },
+			],
 			completedPhases: [
-				{ id: "phase-1", title: "Foundation" },
-				{ id: "phase-2", title: "Integration" },
+				{ id: "phase-1", title: "Phase 1" },
+				{ id: "phase-2", title: "Phase 2" },
 			],
 			resultCommit: "result-commit-2",
 		});
@@ -1780,7 +1821,10 @@ describe("execution lifecycle", () => {
 	it("rejects resume when the execution is not escalated", async () => {
 		const store = createMemoryRunStore();
 		await sourceRun(store);
-		const handle = await beginExecution({ store }, input());
+		const handle = await beginExecution(
+			{ store, newId: () => crypto.randomUUID() },
+			input(),
+		);
 		await expect(
 			resumeExecution(handle, { signal: new AbortController().signal }),
 		).rejects.toThrow(/not resumable/);

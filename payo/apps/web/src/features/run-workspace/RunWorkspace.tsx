@@ -2,6 +2,7 @@ import { PlanReview } from "@web/features/plan-review/PlanReview.tsx";
 import { Button } from "@web/shared/ui/Button.tsx";
 import { type ReactNode, useState } from "react";
 import { ActivityTimeline } from "./ActivityTimeline.tsx";
+import { ExecutionView } from "./ExecutionView.tsx";
 import { StageStrip } from "./StageStrip.tsx";
 import { SwarmView } from "./SwarmView.tsx";
 import { useRunActivity } from "./useRunActivity.ts";
@@ -10,19 +11,23 @@ export function RunWorkspace({
 	token,
 	runId,
 	onDisconnect,
+	onSelectRun,
 }: {
 	token: string;
 	runId: string;
 	onDisconnect: () => void;
+	onSelectRun: (runId: string) => void;
 }) {
-	const [view, setView] = useState<"swarm" | "decision" | "activity">("swarm");
+	const [view, setView] = useState<
+		"swarm" | "decision" | "activity" | "execution" | null
+	>(null);
 	const { run, history, connection, connectionError, events } = useRunActivity(
 		token,
 		runId,
 	);
 
 	if (run.isPending) return <WorkspaceMessage>Loading run…</WorkspaceMessage>;
-	if (run.error)
+	if (run.error && !run.data)
 		return (
 			<WorkspaceMessage type="alert">
 				Could not load this run: {run.error.message}
@@ -30,6 +35,11 @@ export function RunWorkspace({
 		);
 	if (!run.data) return <WorkspaceMessage>Run not found.</WorkspaceMessage>;
 
+	const execution = run.data.execution;
+	const approved =
+		run.data.status === "ended" && run.data.outcome === "approved";
+	const selectedView =
+		view ?? (execution ? "execution" : approved ? "decision" : "swarm");
 	const item = run.data.workItem;
 	const statusLabel =
 		connection === "loading"
@@ -50,6 +60,9 @@ export function RunWorkspace({
 
 	return (
 		<div className="min-w-0 space-y-5">
+			{run.error && (
+				<p role="alert">Could not refresh this run: {run.error.message}</p>
+			)}
 			<section className="border-b border-[var(--line)] pb-6">
 				<div className="flex flex-wrap items-start justify-between gap-4">
 					<div className="min-w-0">
@@ -100,9 +113,11 @@ export function RunWorkspace({
 						{connectionError}
 					</p>
 				) : null}
-				<div className="mt-5">
-					<StageStrip stage={run.data.stage} />
-				</div>
+				{!execution && (
+					<div className="mt-5">
+						<StageStrip stage={run.data.stage} />
+					</div>
+				)}
 				{run.data.openGates.length > 0 && (
 					<div className="mt-3 rounded-sm border border-[var(--warning-border)] bg-[var(--warning-surface)] px-4 py-3 text-sm text-[var(--status-warn)]">
 						<span className="font-semibold">
@@ -112,9 +127,9 @@ export function RunWorkspace({
 						<button
 							type="button"
 							className="font-semibold underline"
-							onClick={() => setView("decision")}
+							onClick={() => setView(execution ? "execution" : "decision")}
 						>
-							Review decision
+							{execution ? "View execution" : "Review decision"}
 						</button>
 					</div>
 				)}
@@ -124,24 +139,46 @@ export function RunWorkspace({
 				className="flex flex-wrap gap-1 border-b border-[var(--line)]"
 			>
 				{(
-					[
-						["swarm", "Swarm view"],
-						["decision", "Decision view"],
-						["activity", "Activity view"],
-					] as const
+					(execution
+						? [
+								["execution", "Execution view"],
+								["activity", "Activity view"],
+							]
+						: [
+								["swarm", "Swarm view"],
+								["decision", approved ? "Implementation" : "Decision view"],
+								["activity", "Activity view"],
+							]) as readonly (readonly [
+						"swarm" | "decision" | "activity" | "execution",
+						string,
+					])[]
 				).map(([value, label]) => (
 					<button
 						key={value}
 						type="button"
-						aria-pressed={view === value}
+						aria-pressed={selectedView === value}
 						onClick={() => setView(value)}
-						className={`min-h-11 border-b-2 px-4 text-sm font-semibold ${view === value ? "border-[var(--accent)] text-[var(--accent)]" : "border-transparent text-[var(--muted)]"}`}
+						className={`min-h-11 border-b-2 px-4 text-sm font-semibold ${selectedView === value ? "border-[var(--accent)] text-[var(--accent)]" : "border-transparent text-[var(--muted)]"}`}
 					>
 						{label}
 					</button>
 				))}
 			</nav>
-			{view === "swarm" ? (
+			{selectedView === "execution" && execution ? (
+				<ExecutionView
+					execution={execution}
+					gate={
+						run.data.openGates.find(
+							(gate) => gate.kind === "execution-escalation",
+						) ?? null
+					}
+					token={token}
+					onRefresh={async () => {
+						await run.refetch();
+					}}
+					onSelectRun={onSelectRun}
+				/>
+			) : selectedView === "swarm" ? (
 				history.isPending ? (
 					<WorkspaceMessage>Loading activity…</WorkspaceMessage>
 				) : history.error ? (
@@ -157,14 +194,17 @@ export function RunWorkspace({
 				)
 			) : (
 				<>
-					<div hidden={view === "activity"}>
-						<PlanReview
-							token={token}
-							runId={runId}
-							onViewActivity={() => setView("activity")}
-						/>
-					</div>
-					<div hidden={view === "decision"}>
+					{!execution && (
+						<div hidden={selectedView === "activity"}>
+							<PlanReview
+								token={token}
+								runId={runId}
+								onSelectRun={onSelectRun}
+								onViewActivity={() => setView("activity")}
+							/>
+						</div>
+					)}
+					<div hidden={selectedView !== "activity"}>
 						{history.isPending ? (
 							<WorkspaceMessage>Loading activity…</WorkspaceMessage>
 						) : history.error ? (

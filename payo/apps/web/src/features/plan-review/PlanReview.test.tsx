@@ -15,6 +15,7 @@ const api = vi.hoisted(() => ({
 	resumeRun: vi.fn(),
 	getPlanVersions: vi.fn(),
 	submitPlanUpdate: vi.fn(),
+	implementRun: vi.fn(),
 }));
 vi.mock("./api.ts", () => api);
 vi.mock("@web/features/runs/api.ts", () => ({ getRun: api.getRun }));
@@ -78,13 +79,13 @@ function review(
 	};
 }
 
-function mount() {
+function mount(onSelectRun = vi.fn()) {
 	const client = new QueryClient({
 		defaultOptions: { queries: { retry: false, staleTime: 60_000 } },
 	});
 	return render(
 		<QueryClientProvider client={client}>
-			<PlanReview token="token" runId={RUN_ID} />
+			<PlanReview token="token" runId={RUN_ID} onSelectRun={onSelectRun} />
 		</QueryClientProvider>,
 	);
 }
@@ -498,4 +499,100 @@ it("opens the newest snapshot and compares to its predecessor with context", asy
 		"aria-pressed",
 		"true",
 	);
+});
+
+it("launches an approved PR, preserves inputs on rejection, and navigates on acceptance", async () => {
+	const user = userEvent.setup();
+	const navigate = vi.fn();
+	api.getRun.mockResolvedValue(
+		summary({
+			status: "ended",
+			outcome: "approved",
+			stage: "Approved",
+			openGates: [],
+		}),
+	);
+	api.getRunReview.mockResolvedValue({
+		...review(),
+		plan: {
+			...review().plan,
+			prStrategy: [
+				{ id: "empty", title: "Empty", phases: [] },
+				{ id: "pr2", title: "Second", phases: ["Build", "Verify"] },
+			],
+		},
+		review: { available: false, reason: "missing" },
+	});
+	let resolveLaunch: (value: { runId: string }) => void = () => {};
+	api.implementRun
+		.mockRejectedValueOnce(new Error("Configure execution checks"))
+		.mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					resolveLaunch = resolve;
+				}),
+		);
+	mount(navigate);
+	await screen.findByRole("heading", { name: "Implementation" });
+	expect(
+		screen.getByRole("button", { name: "Start empty locally" }),
+	).toBeDisabled();
+	await user.click(screen.getByText("pr2 · Second"));
+	expect(screen.getByText("Build")).toBeVisible();
+	expect(screen.getByText("Verify")).toBeVisible();
+	await user.click(screen.getByText("Base branch · main"));
+	await user.type(screen.getByLabelText("Override base branch"), " feature ");
+	await user.click(screen.getByRole("button", { name: "Start pr2 locally" }));
+	expect(await screen.findByRole("alert")).toHaveTextContent(
+		"Configure execution checks",
+	);
+	expect(screen.getByLabelText("Override base branch")).toHaveValue(
+		" feature ",
+	);
+	await user.click(screen.getByRole("button", { name: "Start pr2 locally" }));
+	expect(screen.getByRole("button", { name: /starting/i })).toBeDisabled();
+	expect(api.implementRun).toHaveBeenLastCalledWith("token", RUN_ID, {
+		prId: "pr2",
+		base: "feature",
+	});
+	resolveLaunch({ runId: "accepted-id" });
+	await waitFor(() => expect(navigate).toHaveBeenCalledWith("accepted-id"));
+});
+
+it("links preview phases to the plan and allows revision while ambiguous phases block approval", async () => {
+	const data = review("# Working plan\n\n### Build");
+	api.getRunReview.mockResolvedValue({
+		...data,
+		plan: {
+			...data.plan,
+			questions: [],
+			implementation: [
+				{
+					id: "pr1",
+					title: "First PR",
+					phases: [
+						{ title: "Build", line: 3 },
+						{ title: "Ship", line: null },
+					],
+					issues: ["Could not match Ship."],
+				},
+			],
+		},
+	});
+	mount();
+	const link = await screen.findByRole("link", { name: "Build" });
+	expect(link).toHaveAttribute("href", "#plan-line-3");
+	expect(screen.getByRole("heading", { name: "Build" })).toHaveAttribute(
+		"id",
+		"plan-line-3",
+	);
+	expect(screen.getByText("Could not match Ship.")).toBeVisible();
+	expect(
+		screen.getByRole("button", { name: "Approve and end the run" }),
+	).toBeDisabled();
+	expect(screen.getByRole("button", { name: "Revise plan" })).toBeEnabled();
+	expect(screen.getByRole("button", { name: "Request changes" })).toBeEnabled();
+	expect(
+		screen.queryByRole("button", { name: /start .* locally/i }),
+	).toBeNull();
 });

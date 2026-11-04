@@ -259,6 +259,7 @@ export const ExecutionSummary = z.object({
 	sourceRunId: Id,
 	prId: Id,
 	phaseCount: z.int().nonnegative().default(0),
+	phases: z.array(z.object({ id: Id, title: text })).optional(),
 	completedPhases: z
 		.array(z.object({ id: Id, title: text, resultCommit: text }))
 		.default([]),

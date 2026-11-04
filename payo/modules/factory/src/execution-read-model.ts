@@ -150,6 +150,7 @@ export async function readExecutionSummary(
 		sourceRunId: config.sourceRunId,
 		prId: config.prId,
 		phaseCount: manifest?.phases.length ?? 0,
+		phases: manifest?.phases.map(({ id, title }) => ({ id, title })),
 		completedPhases,
 		resultCommit:
 			run.status === "ended" && run.outcome === "reviewed"

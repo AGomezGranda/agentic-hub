@@ -67,7 +67,7 @@ const roleSources = {
 };
 
 const plan = {
-	markdown: "# Plan\n",
+	markdown: "# Plan\n## Phase 1 — One phase\n",
 	prStrategy: [{ id: "pr", title: "One", phases: ["One phase"] }],
 	openQuestions: [],
 };
@@ -104,6 +104,7 @@ async function seed(
 	const dataDir = await mkdtemp(join(tmpdir(), "payo-composition-"));
 	await beginFactory(
 		{
+			newId: () => crypto.randomUUID(),
 			store,
 			runner: createFakeRunner([], "fake"),
 			limiter: createLimiter(1),

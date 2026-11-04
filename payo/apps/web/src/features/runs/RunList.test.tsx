@@ -255,3 +255,45 @@ it("keeps the no-runs message in both modes without empty repository groups", as
 			),
 	).toHaveLength(0);
 });
+
+it("distinguishes an execution from its planning run in links and the selector", () => {
+	const planning = runSummary(RUN_A);
+	const execution = {
+		...runSummary(RUN_B),
+		execution: {
+			runId: RUN_B,
+			sourceRunId: RUN_A,
+			prId: "PR-1",
+			phaseCount: 2,
+			completedPhases: [],
+			resultCommit: null,
+			artifactIssues: [],
+			status: "active" as const,
+			outcome: null,
+			stage: "Implement" as const,
+			phaseIndex: 1,
+			scope: "phase" as const,
+			branch: null,
+			worktree: null,
+			statusDetail: null,
+			escalationReason: null,
+			checks: [],
+			review: null,
+		},
+	};
+	render(
+		<RunList
+			runs={[planning, execution]}
+			isPending={false}
+			selectedRunId={RUN_A}
+			onSelect={() => {}}
+		/>,
+	);
+	expect(screen.getByRole("link", { name: /Execution PR-1/ })).toHaveAttribute(
+		"href",
+		`/runs/${RUN_B}`,
+	);
+	expect(screen.getByRole("option", { name: /Execution PR-1/ })).toHaveValue(
+		RUN_B,
+	);
+});

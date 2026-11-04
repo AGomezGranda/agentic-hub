@@ -3,6 +3,7 @@ import { ExecutionSummary } from "./execution.ts";
 import {
 	Finding,
 	OpenQuestion,
+	PlanOutput,
 	VerifiedOutput,
 	WorkItemRequest,
 } from "./factory.ts";
@@ -145,6 +146,22 @@ export const RunReview = z.object({
 			markdown: z.string(),
 			editorPath: nonBlank.nullable(),
 			questions: z.array(OpenQuestion),
+			prStrategy: PlanOutput.shape.prStrategy.optional(),
+			implementation: z
+				.array(
+					z.object({
+						id: nonBlank,
+						title: nonBlank,
+						phases: z.array(
+							z.object({
+								title: nonBlank,
+								line: z.int().positive().nullable(),
+							}),
+						),
+						issues: z.array(nonBlank),
+					}),
+				)
+				.optional(),
 			version: z.int().positive().optional(),
 			workingCopyHash: z
 				.string()

@@ -27,8 +27,8 @@ import {
 } from "./factory-fixtures.ts";
 
 const plan = {
-	markdown: "# Plan\n",
-	prStrategy: [{ id: "pr", title: "One", phases: [] }],
+	markdown: "# Plan\n## Phase 1 — One phase\n",
+	prStrategy: [{ id: "pr", title: "One", phases: ["One phase"] }],
 	openQuestions: [],
 };
 const clean = () => [
@@ -462,7 +462,7 @@ it("snapshots edits and answers, then approves with retryable cleanup", async ()
 	const { deps, input } = await setup([envelope(questionPlan), ...clean()]);
 	const handle = await start(deps, input);
 	const path = join(deps.dataDir, "runs", "run", "plan.md");
-	await writeFile(path, "# Edited\n");
+	await writeFile(path, "# Edited\n## Phase 1 — One phase\n");
 	await expect(approve(handle)).rejects.toThrow("unanswered");
 	await expect(
 		answer(handle, { questionId: "missing", text: "yes" }),
@@ -636,6 +636,7 @@ async function setup(scripts: FakeStep[][]) {
 		reviser: { model: null, timeoutMs: 1000 },
 	};
 	const deps = {
+		newId: (): string => crypto.randomUUID(),
 		store: createMemoryRunStore(),
 		runner,
 		limiter: createLimiter(1),
@@ -1156,4 +1157,17 @@ it("escalates a workspace creation failure and resumes the same stage", async ()
 	deps.workspace = fakeWorkspace("/workspace");
 	await resume(handle, { signal: input.signal });
 	expect(handle.checkpoint.stage).toBe("Approval");
+});
+
+it("uses the supplied ID generator for workflow steps", async () => {
+	const { deps, input } = await setup([envelope(plan), ...clean()]);
+	let next = 0;
+	deps.newId = () => `injected-${++next}`;
+	await start(deps, input);
+	const events = await deps.store.read(input.runId);
+	expect(
+		events.some(
+			(event) => event.type === "step.started" && event.stepId === "injected-1",
+		),
+	).toBe(true);
 });

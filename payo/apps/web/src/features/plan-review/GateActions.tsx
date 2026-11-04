@@ -9,6 +9,7 @@ export function GateActions({
 	questions,
 	answers,
 	decisionAvailable,
+	implementationBlocked,
 	busy,
 	onCommand,
 }: {
@@ -16,6 +17,7 @@ export function GateActions({
 	questions: readonly OpenQuestion[];
 	answers: Record<string, string>;
 	decisionAvailable: boolean;
+	implementationBlocked: boolean;
 	busy: boolean;
 	onCommand: (command: GateCommand) => void;
 }) {
@@ -55,6 +57,12 @@ export function GateActions({
 				) : null}
 			</div>
 
+			{approval && implementationBlocked && (
+				<p className="mt-3 text-sm text-[var(--status-warn)]">
+					Resolve the phase assignments shown under Implementation before
+					approving.
+				</p>
+			)}
 			{approval && unanswered.length > 0 ? (
 				<p className="mt-4 rounded-sm border border-[var(--warning-border)] bg-[var(--warning-surface)] px-3 py-2.5 text-sm text-[var(--status-warn)]">
 					Answer every open question before approving. {unanswered.length}{" "}
@@ -71,7 +79,12 @@ export function GateActions({
 				{canApprove && confirming ? (
 					<>
 						<Button
-							disabled={busy || !decisionAvailable || unanswered.length > 0}
+							disabled={
+								busy ||
+								!decisionAvailable ||
+								implementationBlocked ||
+								unanswered.length > 0
+							}
 							onClick={() => onCommand("approve")}
 							type="button"
 						>
@@ -89,7 +102,12 @@ export function GateActions({
 				) : null}
 				{canApprove && !confirming ? (
 					<Button
-						disabled={busy || !decisionAvailable || unanswered.length > 0}
+						disabled={
+							busy ||
+							!decisionAvailable ||
+							implementationBlocked ||
+							unanswered.length > 0
+						}
 						onClick={() => setConfirmingGate(approval?.gateId ?? null)}
 						type="button"
 					>

@@ -8,6 +8,7 @@ import {
 import { sha256Hex } from "@payo/kernel";
 import { loadPlanVersions, readArtifact } from "./artifacts.ts";
 import { CommandError } from "./errors.ts";
+import { resolveImplementation } from "./phase-outline.ts";
 import { readPlan } from "./plans.ts";
 import { type FactoryHandle, mutableFactoryHandle } from "./types.ts";
 
@@ -40,11 +41,7 @@ export async function readPlanVersion(handle: FactoryHandle, number: number) {
 		(item) => item.number === number,
 	);
 	if (!version)
-		throw new CommandError(
-			404,
-			"not_found",
-			`plan version ${number} not found`,
-		);
+		throw new CommandError("not_found", `plan version ${number} not found`);
 	return version;
 }
 
@@ -92,6 +89,10 @@ async function projectPlan(
 			return {
 				available: true as const,
 				markdown,
+				implementation: resolveImplementation(
+					markdown,
+					version.plan.prStrategy,
+				),
 				editorPath: join(deps.dataDir, "runs", runId, "plan.md"),
 				questions: version.plan.openQuestions,
 				version: version.number,
@@ -103,6 +104,16 @@ async function projectPlan(
 			markdown: snapshotMarkdown,
 			editorPath: null,
 			questions: version.plan.openQuestions,
+			...(log.current().status === "ended" &&
+			log.current().outcome === "approved"
+				? {
+						prStrategy: version.plan.prStrategy,
+						implementation: resolveImplementation(
+							snapshotMarkdown,
+							version.plan.prStrategy,
+						),
+					}
+				: {}),
 			version: version.number,
 			workingCopyHash: sha256Hex(new TextEncoder().encode(snapshotMarkdown)),
 		};

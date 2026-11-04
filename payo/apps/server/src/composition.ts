@@ -168,6 +168,7 @@ export async function createComposition(
 	const limiter: Limiter = createLimiter(cap);
 
 	const depsForRun = (): FactoryDeps => ({
+		newId: randomUUID,
 		store,
 		runner: adapters.runner(),
 		limiter,
@@ -177,6 +178,7 @@ export async function createComposition(
 		roleSources: adapters.roleSources,
 	});
 	const executionDeps = () => ({
+		newId: randomUUID,
 		store,
 		runner: (adapters.executionRunner ?? adapters.runner)(),
 		limiter,

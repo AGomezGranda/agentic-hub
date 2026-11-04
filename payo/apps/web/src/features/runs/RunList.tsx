@@ -116,7 +116,9 @@ export function RunList({
 						)}
 						{runs.map((run) => (
 							<option key={run.runId} value={run.runId}>
-								{run.workItem?.title ?? run.runId} · {run.repo}
+								{run.workItem?.title ?? run.runId}
+								{run.execution ? ` · Execution ${run.execution.prId}` : ""} ·{" "}
+								{run.repo}
 							</option>
 						))}
 					</select>
@@ -231,6 +233,7 @@ function RunRow({
 					</p>
 					<p className="mt-1 min-w-0 truncate text-xs text-[var(--muted)]">
 						{subtitle}
+						{run.execution ? ` · Execution ${run.execution.prId}` : ""}
 						{showRepository ? (
 							<>
 								{" · "}

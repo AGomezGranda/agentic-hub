@@ -29,6 +29,7 @@ export interface RoleSource {
 	composedSha?: string;
 }
 export interface FactoryDeps {
+	newId: () => string;
 	store: RunStore;
 	runner: AgentRunner;
 	limiter: Limiter;

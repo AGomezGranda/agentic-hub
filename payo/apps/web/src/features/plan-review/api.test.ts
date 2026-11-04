@@ -4,6 +4,7 @@ import {
 	answerQuestion,
 	approveRun,
 	getRunReview,
+	implementRun,
 	requestChanges,
 	resumeRun,
 } from "./api.ts";
@@ -78,4 +79,25 @@ it("sends answers and only the gate-specific commands", async () => {
 		method: "POST",
 		body: JSON.stringify({ questionId: "q1", text: "Because" }),
 	});
+});
+
+it("launches with default or explicit base", async () => {
+	const fetchMock = vi.fn(
+		async (_url: RequestInfo | URL, _init?: RequestInit) => response({ runId }),
+	);
+	vi.stubGlobal("fetch", fetchMock);
+	await implementRun(token, runId, { prId: "one" });
+	await implementRun(token, runId, { prId: "two", base: "branch" });
+	expect(
+		fetchMock.mock.calls.map(([url, init]) => [
+			String(url),
+			JSON.parse(String(init?.body)),
+		]),
+	).toEqual([
+		[`${getApiBaseUrl()}/runs/${runId}/implement`, { prId: "one" }],
+		[
+			`${getApiBaseUrl()}/runs/${runId}/implement`,
+			{ prId: "two", base: "branch" },
+		],
+	]);
 });
