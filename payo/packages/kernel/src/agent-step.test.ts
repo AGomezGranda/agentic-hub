@@ -65,6 +65,15 @@ const usage = (tokensIn: number): UsageRecord => ({
 	tokensOut: 2,
 	cost: "unknown",
 });
+const money = (amount: number, complete = true): UsageRecord => ({
+	tokensIn: 4,
+	tokensOut: 3,
+	cost: amount,
+	costDetails: {
+		amounts: [{ currency: "USD", basis: "estimated", amount }],
+		complete,
+	},
+});
 const validate = jsonEnvelope(z.object({ verdict: z.literal("ok") }));
 
 function specFor(overrides: Partial<AgentSpec> = {}): AgentSpec {
@@ -525,6 +534,121 @@ describe("runAgentStep", () => {
 		const attempt = (await stateOf(store)).attempts.get("a1");
 		expect(attempt?.status).toBe("timed_out");
 		expect(attempt?.usage).toEqual(usage(2));
+	});
+
+	it("flushes a lone usage snapshot before the runner hangs", async () => {
+		const { store, deps } = await setup();
+		const controller = new AbortController();
+		const reported = money(0.2);
+		const runner = scripted(async function* (signal) {
+			yield { type: "usage", usage: reported };
+			yield* hangs()(signal);
+		});
+
+		const running = runAgentStep(
+			deps,
+			stepOf(runner, {
+				signal: controller.signal,
+				spec: specFor({ timeoutMs: 5000 }),
+			}),
+		);
+		await tick(10);
+		const persisted = (await store.read("r1")).some(
+			(event) =>
+				event.type === "attempt.event" &&
+				event.event.type === "usage" &&
+				event.event.usage.cost === 0.2,
+		);
+		expect(persisted).toBe(true);
+
+		controller.abort();
+		await running;
+	});
+
+	it("keeps reported amounts but marks cost incomplete on timeout", async () => {
+		const { store, deps } = await setup();
+		const runner = scripted(async function* (signal) {
+			yield { type: "usage", usage: money(0.25) };
+			yield* hangs()(signal);
+		});
+
+		await runAgentStep(
+			deps,
+			stepOf(runner, { spec: specFor({ timeoutMs: 20 }) }),
+		);
+
+		const attempt = (await stateOf(store)).attempts.get("a1");
+		expect(attempt?.status).toBe("timed_out");
+		expect(attempt?.usage).toEqual({
+			...money(0.25),
+			costDetails: { ...money(0.25).costDetails, complete: false },
+		});
+	});
+
+	it("keeps reported amounts but marks cost incomplete on cancellation", async () => {
+		const { store, deps } = await setup();
+		const controller = new AbortController();
+		const runner = scripted(async function* (signal) {
+			yield { type: "usage", usage: money(0.3) };
+			yield* hangs()(signal);
+		});
+		setTimeout(() => controller.abort(), 20);
+
+		await runAgentStep(
+			deps,
+			stepOf(runner, {
+				signal: controller.signal,
+				spec: specFor({ timeoutMs: 5000 }),
+			}),
+		);
+
+		const attempt = (await stateOf(store)).attempts.get("a1");
+		expect(attempt?.status).toBe("cancelled");
+		expect(attempt?.usage).toMatchObject({
+			cost: 0.3,
+			costDetails: {
+				amounts: [{ currency: "USD", basis: "estimated", amount: 0.3 }],
+				complete: false,
+			},
+		});
+	});
+
+	it("keeps reported amounts but marks cost incomplete when the runner throws", async () => {
+		const { store, deps } = await setup();
+		const runner = scripted(async function* () {
+			yield { type: "usage", usage: money(0.35) };
+			throw new Error("boom");
+		});
+
+		await expect(runAgentStep(deps, stepOf(runner))).rejects.toThrow("boom");
+
+		const attempt = (await stateOf(store)).attempts.get("a1");
+		expect(attempt?.status).toBe("failed");
+		expect(attempt?.usage).toMatchObject({
+			cost: 0.35,
+			costDetails: {
+				amounts: [{ currency: "USD", basis: "estimated", amount: 0.35 }],
+				complete: false,
+			},
+		});
+	});
+
+	it("retains both attempts' costs across an output-validation retry", async () => {
+		const { store, deps } = await setup();
+		const runner = scripted(
+			emits(
+				{ type: "usage", usage: money(0.1) },
+				{ type: "result", text: "not json" },
+			),
+			emits({ type: "usage", usage: money(0.2, false) }, valid),
+		);
+
+		const result = await runAgentStep(deps, stepOf(runner));
+
+		expect(result.outcome).toBe("succeeded");
+		const state = await stateOf(store);
+		expect(state.attempts.get("a1")?.usage).toEqual(money(0.1));
+		expect(state.attempts.get("a2")?.usage).toEqual(money(0.2, false));
 	});
 
 	it("batches attempt events, keeping every message in order", async () => {

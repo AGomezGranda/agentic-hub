@@ -7,12 +7,20 @@ import {
 	ConfigSettingsSnapshot,
 	DoctorReport,
 	EventsResponse,
+	ExecutionNamingRequest,
+	ImplementPreview,
+	ImplementPreviewRequest,
 	ImplementRequest,
+	OpenWorkspaceRequest,
 	PickDirectoryResponse,
 	PlanRestoreRequest,
 	PlanUpdateRequest,
 	PlanVersionDetail,
 	PlanVersionList,
+	PublicationPreview,
+	PublicationPreviewRequest,
+	PublishRequest,
+	ResumeRequest,
 	RunId,
 	RunIdResponse,
 	RunReview,
@@ -21,6 +29,7 @@ import {
 	SaveConfigSettingsRequest,
 	StartRunRequest,
 	StartRunResponse,
+	WorkCostTree,
 } from "@payo/contracts";
 import { CommandError } from "@payo/factory";
 import {
@@ -39,6 +48,7 @@ import {
 	FolderDialogUnavailable,
 	notFound,
 } from "./errors.ts";
+import type { WorkspaceOpener } from "./open-workspace.ts";
 import type { ConfigSettingsService } from "./settings.ts";
 
 const JSON_LIMIT = 64 * 1024;
@@ -50,6 +60,7 @@ export interface HandlerOptions {
 	getServices(): Composition | null;
 	configSettings: ConfigSettingsService;
 	pickDirectory: DirectoryPicker;
+	openWorkspace: WorkspaceOpener;
 }
 
 export function createHandler(
@@ -203,6 +214,32 @@ async function handle(
 		return;
 	}
 
+	if (segments.length === 5 && segments[4] === "open-workspace") {
+		if (req.method !== "POST")
+			throw new ApiFailure(405, "method_not_allowed", "method not allowed");
+		const input = OpenWorkspaceRequest.safeParse(await readJson(req));
+		if (!input.success)
+			throw new ApiFailure(
+				400,
+				"invalid_request",
+				"invalid open workspace request",
+			);
+		const run = await services.summary(runId);
+		await options.openWorkspace(
+			run.execution?.worktree ?? run.repo,
+			input.data.target,
+		);
+		json(res, 200, RunIdResponse.parse({ runId }), cors);
+		return;
+	}
+
+	if (segments.length === 5 && segments[4] === "costs") {
+		if (req.method !== "GET")
+			throw new ApiFailure(405, "method_not_allowed", "method not allowed");
+		json(res, 200, WorkCostTree.parse(await services.costs(runId)), cors);
+		return;
+	}
+
 	if (segments.length === 5 && segments[4] === "review") {
 		if (req.method !== "GET")
 			throw new ApiFailure(405, "method_not_allowed", "method not allowed");
@@ -258,6 +295,33 @@ async function handle(
 		return;
 	}
 
+	if (
+		segments.length === 5 &&
+		(segments[4] === "implement-preview" || segments[4] === "execution-naming")
+	) {
+		if (req.method !== "POST")
+			throw new ApiFailure(405, "method_not_allowed", "method not allowed");
+		const body = await readJson(req);
+		const schema =
+			segments[4] === "implement-preview"
+				? ImplementPreviewRequest
+				: ExecutionNamingRequest;
+		const input = schema.safeParse(body);
+		if (!input.success)
+			throw new ApiFailure(400, "invalid_request", "invalid naming request");
+		const result =
+			segments[4] === "implement-preview"
+				? await services.implementPreview(
+						runId,
+						ImplementPreviewRequest.parse(body),
+					)
+				: await services.executionNaming(
+						runId,
+						ExecutionNamingRequest.parse(body),
+					);
+		json(res, 200, ImplementPreview.parse(result), cors);
+		return;
+	}
 	if (segments.length === 5 && segments[4] === "implement") {
 		if (req.method !== "POST")
 			throw new ApiFailure(405, "method_not_allowed", "method not allowed");
@@ -266,6 +330,38 @@ async function handle(
 			throw new ApiFailure(400, "invalid_request", "invalid implement request");
 		const executionRunId = await services.implement(runId, input.data);
 		json(res, 202, RunIdResponse.parse({ runId: executionRunId }), cors);
+		return;
+	}
+
+	if (segments.length === 5 && segments[4] === "publication-preview") {
+		if (req.method !== "POST")
+			throw new ApiFailure(405, "method_not_allowed", "method not allowed");
+		const input = PublicationPreviewRequest.safeParse(
+			await readJson(req, true),
+		);
+		if (!input.success)
+			throw new ApiFailure(
+				400,
+				"invalid_request",
+				"invalid publication preview request",
+			);
+		json(
+			res,
+			200,
+			PublicationPreview.parse(await services.publicationPreview(runId)),
+			cors,
+		);
+		return;
+	}
+
+	if (segments.length === 5 && segments[4] === "publish") {
+		if (req.method !== "POST")
+			throw new ApiFailure(405, "method_not_allowed", "method not allowed");
+		const input = PublishRequest.safeParse(await readJson(req));
+		if (!input.success)
+			throw new ApiFailure(400, "invalid_request", "invalid publish request");
+		const publicationRunId = await services.publish(runId, input.data);
+		json(res, 202, RunIdResponse.parse({ runId: publicationRunId }), cors);
 		return;
 	}
 
@@ -321,7 +417,10 @@ async function handle(
 			return;
 		}
 		if (command === "resume") {
-			await services.resume(runId);
+			const input = ResumeRequest.safeParse(await readJson(req, true));
+			if (!input.success)
+				throw new ApiFailure(400, "invalid_request", "invalid resume request");
+			await services.resume(runId, input.data);
 			json(res, 202, RunIdResponse.parse({ runId }), cors);
 			return;
 		}
@@ -342,7 +441,10 @@ function parseFromSeq(value: string | null): number | undefined {
 	return Number(value);
 }
 
-async function readJson(req: IncomingMessage): Promise<unknown> {
+async function readJson(
+	req: IncomingMessage,
+	allowEmpty = false,
+): Promise<unknown> {
 	const declared = Number(header(req, "content-length") ?? 0);
 	if (declared > JSON_LIMIT)
 		throw new ApiFailure(413, "payload_too_large", "request body too large");
@@ -355,6 +457,7 @@ async function readJson(req: IncomingMessage): Promise<unknown> {
 			throw new ApiFailure(413, "payload_too_large", "request body too large");
 		chunks.push(buffer);
 	}
+	if (total === 0 && allowEmpty) return {};
 	if (total === 0)
 		throw new ApiFailure(400, "invalid_request", "request body required");
 	try {

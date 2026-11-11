@@ -36,6 +36,9 @@ export const AgentEvent = z.discriminatedUnion("type", [
 		name: z.string().min(1).max(128),
 		ok: z.boolean(),
 	}),
+	// Each usage event replaces the whole attempt's previous snapshot, never a delta. A runner that
+	// receives native per-call deltas accumulates them first. The final snapshot must arrive before
+	// the terminal `result` or `error`, because the kernel stops consuming at the terminal event.
 	z.object({ type: z.literal("usage"), usage: UsageRecord }),
 	z.object({ type: z.literal("result"), text: z.string().max(MAX_TEXT) }),
 	z.object({ type: z.literal("error"), message: z.string().max(MAX_TEXT) }),

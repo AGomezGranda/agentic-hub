@@ -5,9 +5,11 @@ import {
 	DoctorCheck,
 	DoctorReport,
 	ImplementRequest,
+	ResumeRequest,
 	RunId,
 	RunReview,
 	RunSummary,
+	RunSummaryList,
 	StartRunRequest,
 } from "./api.ts";
 
@@ -139,6 +141,29 @@ describe("API contracts", () => {
 		);
 	});
 
+	it("accepts blocked gate summaries without available commands", () => {
+		const blocked = {
+			...summary,
+			openGates: [
+				{
+					...summary.openGates[0],
+					kind: "execution-escalation",
+					allowedCommands: [],
+				},
+			],
+		};
+		expect(RunSummary.parse(blocked)).toEqual(blocked);
+		expect(RunSummaryList.parse({ runs: [blocked] })).toEqual({
+			runs: [blocked],
+		});
+		expect(
+			RunSummary.safeParse({
+				...blocked,
+				openGates: [{ ...blocked.openGates[0], allowedCommands: [""] }],
+			}).success,
+		).toBe(false);
+	});
+
 	it("validates available and unavailable run review projections", () => {
 		const review = {
 			plan: {
@@ -203,4 +228,21 @@ describe("API contracts", () => {
 		};
 		expect(DoctorReport.parse(report)).toEqual(report);
 	});
+});
+
+it("validates issue answers without breaking plain resume requests", () => {
+	expect(ResumeRequest.safeParse({}).success).toBe(true);
+	const answer = { issue: "Which route?", answer: "Use /history" };
+	expect(
+		ResumeRequest.safeParse({ gateId: "gate", answers: [answer] }).success,
+	).toBe(true);
+	for (const invalid of [
+		{ answers: [answer] },
+		{ gateId: "gate" },
+		{ gateId: "gate", answers: [] },
+		{ gateId: "gate", answers: [{ ...answer, answer: " " }] },
+		{ gateId: "gate", answers: [answer, answer] },
+		{ unexpected: "ignored" },
+	])
+		expect(ResumeRequest.safeParse(invalid).success).toBe(false);
 });

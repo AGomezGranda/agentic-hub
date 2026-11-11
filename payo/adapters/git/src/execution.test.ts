@@ -64,6 +64,110 @@ async function fixture() {
 const signal = () => new AbortController().signal;
 
 describe("createExecutionWorkspace", () => {
+	it("prepares and commits an owned ticket branch", async () => {
+		const { workspace, input } = await fixture();
+		const { path } = await workspace.prepare(
+			{ ...input, branch: "ABC_2-123/create-todo-entity" },
+			signal(),
+		);
+		await writeFile(join(path, "tracked.txt"), "ticketed change\n");
+		const snapshot = await workspace.inspect(path, signal());
+		const intent = await workspace.prepareCommit(
+			path,
+			snapshot.fingerprint,
+			signal(),
+		);
+		const trailer = `Payo-Execution: ${executionId}/phase-1`;
+		const message = `[ABC_2-123] Create todo entity\n\n${trailer}`;
+		await workspace.commit(path, intent.expectedSnapshot, message, signal(), {
+			...intent,
+			trailer,
+		});
+		expect(await workspace.inspectCommit(path, signal())).toMatchObject({
+			message,
+		});
+	});
+
+	it.each(["missing", "executionId", "repo", "path", "branch", "baseCommit"])(
+		"refuses committing with %s ownership metadata",
+		async (field) => {
+			const { workspace, input } = await fixture();
+			const { path } = await workspace.prepare(input, signal());
+			await writeFile(join(path, "tracked.txt"), "change\n");
+			const snapshot = await workspace.inspect(path, signal());
+			const intent = await workspace.prepareCommit(
+				path,
+				snapshot.fingerprint,
+				signal(),
+			);
+			const metadataPath = join(
+				input.worktreeRoot,
+				".meta",
+				`${executionId}.json`,
+			);
+			if (field === "missing") await rm(metadataPath);
+			else {
+				const metadata = JSON.parse(await readFile(metadataPath, "utf8"));
+				metadata[field] = "foreign";
+				await writeFile(metadataPath, JSON.stringify(metadata));
+			}
+			const trailer = `Payo-Execution: ${executionId}/phase-1`;
+			await expect(
+				workspace.commit(
+					path,
+					intent.expectedSnapshot,
+					`phase\n\n${trailer}`,
+					signal(),
+					{ ...intent, trailer },
+				),
+			).rejects.toThrow(/ownership/i);
+			expect((await git(path, ["rev-parse", "HEAD"])).trim()).toBe(
+				input.baseCommit,
+			);
+		},
+	);
+
+	it("rejects a commit hook changing the subject while retaining its trailer", async () => {
+		const { repo, workspace, input } = await fixture();
+		const { path } = await workspace.prepare(input, signal());
+		const hooks = await tempDir("payo-execution-hooks-");
+		await writeFile(
+			join(hooks, "commit-msg"),
+			'#!/bin/sh\nsed "1s/.*/changed subject/" "$1" > "$1.tmp"\nmv "$1.tmp" "$1"\n',
+			{ mode: 0o755 },
+		);
+		await git(repo, ["config", "core.hooksPath", hooks]);
+		await writeFile(join(path, "tracked.txt"), "change\n");
+		const snapshot = await workspace.inspect(path, signal());
+		const intent = await workspace.prepareCommit(
+			path,
+			snapshot.fingerprint,
+			signal(),
+		);
+		const trailer = `Payo-Execution: ${executionId}/phase-1`;
+		await expect(
+			workspace.commit(
+				path,
+				intent.expectedSnapshot,
+				`phase\n\n${trailer}`,
+				signal(),
+				{ ...intent, trailer },
+			),
+		).rejects.toThrow(/durable intent/i);
+	});
+
+	it.each([
+		"--help",
+		"ticket/invalid..branch",
+		"ticket/invalid branch",
+		"@{-1}",
+	])("rejects invalid branch %s", async (branch) => {
+		const { workspace, input } = await fixture();
+		await expect(
+			workspace.prepare({ ...input, branch }, signal()),
+		).rejects.toThrow(/branch/i);
+	});
+
 	it("creates a named branch at the pinned base and reuses only its clean owned worktree", async () => {
 		const { repo, baseCommit, workspace, input } = await fixture();
 		const prepared = await workspace.prepare(input, signal());
@@ -134,6 +238,52 @@ describe("createExecutionWorkspace", () => {
 		).rejects.toThrow();
 	});
 
+	it.each(["rev-parse", "merge-base", "ls-tree"])(
+		"propagates operational %s failures instead of reporting absent prerequisites",
+		async (command) => {
+			const workspace = createExecutionWorkspace({
+				root: "/unused",
+				exec: async (args) =>
+					args.includes(command)
+						? { stdout: "", stderr: "fatal: bad config line 1", exitCode: 128 }
+						: { stdout: "a".repeat(40), stderr: "", exitCode: 0 },
+			});
+			await expect(
+				workspace.verifyPrerequisites(
+					"/repo",
+					"a".repeat(40),
+					[{ description: "dependency", ref: "main", paths: ["tracked.txt"] }],
+					signal(),
+				),
+			).rejects.toThrow(/exit 128.*bad config line 1/);
+		},
+	);
+
+	it("distinguishes missing prerequisite paths from existing literal paths", async () => {
+		const { repo, baseCommit, workspace } = await fixture();
+		await expect(
+			workspace.verifyPrerequisites(
+				repo,
+				baseCommit,
+				["tracked.txt", "missing.txt", "track*.txt"].map((path) => ({
+					description: path,
+					paths: [path],
+				})),
+				signal(),
+			),
+		).resolves.toMatchObject([
+			{ present: true, reason: null },
+			{
+				present: false,
+				reason: "path missing.txt is absent at the pinned base",
+			},
+			{
+				present: false,
+				reason: "path track*.txt is absent at the pinned base",
+			},
+		]);
+	});
+
 	it("refuses dirty reused worktrees without deleting their edits", async () => {
 		const { workspace, input } = await fixture();
 		const prepared = await workspace.prepare(input, signal());
@@ -186,6 +336,25 @@ describe("createExecutionWorkspace", () => {
 		expect(after.changedPaths.sort()).toEqual(["new file.txt", "tracked.txt"]);
 		expect(diff).toContain("modified");
 		expect(diff).toContain("untracked content");
+	});
+
+	it("captures the net tracked change across staged, unstaged, and committed edits", async () => {
+		const { workspace, input } = await fixture();
+		const { path } = await workspace.prepare(input, signal());
+		await writeFile(join(path, "tracked.txt"), "committed\n");
+		await git(path, ["add", "tracked.txt"]);
+		await git(path, ["commit", "-m", "phase"]);
+		await writeFile(join(path, "tracked.txt"), "staged\n");
+		await git(path, ["add", "tracked.txt"]);
+		expect(await workspace.diff(path, input.baseCommit, signal())).toContain(
+			"+staged",
+		);
+		await writeFile(join(path, "tracked.txt"), "base\n");
+		expect(await workspace.diff(path, input.baseCommit, signal())).toBe("");
+		await writeFile(join(path, "tracked.txt"), "unstaged\n");
+		const diff = await workspace.diff(path, input.baseCommit, signal());
+		expect(diff).toContain("+unstaged");
+		expect(diff).not.toContain("+staged");
 	});
 
 	it("rejects a diff that contains an untracked symlink instead of omitting it", async () => {

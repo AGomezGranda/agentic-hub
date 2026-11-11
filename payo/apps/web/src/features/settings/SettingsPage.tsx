@@ -29,6 +29,8 @@ interface SettingsForm {
 	pi: string;
 	acli: string;
 	git: string;
+	gh: string;
+	publication: NonNullable<PayoConfigDocument["publication"]>;
 	modelProvider: string;
 	modelId: string;
 	roles: Record<Role, RoleForm>;
@@ -372,6 +374,81 @@ export function SettingsPage({
 
 				<fieldset className="console-panel space-y-4">
 					<legend className="px-1 text-sm font-semibold uppercase tracking-widest">
+						Publication and ticket naming
+					</legend>
+					<p className="text-sm leading-6 text-[var(--muted)]">
+						Ticketed branches keep the exact ticket ID followed by one slash and
+						3–6 lowercase ASCII words separated by hyphens. Ticketed subjects
+						keep the exact [ticketId] prefix and a nonblank single-line
+						description. Ticketless runs use payo/&lt;execution-id&gt; and
+						descriptive subjects. Empty naming fields use defaults. Restart Payo
+						after saving.
+					</p>
+					<TextField
+						id="settings-gh"
+						label="GitHub CLI executable"
+						hint="Executable name or path. Empty uses gh. Treat this value as a trusted command."
+						error={fieldErrors.gh}
+						value={form.gh}
+						onChange={(value) => update("gh", value)}
+					/>
+					<TextField
+						id="settings-publication-remote"
+						label="Publication remote"
+						hint="Remote name. Empty uses origin."
+						error={fieldErrors["publication.remote"]}
+						value={form.publication.remote ?? ""}
+						onChange={(value) =>
+							update("publication", {
+								...form.publication,
+								remote: value || undefined,
+							})
+						}
+					/>
+					{(
+						[
+							[
+								"branch_template",
+								"Ticketed branch template",
+								"Supports {ticketId} and {slug}. Default: {ticketId}/{slug}. Literal words count toward the 3–6 word suffix.",
+							],
+							[
+								"commit_template",
+								"Ticketed commit template",
+								"Supports {ticketId} and {description}. Default: [{ticketId}] {description}.",
+							],
+							[
+								"pr_title_template",
+								"Ticketed PR title template",
+								"Supports {ticketId} and {description}. Default: [{ticketId}] {description}.",
+							],
+							[
+								"pr_body_template",
+								"PR body template",
+								"Supports {ticketId}, {prTitle}, {summary}, {changes}, {checks} and {executionId}. When omitted: Summary, Changes and Validation sections. Clear to use an empty body. Uses reviewed result summaries; Payo appends its publication marker separately.",
+							],
+						] as const
+					).map(([key, label, hint]) => (
+						<TextAreaField
+							key={key}
+							id={`settings-publication-${key}`}
+							label={label}
+							hint={hint}
+							error={fieldErrors[`publication.${key}`]}
+							value={form.publication[key] ?? ""}
+							onChange={(value) =>
+								update("publication", {
+									...form.publication,
+									[key]:
+										key === "pr_body_template" ? value : value || undefined,
+								})
+							}
+						/>
+					))}
+				</fieldset>
+
+				<fieldset className="console-panel space-y-4">
+					<legend className="px-1 text-sm font-semibold uppercase tracking-widest">
 						Global model
 					</legend>
 					<p className="text-sm leading-6 text-[var(--muted)]">
@@ -621,6 +698,8 @@ function formFromDocument(document: PayoConfigDocument): SettingsForm {
 		pi: document.tools?.pi ?? "",
 		acli: document.tools?.acli ?? "",
 		git: document.tools?.git ?? "",
+		gh: document.tools?.gh ?? "",
+		publication: document.publication ?? {},
 		modelProvider: document.model?.provider ?? "",
 		modelId: document.model?.id ?? "",
 		roles: Object.fromEntries(
@@ -747,12 +826,19 @@ function buildCandidate(form: SettingsForm): PayoConfigDocument {
 	const pi = form.pi.trim();
 	const acli = form.acli.trim();
 	const git = form.git.trim();
-	if (pi || acli || git)
+	const gh = form.gh.trim();
+	if (pi || acli || git || gh)
 		candidate.tools = {
 			...(pi ? { pi } : {}),
 			...(acli ? { acli } : {}),
 			...(git ? { git } : {}),
+			...(gh ? { gh } : {}),
 		};
+
+	const publication = Object.fromEntries(
+		Object.entries(form.publication).filter(([, value]) => value !== undefined),
+	);
+	if (Object.keys(publication).length > 0) candidate.publication = publication;
 
 	const model = pairValue(form.modelProvider, form.modelId);
 	if (model) candidate.model = model;
@@ -824,6 +910,8 @@ function fieldForIssue(path: readonly PropertyKey[]): string | undefined {
 	if (key === "tools.pi") return "pi";
 	if (key === "tools.acli") return "acli";
 	if (key === "tools.git") return "git";
+	if (key === "tools.gh") return "gh";
+	if (key.startsWith("publication.")) return key;
 	if (key === "model.provider") return "modelProvider";
 	if (key === "model.id") return "modelId";
 	const role = /^roles\.([a-z]+)\.(timeout_ms|model\.(provider|id))$/.exec(key);

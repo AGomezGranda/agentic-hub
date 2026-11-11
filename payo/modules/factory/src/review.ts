@@ -7,8 +7,8 @@ import {
 	VerifiedOutput,
 } from "@payo/contracts";
 import { fanOut, runAgentStep } from "@payo/kernel";
+import { decideReview } from "./domain/planning.ts";
 import { lenses, roleSpec } from "./roles.ts";
-import { decideReview } from "./state.ts";
 import {
 	type MutableFactoryHandle,
 	required,

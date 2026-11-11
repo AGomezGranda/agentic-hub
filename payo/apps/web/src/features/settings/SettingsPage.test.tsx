@@ -1,6 +1,12 @@
 // @vitest-environment jsdom
 import type { ConfigSettingsSnapshot } from "@payo/contracts";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import {
+	cleanup,
+	fireEvent,
+	render,
+	screen,
+	waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { PayoApiError } from "@web/shared/api/client.ts";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -367,4 +373,104 @@ it("restores the loaded document when changes are discarded", async () => {
 
 	expect(screen.getByLabelText("Server port")).toHaveValue(7331);
 	await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(false));
+});
+
+it("edits and round-trips publication fields and multiline body while preserving hidden settings", async () => {
+	const user = userEvent.setup();
+	vi.mocked(saveConfigSettings).mockImplementation(async (_token, input) => ({
+		...loaded,
+		revision: "rev-2",
+		document: input.document,
+	}));
+	await renderLoaded();
+	const values = {
+		"GitHub CLI executable": "/opt/gh",
+		"Publication remote": "upstream",
+		"Ticketed branch template": "{ticketId}/fix-{slug}",
+		"Ticketed commit template": "[{ticketId}] Fix {description}",
+		"Ticketed PR title template": "[{ticketId}] Add {description}",
+		"PR body template": "## Summary\n{summary}\n\n## Checks\n{checks}",
+	};
+	for (const [label, value] of Object.entries(values))
+		fireEvent.change(screen.getByLabelText(label), { target: { value } });
+	await user.click(screen.getByRole("button", { name: "Save settings" }));
+	await screen.findByText("Saved. Restart Payo to apply these settings.");
+	const document = {
+		...loaded.document,
+		tools: { ...loaded.document.tools, gh: "/opt/gh" },
+		publication: {
+			remote: "upstream",
+			branch_template: values["Ticketed branch template"],
+			commit_template: values["Ticketed commit template"],
+			pr_title_template: values["Ticketed PR title template"],
+			pr_body_template: values["PR body template"],
+		},
+	};
+	expect(saveConfigSettings).toHaveBeenCalledWith("token", {
+		revision: loaded.revision,
+		document,
+	});
+	for (const [label, value] of Object.entries(values))
+		expect(screen.getByLabelText(label)).toHaveValue(value);
+});
+
+it("preserves publication settings on unrelated saves and displays server policy errors", async () => {
+	const user = userEvent.setup();
+	const publication = {
+		remote: "upstream",
+		branch_template: "{ticketId}/{slug}",
+		commit_template: "[{ticketId}] {description}",
+		pr_title_template: "[{ticketId}] {description}",
+		pr_body_template: "Line one\n{summary}\n",
+	};
+	const document = {
+		...loaded.document,
+		publication,
+		tools: { gh: "/opt/gh" },
+	};
+	vi.mocked(getConfigSettings).mockResolvedValue({ ...loaded, document });
+	vi.mocked(saveConfigSettings).mockRejectedValue(
+		new PayoApiError(
+			400,
+			"invalid_request",
+			"publication.commit_template: must retain the exact ticket prefix",
+		),
+	);
+	await renderLoaded();
+	fireEvent.change(screen.getByLabelText("Base branch"), {
+		target: { value: "develop" },
+	});
+	await user.click(screen.getByRole("button", { name: "Save settings" }));
+	expect(saveConfigSettings).toHaveBeenCalledWith("token", {
+		revision: loaded.revision,
+		document: {
+			...document,
+			paths: { ...document.paths, base_branch: "develop" },
+		},
+	});
+	expect(await screen.findByRole("alert")).toHaveTextContent(
+		"publication.commit_template: must retain the exact ticket prefix",
+	);
+});
+
+it("preserves an explicitly empty PR body template on an unrelated save", async () => {
+	const document = {
+		...loaded.document,
+		publication: { pr_body_template: "" },
+	};
+	vi.mocked(getConfigSettings).mockResolvedValue({ ...loaded, document });
+	await renderLoaded();
+	fireEvent.change(screen.getByLabelText("Base branch"), {
+		target: { value: "develop" },
+	});
+	await userEvent
+		.setup()
+		.click(screen.getByRole("button", { name: "Save settings" }));
+	expect(saveConfigSettings).toHaveBeenCalledWith("token", {
+		revision: loaded.revision,
+		document: {
+			...document,
+			paths: { ...document.paths, base_branch: "develop" },
+		},
+	});
 });

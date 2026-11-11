@@ -13,6 +13,27 @@ afterEach(() => {
 	sessionStorage.clear();
 });
 
+it.each([
+	`${"a".repeat(79)}“`,
+	"“token”",
+	'"token"',
+	"Bearer token",
+	"token\nextra",
+	"café",
+	"",
+])("rejects a malformed token before fetch (%j)", async (token) => {
+	const fetchMock = vi.fn();
+	vi.stubGlobal("fetch", fetchMock);
+	await expect(
+		getJson("/example", token, "GET", (data) => data),
+	).rejects.toMatchObject({
+		status: 401,
+		code: "invalid_token",
+		message: expect.stringContaining("Paste only the token"),
+	});
+	expect(fetchMock).not.toHaveBeenCalled();
+});
+
 it("forwards authentication, cancellation and response validation for a GET", async () => {
 	const fetchMock = vi.fn(async () => Response.json({ value: 42 }));
 	vi.stubGlobal("fetch", fetchMock);

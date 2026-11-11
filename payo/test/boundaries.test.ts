@@ -5,6 +5,8 @@ import {
 	copyFileSync,
 	mkdirSync,
 	mkdtempSync,
+	readdirSync,
+	readFileSync,
 	rmSync,
 	writeFileSync,
 } from "node:fs";
@@ -39,6 +41,7 @@ const cases: BoundaryCase[] = [
 	["packages/kernel/src/a.ts", `import "@payo/git";`, KERNEL],
 	["packages/kernel/src/a.ts", `import "@payo/factory";`, KERNEL],
 	["packages/kernel/src/a.ts", `import "@payo/runner-fake";`, KERNEL],
+	["packages/kernel/src/a.ts", `import "@payo/gh";`, KERNEL],
 	[
 		"packages/kernel/src/a.ts",
 		`import type { X } from "@payo/git"; export type Y = X;`,
@@ -66,6 +69,8 @@ const cases: BoundaryCase[] = [
 	["modules/factory/src/a.ts", `import "@payo/kernel";`, undefined],
 	["modules/factory/src/a.ts", `import "@payo/kernel/testing";`, MODULES],
 	["adapters/runner-pi/src/a.ts", `import "@payo/git";`, ADAPTERS],
+	["adapters/gh/src/a.ts", `import "@payo/factory";`, ADAPTERS],
+	["adapters/gh/src/a.ts", `import "@payo/kernel";`, undefined],
 	["adapters/runner-pi/src/a.ts", `import "@payo/factory";`, ADAPTERS],
 	["adapters/runner-pi/src/a.ts", `import "@payo/kernel";`, undefined],
 	[
@@ -85,6 +90,7 @@ const cases: BoundaryCase[] = [
 		ADAPTERS,
 	],
 	["apps/cli/src/a.ts", `import "@payo/kernel";`, CLI],
+	["apps/cli/src/a.ts", `import "@payo/gh";`, CLI],
 	["apps/cli/src/a.ts", `import "@payo/server";`, CLI],
 	["apps/cli/src/a.ts", `import "@payo/contracts";`, undefined],
 	["apps/cli/src/a.ts", `import "@payo/config";`, undefined],
@@ -95,6 +101,7 @@ const cases: BoundaryCase[] = [
 	["apps/web/src/a.ts", `import "@payo/contracts";`, undefined],
 	["apps/web/src/a.ts", `import "@payo/config";`, WEB],
 	["apps/web/src/a.ts", `import "@payo/factory";`, WEB],
+	["apps/web/src/a.ts", `import "@payo/gh";`, WEB],
 	["apps/web/src/a.ts", `import "../../server/src/main.ts";`, RELATIVE_ESCAPE],
 	[
 		"apps/server/src/a.ts",
@@ -203,4 +210,19 @@ describe("package dependency rules (Biome noRestrictedImports)", () => {
 			expect(messages[0]).toContain(expected);
 		}
 	});
+});
+
+it("keeps factory filesystem access in infrastructure", () => {
+	const root = join(payoRoot, "modules/factory/src");
+	for (const file of readdirSync(root, { recursive: true, encoding: "utf8" })) {
+		if (
+			!file.endsWith(".ts") ||
+			file.endsWith(".test.ts") ||
+			file.startsWith("infrastructure/")
+		)
+			continue;
+		expect(readFileSync(join(root, file), "utf8"), file).not.toMatch(
+			/["'](?:node:)?fs(?:\/promises)?["']/,
+		);
+	}
 });

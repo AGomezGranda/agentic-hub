@@ -148,15 +148,28 @@ it("compares saved versions and confirms restore with current state", async () =
 			questions: [],
 			answers: {},
 		},
+		{
+			number: 3,
+			source: "agent",
+			markdown: "# Third",
+			questions: [],
+			answers: {},
+		},
 	]);
 	mount();
 	await user.click(await screen.findByRole("button", { name: "History" }));
 	await user.click(screen.getByRole("button", { name: "Version 1 · agent" }));
 	expect(screen.getByText("First")).toBeInTheDocument();
 	await user.click(screen.getByRole("button", { name: "Compare" }));
-	await user.click(
-		screen.getByRole("button", { name: "Use as baseline · v2" }),
-	);
+	expect(screen.getByRole("combobox", { name: "From" })).toHaveValue("3");
+	await user.selectOptions(screen.getByRole("combobox", { name: "From" }), "2");
+	expect(screen.getByText("− # Second")).toBeInTheDocument();
+	expect(screen.getByRole("combobox", { name: "To" })).toHaveValue("1");
+	await user.selectOptions(screen.getByRole("combobox", { name: "To" }), "2");
+	expect(screen.getByRole("combobox", { name: "From" })).toHaveValue("1");
+	expect(screen.getByText("+ # Second")).toBeInTheDocument();
+	await user.selectOptions(screen.getByRole("combobox", { name: "To" }), "1");
+	await user.selectOptions(screen.getByRole("combobox", { name: "From" }), "2");
 	expect(screen.getByText("+ # First")).toBeInTheDocument();
 	expect(screen.getByText("− # Second")).toBeInTheDocument();
 	await user.click(
@@ -490,15 +503,12 @@ it("opens the newest snapshot and compares to its predecessor with context", asy
 		screen.getByRole("button", { name: "Version 2 · human" }),
 	).toHaveAttribute("aria-pressed", "true");
 	await user.click(screen.getByRole("button", { name: "Compare" }));
-	expect(screen.getByText("v1 → v2")).toBeInTheDocument();
+	expect(screen.getByRole("combobox", { name: "From" })).toHaveValue("1");
+	expect(screen.getByRole("combobox", { name: "To" })).toHaveValue("2");
 	expect(screen.getByText("− Old")).toBeInTheDocument();
 	expect(screen.getByText("+ New")).toBeInTheDocument();
 	expect(screen.getByText("# Shared")).toBeInTheDocument();
 	expect(screen.getByText("End")).toBeInTheDocument();
-	expect(screen.getByRole("button", { name: "Baseline · v1" })).toHaveAttribute(
-		"aria-pressed",
-		"true",
-	);
 });
 
 it("launches an approved PR, preserves inputs on rejection, and navigates on acceptance", async () => {
@@ -533,23 +543,23 @@ it("launches an approved PR, preserves inputs on rejection, and navigates on acc
 				}),
 		);
 	mount(navigate);
-	await screen.findByRole("heading", { name: "Implementation" });
+	await screen.findByRole("heading", { name: "Planned PRs" });
 	expect(
-		screen.getByRole("button", { name: "Start empty locally" }),
+		screen.getByRole("button", { name: "Implement empty" }),
 	).toBeDisabled();
 	await user.click(screen.getByText("pr2 · Second"));
 	expect(screen.getByText("Build")).toBeVisible();
 	expect(screen.getByText("Verify")).toBeVisible();
 	await user.click(screen.getByText("Base branch · main"));
 	await user.type(screen.getByLabelText("Override base branch"), " feature ");
-	await user.click(screen.getByRole("button", { name: "Start pr2 locally" }));
+	await user.click(screen.getByRole("button", { name: "Implement pr2" }));
 	expect(await screen.findByRole("alert")).toHaveTextContent(
 		"Configure execution checks",
 	);
 	expect(screen.getByLabelText("Override base branch")).toHaveValue(
 		" feature ",
 	);
-	await user.click(screen.getByRole("button", { name: "Start pr2 locally" }));
+	await user.click(screen.getByRole("button", { name: "Implement pr2" }));
 	expect(screen.getByRole("button", { name: /starting/i })).toBeDisabled();
 	expect(api.implementRun).toHaveBeenLastCalledWith("token", RUN_ID, {
 		prId: "pr2",

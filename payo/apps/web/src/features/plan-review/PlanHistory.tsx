@@ -30,7 +30,13 @@ export function PlanHistory({
 	const target = ordered.find((v) => v.number === selected) ?? ordered[0];
 	const before =
 		ordered.find((v) => v.number === baseline && v.number !== target?.number) ??
-		ordered.find((v) => v.number < (target?.number ?? 0));
+		ordered.find((v) => v.number < (target?.number ?? 0)) ??
+		ordered.find((v) => v.number !== target?.number);
+	function selectVersion(version: number) {
+		setSelected(version);
+		setBaseline(undefined);
+		setConfirm(false);
+	}
 	return (
 		<section aria-label="Plan version history" className="space-y-4">
 			<header className="flex flex-wrap items-center justify-between gap-3">
@@ -65,11 +71,6 @@ export function PlanHistory({
 						className="border-b border-[var(--line)] p-3 md:border-r md:border-b-0"
 					>
 						<p className="console-eyebrow mb-3">VERSIONS · {versions.length}</p>
-						{compare ? (
-							<p className="mb-3 text-xs text-[var(--muted)]">
-								Choose a version to read, or mark another as the baseline.
-							</p>
-						) : null}
 						<ul className="space-y-2">
 							{ordered.map((v) => (
 								<li
@@ -84,27 +85,10 @@ export function PlanHistory({
 										className="w-full justify-start"
 										variant="quiet"
 										aria-pressed={v.number === target.number}
-										onClick={() => {
-											setSelected(v.number);
-											setBaseline(undefined);
-											setConfirm(false);
-										}}
+										onClick={() => selectVersion(v.number)}
 									>
 										Version {v.number} · {v.source}
 									</Button>
-									{compare && v.number !== target.number ? (
-										<Button
-											size="small"
-											variant="quiet"
-											aria-pressed={v.number === before?.number}
-											onClick={() => setBaseline(v.number)}
-										>
-											{v.number === before?.number
-												? "Baseline"
-												: "Use as baseline"}{" "}
-											· v{v.number}
-										</Button>
-									) : null}
 								</li>
 							))}
 						</ul>
@@ -138,13 +122,53 @@ export function PlanHistory({
 							</div>
 						</header>
 						{compare ? (
-							before ? (
-								<PlanComparison before={before} after={target} />
-							) : (
-								<p className="p-6 text-sm text-[var(--muted)]">
-									Select a baseline from the version list.
-								</p>
-							)
+							<>
+								<div className="grid grid-cols-1 items-end gap-3 border-b border-[var(--line)] bg-[var(--canvas)] p-4 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
+									<label className="grid min-w-0 gap-2 text-xs text-[var(--muted)]">
+										From
+										<select
+											className="min-h-11 w-full rounded-sm border border-[var(--line)] bg-[var(--surface)] px-3 text-sm text-[var(--ink)]"
+											value={before?.number ?? ""}
+											onChange={(event) =>
+												setBaseline(Number(event.target.value))
+											}
+										>
+											{ordered
+												.filter((v) => v.number !== target.number)
+												.map((v) => (
+													<option key={v.number} value={v.number}>
+														Version {v.number} · {v.source}
+													</option>
+												))}
+										</select>
+									</label>
+									<span
+										aria-hidden="true"
+										className="hidden pb-3 text-[var(--muted)] sm:block"
+									>
+										→
+									</span>
+									<label className="grid min-w-0 gap-2 text-xs text-[var(--muted)]">
+										To
+										<select
+											className="min-h-11 w-full rounded-sm border border-[var(--line)] bg-[var(--surface)] px-3 text-sm text-[var(--ink)]"
+											value={target.number}
+											onChange={(event) =>
+												selectVersion(Number(event.target.value))
+											}
+										>
+											{ordered.map((v) => (
+												<option key={v.number} value={v.number}>
+													Version {v.number} · {v.source}
+												</option>
+											))}
+										</select>
+									</label>
+								</div>
+								{before ? (
+									<PlanComparison before={before} after={target} />
+								) : null}
+							</>
 						) : (
 							<div className="p-4 sm:p-6">
 								<Markdown>{target.markdown}</Markdown>
@@ -205,9 +229,6 @@ function PlanComparison({
 	const changed = diff.removed.length > 0 || diff.added.length > 0;
 	return (
 		<div className="space-y-3 p-4">
-			<h4 className="console-eyebrow">
-				v{before.number} → v{after.number}
-			</h4>
 			{!changed ? (
 				<p>No changes between these versions.</p>
 			) : (

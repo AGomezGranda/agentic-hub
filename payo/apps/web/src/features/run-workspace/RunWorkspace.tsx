@@ -2,10 +2,12 @@ import { PlanReview } from "@web/features/plan-review/PlanReview.tsx";
 import { Button } from "@web/shared/ui/Button.tsx";
 import { type ReactNode, useState } from "react";
 import { ActivityTimeline } from "./ActivityTimeline.tsx";
+import { CostPanel } from "./CostPanel.tsx";
 import { ExecutionView } from "./ExecutionView.tsx";
 import { StageStrip } from "./StageStrip.tsx";
 import { SwarmView } from "./SwarmView.tsx";
 import { useRunActivity } from "./useRunActivity.ts";
+import { WorkspaceActions } from "./WorkspaceActions.tsx";
 
 export function RunWorkspace({
 	token,
@@ -19,7 +21,7 @@ export function RunWorkspace({
 	onSelectRun: (runId: string) => void;
 }) {
 	const [view, setView] = useState<
-		"swarm" | "decision" | "activity" | "execution" | null
+		"swarm" | "decision" | "activity" | "execution" | "code-review" | null
 	>(null);
 	const { run, history, connection, connectionError, events } = useRunActivity(
 		token,
@@ -39,7 +41,14 @@ export function RunWorkspace({
 	const approved =
 		run.data.status === "ended" && run.data.outcome === "approved";
 	const selectedView =
-		view ?? (execution ? "execution" : approved ? "decision" : "swarm");
+		view ??
+		(execution
+			? execution.scope === "final"
+				? "code-review"
+				: "execution"
+			: approved
+				? "decision"
+				: "swarm");
 	const item = run.data.workItem;
 	const statusLabel =
 		connection === "loading"
@@ -67,7 +76,9 @@ export function RunWorkspace({
 				<div className="flex flex-wrap items-start justify-between gap-4">
 					<div className="min-w-0">
 						<p className="mb-2 text-[10px] font-bold tracking-[0.14em] text-[var(--muted)]">
-							RUN WORKSPACE
+							{execution
+								? `PR WORKSPACE · ${execution.prId}`
+								: "PLAN WORKSPACE"}
 						</p>
 						<h1 className="break-words text-2xl font-semibold tracking-tight sm:text-3xl">
 							{item?.title ?? "Work item unresolved"}
@@ -89,7 +100,9 @@ export function RunWorkspace({
 						</span>
 						<span className="rounded-sm border border-[var(--line)] px-3 py-1.5 text-xs font-semibold capitalize text-[var(--muted)]">
 							{run.data.status === "active"
-								? "Active"
+								? execution?.stage === "Escalated"
+									? "Paused · Needs attention"
+									: "Active"
 								: run.data.outcome
 									? `Ended · ${run.data.outcome}`
 									: "Ended"}
@@ -105,6 +118,12 @@ export function RunWorkspace({
 						</Button>
 					</div>
 				</div>
+				<WorkspaceActions
+					key={runId}
+					token={token}
+					runId={runId}
+					path={execution?.worktree ?? run.data.repo}
+				/>
 				{connectionError ? (
 					<p
 						className={`mt-4 rounded-sm px-3 py-2.5 text-sm ${isConnectionAlert ? "border border-[var(--danger-border)] bg-[var(--danger-surface)] text-[var(--danger)]" : "bg-[var(--surface-raised)] text-[var(--muted)]"}`}
@@ -118,22 +137,36 @@ export function RunWorkspace({
 						<StageStrip stage={run.data.stage} />
 					</div>
 				)}
-				{run.data.openGates.length > 0 && (
-					<div className="mt-3 rounded-sm border border-[var(--warning-border)] bg-[var(--warning-surface)] px-4 py-3 text-sm text-[var(--status-warn)]">
-						<span className="font-semibold">
-							Needs attention:{" "}
-							{run.data.openGates.map((gate) => gate.kind).join(", ")}
-						</span>{" "}
-						<button
-							type="button"
-							className="font-semibold underline"
-							onClick={() => setView(execution ? "execution" : "decision")}
-						>
-							{execution ? "View execution" : "Review decision"}
-						</button>
-					</div>
-				)}
+				{run.data.openGates.length > 0 &&
+					(!execution ||
+						selectedView === "activity" ||
+						!run.data.openGates.some(
+							(gate) => gate.kind === "execution-escalation",
+						)) && (
+						<div className="mt-3 rounded-sm border border-[var(--warning-border)] bg-[var(--warning-surface)] px-4 py-3 text-sm text-[var(--status-warn)]">
+							<span className="font-semibold">
+								Needs attention:{" "}
+								{run.data.openGates.map((gate) => gate.kind).join(", ")}
+							</span>{" "}
+							<button
+								type="button"
+								className="font-semibold underline"
+								onClick={() =>
+									setView(
+										execution
+											? execution.scope === "final"
+												? "code-review"
+												: "execution"
+											: "decision",
+									)
+								}
+							>
+								{execution ? "Open PR workspace" : "Review plan"}
+							</button>
+						</div>
+					)}
 			</section>
+			<CostPanel key={runId} token={token} runId={runId} />
 			<nav
 				aria-label="Run views"
 				className="flex flex-wrap gap-1 border-b border-[var(--line)]"
@@ -141,15 +174,16 @@ export function RunWorkspace({
 				{(
 					(execution
 						? [
-								["execution", "Execution view"],
+								["execution", "Implementation"],
+								["code-review", "Code review"],
 								["activity", "Activity view"],
 							]
 						: [
 								["swarm", "Swarm view"],
-								["decision", approved ? "Implementation" : "Decision view"],
+								["decision", "Plan"],
 								["activity", "Activity view"],
 							]) as readonly (readonly [
-						"swarm" | "decision" | "activity" | "execution",
+						"swarm" | "decision" | "activity" | "execution" | "code-review",
 						string,
 					])[]
 				).map(([value, label]) => (
@@ -164,8 +198,25 @@ export function RunWorkspace({
 					</button>
 				))}
 			</nav>
-			{selectedView === "execution" && execution ? (
+			{(selectedView === "execution" || selectedView === "code-review") &&
+			execution ? (
 				<ExecutionView
+					activity={
+						history.isPending ? (
+							<WorkspaceMessage>Loading agent activity…</WorkspaceMessage>
+						) : history.error ? (
+							<HistoryError
+								error={history.error}
+								onRetry={() => void history.refetch()}
+							/>
+						) : (
+							<SwarmView
+								events={events}
+								onOpenWorkspace={() => setView("activity")}
+							/>
+						)
+					}
+					view={selectedView === "code-review" ? "review" : "implementation"}
 					execution={execution}
 					gate={
 						run.data.openGates.find(

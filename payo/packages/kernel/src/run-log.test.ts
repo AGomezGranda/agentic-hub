@@ -34,11 +34,29 @@ describe("openRunLog", () => {
 		await expect(log.write([body.stepFinished("missing")])).rejects.toThrow(
 			/unknown|not running/,
 		);
-		expect(log.current()).toBe(started);
+		expect(log.current()).toEqual(started);
 
 		const next = await log.write([body.stepStarted("s1")]);
 		expect(next.steps.get("s1")?.status).toBe("running");
 		expect(next.lastSeq).toBe(2);
+	});
+	it("keeps its state detached from inputs and returned snapshots", async () => {
+		const store = createMemoryRunStore();
+		const started = await startRun(store, testRunInput("r1"));
+		const log = openRunLog(store, started);
+		started.steps.set("fake", {
+			stepId: "fake",
+			name: "fake",
+			status: "running",
+		});
+		expect(log.current().steps.has("fake")).toBe(false);
+		const written = await log.write([body.stepStarted("s1")]);
+		written.steps.clear();
+		expect(log.current().steps.has("s1")).toBe(true);
+		log.current().steps.clear();
+		expect(log.current().steps.has("s1")).toBe(true);
+		await expect(log.write([body.stepFinished("s1")])).resolves.toBeDefined();
+		expect(log.current()).toEqual(fold(await store.read("r1")));
 	});
 	it("commits the bodies as they were when write was called, element by element", async () => {
 		const store = createMemoryRunStore();

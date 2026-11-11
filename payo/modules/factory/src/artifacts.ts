@@ -85,3 +85,21 @@ export async function readArtifact(
 		throw new Error("artifact bytes do not match reference");
 	return bytes;
 }
+
+export async function loadCheckpoint(
+	store: RunStore,
+	events: RunEvent[],
+): Promise<FactoryCheckpoint> {
+	const event = events.findLast(
+		(item) =>
+			item.type === "artifact.recorded" &&
+			item.artifact.kind === "factory-checkpoint-v1",
+	);
+	if (event?.type !== "artifact.recorded")
+		throw new Error("factory checkpoint not found");
+	return FactoryCheckpoint.parse(
+		JSON.parse(
+			new TextDecoder().decode(await readArtifact(store, event.artifact)),
+		),
+	);
+}

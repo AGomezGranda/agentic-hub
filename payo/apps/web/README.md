@@ -12,6 +12,22 @@ partial batch until an attempt ends. Select an agent to inspect its recorded
 output, which may contain sensitive text. Server status, run creation and the
 shared TOML **Settings** editor each have their own page in the main navigation.
 
+Planning workspaces offer Swarm view, Plan, and Activity view. Approved plans
+have explicit per-PR implementation actions. Execution workspaces offer
+Implementation, Code review, and Activity view, including phase progress,
+checks, finding evidence, verifier decisions, coverage, and saved review context.
+Plan-issue gates support clarification answers, unchanged retry, or a new
+corrected planning run; corrections keep the original execution paused and do
+not transfer its edits. Header actions open the repository or execution worktree
+in Terminal or VS Code on the server machine (macOS/Linux).
+
+Each workspace shows the combined cost of planning and all PR executions, with
+an expandable breakdown by run, step and attempt. Currency and reporting basis
+stay separate; partial and unknown coverage are labeled. Costs refresh every
+five seconds while any included run is active, and after workspace updates.
+The authenticated `GET /api/v1/runs/:runId/costs` endpoint returns the same work
+cost tree from either a planning run or an execution run.
+
 The connection screen accepts a loopback port (default `7331`) and keeps only
 that port in `sessionStorage`; the bearer token remains memory-only. After
 changing `[server].port`, restart Payo and reconnect at the new port. The

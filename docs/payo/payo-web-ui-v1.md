@@ -13,8 +13,9 @@ app; this document no longer tracks phase completion. The current console
 includes run creation/listing, a live run workspace, plan review and gate
 actions, prompt-driven plan revisions and version restore, and a Settings page.
 It has no freeform plan editor, so direct plan edits remain in the user's editor.
-The Payo workflow still stops at plan approval and does not implement code or
-create PRs. See the [usage guide](usage.md) for supported
+Approved plans can now start linked local PR executions with phase progress,
+checks, code review, plan-issue recovery, and work-cost reporting. Payo does not
+push or create PRs. See the [usage guide](usage.md) for supported
 behavior and [`payo/apps/web/README.md`](../../payo/apps/web/README.md) for source
 layout and dependency boundaries.
 

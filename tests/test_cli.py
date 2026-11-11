@@ -27,6 +27,35 @@ def setup_agents(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return src
 
 
+@pytest.mark.parametrize("command", [["install", "demo"], ["sync"]])
+def test_shared_targets_are_processed_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    command: list[str],
+) -> None:
+    src = setup_agents(tmp_path, monkeypatch)
+    make_skill(src, "demo")
+    shared = (tmp_path / ".agents/skills", "symlink")
+    monkeypatch.setattr(
+        agents, "AGENTS", dict.fromkeys(("pi", "opencode", "codex"), shared)
+    )
+    install = Mock(wraps=agents.install_one)
+    remove = Mock(wraps=agents.remove_one)
+    monkeypatch.setattr(agents, "install_one", install)
+    monkeypatch.setattr(agents, "remove_one", remove)
+    caplog.set_level(logging.INFO, logger="agentic-hub")
+
+    cli.main(command)
+    install.assert_called_once_with("pi", "demo")
+    assert all(agents.status(h, "demo") == "linked" for h in agents.AGENTS)
+
+    cli.main(["remove", "demo", "--agent", "codex,pi,opencode"])
+    remove.assert_called_once_with("codex", "demo")
+    assert "removed 1/1" in caplog.text
+    assert all(agents.status(h, "demo") == "missing" for h in agents.AGENTS)
+
+
 @pytest.mark.parametrize(
     "command", [["sync"], ["install", "demo"], ["remove", "demo"], ["mode", "status"]]
 )

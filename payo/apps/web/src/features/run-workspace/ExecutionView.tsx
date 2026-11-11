@@ -1,24 +1,34 @@
 import type { ExecutionSummary, OpenGateSummary } from "@payo/contracts";
 import { resumeRun } from "@web/features/plan-review/api.ts";
 import { Button } from "@web/shared/ui/Button.tsx";
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
+import { ExecutionPlanIssues } from "./ExecutionPlanIssues.tsx";
+import { ExecutionProgress } from "./ExecutionProgress.tsx";
+import { ExecutionReview, ExecutionReviewContext } from "./ExecutionReview.tsx";
 
 export function ExecutionView({
 	execution,
+	view = "implementation",
 	gate,
 	token,
 	onRefresh,
 	onSelectRun,
+	activity,
 }: {
 	execution: ExecutionSummary;
+	view?: "implementation" | "review";
 	gate: OpenGateSummary | null;
 	token: string;
 	onRefresh: () => Promise<void>;
 	onSelectRun: (runId: string) => void;
+	activity?: ReactNode;
 }) {
 	const { review } = execution;
 	const [pending, setPending] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+	const retryPreparation =
+		execution.pausedOperation === "Prepare" ||
+		execution.statusDetail === "manifest-invalid";
 	const resume = async () => {
 		setPending(true);
 		setError(null);
@@ -26,17 +36,98 @@ export function ExecutionView({
 			await resumeRun(token, execution.runId);
 		} catch (err) {
 			setError(
-				err instanceof Error ? err.message : "Could not resume execution.",
+				err instanceof Error ? err.message : "Could not resume PR work.",
 			);
 		} finally {
-			await onRefresh();
-			setPending(false);
+			try {
+				await onRefresh();
+			} finally {
+				setPending(false);
+			}
 		}
 	};
-	const gateAction = gate && (
-		<div>
-			<h3 className="font-semibold">Execution gate</h3>
-			<p className="break-words">{gate.reason}</p>
+	const planConflict = !!execution.planIssues?.length;
+	const final = execution.scope === "final";
+	const phases = execution.phases ?? [];
+	const passedChecks = execution.checks.filter(
+		(check) => check.status === "passed",
+	).length;
+	const orderedChecks = [...execution.checks].sort(
+		(left, right) =>
+			Number(left.status === "passed") - Number(right.status === "passed"),
+	);
+	const checksPanel = (
+		<div className="execution-panel">
+			<div className="execution-section-title">
+				<h3>Latest checks</h3>
+				{execution.checks.length > 0 && (
+					<span>
+						{passedChecks} / {execution.checks.length} passed
+					</span>
+				)}
+			</div>
+			{execution.checks.length > 0 && (
+				<p className="text-xs text-[var(--muted)]">
+					{view === "review"
+						? review?.details?.checksAreLatest
+							? "Latest checks are the checks referenced by this review."
+							: "Latest execution checks; association with this review is not established."
+						: "From the most recent check run."}
+				</p>
+			)}
+			{execution.checks.length ? (
+				<ul className="execution-checks">
+					{orderedChecks.map((check) => (
+						<li key={check.name}>
+							<span>{check.name}</span>
+							<span
+								className={
+									check.status === "passed"
+										? "text-[var(--status-good)]"
+										: "text-[var(--danger)]"
+								}
+							>
+								{check.status}
+							</span>
+							{check.output && (
+								<details className="w-full">
+									<summary>Failure output for {check.name}</summary>
+									<pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words">
+										{check.output}
+									</pre>
+								</details>
+							)}
+						</li>
+					))}
+				</ul>
+			) : (
+				<p>No check results available</p>
+			)}
+		</div>
+	);
+	const retry = gate && (
+		<div className="execution-retry">
+			{view === "implementation" &&
+				review?.blockers?.map((finding) => (
+					<div key={finding.id}>
+						<h4 className="font-semibold">{finding.title}</h4>
+						{finding.path && (
+							<code>
+								{finding.path}
+								{finding.line && `:${finding.line}`}
+							</code>
+						)}
+						<p>{finding.evidence}</p>
+						<p>Suggested fix: {finding.suggestedFix}</p>
+					</div>
+				))}
+			<p>
+				{retryPreparation
+					? "Preparation stopped before implementation started. Retry preparation checks the workspace and prepares the approved plan again."
+					: planConflict
+						? "Retry all reported issues using the approved plan and retained edits, without adding answers. Editing the worktree yourself is optional."
+						: `Resume continues this run from ${execution.scope === "final" ? "final validation" : `phase ${execution.phaseIndex + 1}`} using the approved plan and retained edits. Completed phases are preserved.`}
+			</p>
 			<Button
 				type="button"
 				disabled={
@@ -46,209 +137,175 @@ export function ExecutionView({
 				}
 				onClick={() => void resume()}
 			>
-				Resume
+				{pending
+					? "Checking workspace…"
+					: retryPreparation
+						? "Retry preparation"
+						: planConflict
+							? "Retry on approved plan"
+							: "Resume"}
 			</Button>
-			{error && <p role="alert">{error}</p>}
+			{pending && (
+				<p role="status">Checking the retained workspace before continuing…</p>
+			)}
+			{error && (
+				<div role="alert">
+					<p className="font-semibold">Execution could not resume</p>
+					<p className="break-words">{error}</p>
+				</div>
+			)}
 		</div>
 	);
-	const phases = execution.phases ?? [];
-	const final = execution.scope === "final";
-	const activePhase =
-		!final && execution.stage !== "Prepare"
-			? phases[execution.phaseIndex]
-			: undefined;
-	const stageLabel = gate
-		? "Awaiting input"
-		: execution.status === "ended"
-			? execution.outcome
-			: execution.stage;
 	return (
-		<section className="min-w-0 space-y-5 text-sm">
-			<h2 className="text-xl font-semibold">Execution · {execution.prId}</h2>
-			<a
-				className="break-all underline"
-				href={`/runs/${execution.sourceRunId}`}
-				onClick={(event) => {
-					if (
-						event.button !== 0 ||
-						event.metaKey ||
-						event.ctrlKey ||
-						event.shiftKey ||
-						event.altKey
-					)
-						return;
-					event.preventDefault();
-					onSelectRun(execution.sourceRunId);
-				}}
-			>
-				Open source run
-			</a>
-
-			{phases.length > 0 && (
-				<section aria-label="Implementation progress">
-					<h3 className="font-semibold">Implementation progress</h3>
-					<ol className="mt-2 divide-y divide-[var(--line)] rounded-sm border border-[var(--line)]">
-						{phases.map((phase) => {
-							const receipt = execution.completedPhases.find(
-								(item) => item.id === phase.id,
-							);
-							const active = activePhase?.id === phase.id;
-							return (
-								<li
-									key={phase.id}
-									className="px-4 py-3"
-									aria-current={active ? "step" : undefined}
-								>
-									<div className="flex flex-wrap justify-between gap-2">
-										<span className="font-semibold">{phase.title}</span>
-										<span>
-											{receipt
-												? "Completed"
-												: active
-													? stageLabel
-													: execution.status === "ended"
-														? "Not completed"
-														: "Upcoming"}
-										</span>
-									</div>
-									{receipt && (
-										<code className="break-all">{receipt.resultCommit}</code>
-									)}
-									{active && gateAction}
-								</li>
-							);
-						})}
-						<li className="px-4 py-3" aria-current={final ? "step" : undefined}>
-							<div className="flex flex-wrap justify-between gap-2">
-								<span className="font-semibold">Final PR review</span>
-								<span>
-									{final
-										? stageLabel
-										: execution.status === "ended"
-											? "Not started"
-											: "Upcoming"}
-								</span>
-							</div>
-							{final && gateAction}
-						</li>
-					</ol>
-				</section>
-			)}
-			{!activePhase && !(final && phases.length) && gateAction}
-
-			<div>
-				<h3 className="font-semibold">
-					{execution.status === "ended" && execution.outcome === "reviewed"
-						? "Reviewed result"
-						: "Local workspace"}
-				</h3>
-				<p>
-					Branch:{" "}
-					<span className="select-text break-all">
-						{execution.branch ?? "Unavailable"}
-					</span>
-				</p>
-				<p>
-					Worktree:{" "}
-					<span className="select-text break-all">
-						{execution.worktree ?? "Unavailable"}
-					</span>
-				</p>
-				{execution.status === "ended" && execution.outcome === "reviewed" && (
-					<p>
-						Result commit:{" "}
-						<span className="select-text break-all">
-							{execution.resultCommit ?? "Unavailable"}
-						</span>
-					</p>
-				)}
-			</div>
-			<div>
-				<h3 className="font-semibold">Current progress</h3>
-				<p>Stage: {execution.stage}</p>
-				<p>
-					{execution.scope === "final"
-						? "Final scope"
-						: execution.phaseIndex < execution.phaseCount
-							? `Phase ${execution.phaseIndex + 1} of ${execution.phaseCount}`
-							: "Phase unavailable"}
-				</p>
-				{execution.statusDetail && (
-					<p className="break-words">{execution.statusDetail}</p>
-				)}
-				<p>
-					Current checkpoint:{" "}
-					{review
-						? `Round ${review.round} · ${review.unresolved} unresolved`
-						: "round and unresolved count unavailable"}
-				</p>
-			</div>
-			{!phases.length && (
+		<section className="execution-view min-w-0 space-y-4 text-sm">
+			<header className="execution-summary">
 				<div>
-					<h3 className="font-semibold">Completed phases</h3>
-					{execution.completedPhases.length ? (
-						<ul>
-							{execution.completedPhases.map((phase) => (
-								<li key={phase.id}>
-									<span>{phase.title}</span> ·{" "}
-									<span className="select-text break-all">
-										{phase.resultCommit}
-									</span>
-								</li>
-							))}
-						</ul>
-					) : (
-						<p>No completed phases</p>
+					<p className="execution-label">
+						{final
+							? "Final scope"
+							: execution.phaseIndex < execution.phaseCount
+								? `Phase ${execution.phaseIndex + 1} of ${execution.phaseCount}`
+								: "Phase unavailable"}
+					</p>
+					<h2>
+						{gate
+							? execution.pausedOperation
+								? `Paused during ${execution.pausedOperation}`
+								: "Awaiting input"
+							: execution.status === "ended"
+								? execution.outcome === "reviewed"
+									? "Implementation reviewed"
+									: `Execution ${execution.outcome ?? "ended"}`
+								: execution.stage}
+					</h2>
+					{!gate && execution.statusDetail && (
+						<p className="text-[var(--muted)]">
+							{execution.statusDetail.replaceAll("-", " ")}
+						</p>
 					)}
 				</div>
-			)}
-			<div>
-				<h3 className="font-semibold">Latest checks</h3>
-				<p>Latest reports may relate to earlier progress.</p>
-				{execution.checks.length ? (
-					<ul>
-						{execution.checks.map((check) => (
-							<li key={check.name}>
-								{check.name} · {check.status}
-							</li>
-						))}
-					</ul>
-				) : (
-					<p>No check results available</p>
-				)}
-			</div>
-			<div>
-				<h3 className="font-semibold">Latest review</h3>
-				{review ? (
-					<>
-						<p>{review.findings} findings</p>
-						{review.uncheckedLenses.length > 0 && (
-							<>
-								<p>Unchecked lenses</p>
+				<a
+					className="break-all underline"
+					href={`/runs/${execution.sourceRunId}`}
+					onClick={(event) => {
+						if (
+							event.button !== 0 ||
+							event.metaKey ||
+							event.ctrlKey ||
+							event.shiftKey ||
+							event.altKey
+						)
+							return;
+						event.preventDefault();
+						onSelectRun(execution.sourceRunId);
+					}}
+				>
+					Back to approved plan
+				</a>
+			</header>
+			<div className="execution-layout">
+				<div className="execution-main">
+					{gate && (
+						<section className="execution-alert">
+							{planConflict ? (
+								<ExecutionPlanIssues
+									key={gate.gateId}
+									execution={execution}
+									gate={gate}
+									token={token}
+									onSelectRun={onSelectRun}
+									onRefresh={onRefresh}
+								>
+									{retry}
+								</ExecutionPlanIssues>
+							) : (
+								<>
+									<h3>Needs attention</h3>
+									<p className="whitespace-pre-wrap break-words">
+										{gate.reason}
+									</p>
+
+									{retry}
+								</>
+							)}
+						</section>
+					)}
+
+					{view === "review" && <ExecutionReview review={review} />}
+					{view === "implementation" && checksPanel}
+					{execution.artifactIssues.length > 0 && (
+						<div role="status" className="execution-alert">
+							<h3 className="font-semibold">Artifact issues</h3>
+							<ul>
+								{execution.artifactIssues.map((issue) => (
+									<li className="break-all" key={issue}>
+										{issue}
+									</li>
+								))}
+							</ul>
+						</div>
+					)}
+				</div>
+				<aside className="execution-rail" aria-label="Execution context">
+					{view === "review" && (
+						<>
+							{review && <ExecutionReviewContext review={review} />}
+							{checksPanel}
+						</>
+					)}
+					{view === "implementation" && phases.length > 0 && (
+						<ExecutionProgress execution={execution} />
+					)}
+					{view === "implementation" &&
+						!phases.length &&
+						execution.completedPhases.length > 0 && (
+							<div className="execution-panel">
+								<h3 className="font-semibold">Completed phases</h3>
 								<ul>
-									{review.uncheckedLenses.map((lens) => (
-										<li key={lens}>{lens}</li>
+									{execution.completedPhases.map((phase) => (
+										<li key={phase.id}>
+											<span>{phase.title}</span> ·{" "}
+											<span className="select-text break-all">
+												{phase.resultCommit}
+											</span>
+										</li>
 									))}
 								</ul>
-							</>
+							</div>
 						)}
-					</>
-				) : (
-					<p>No review evidence available</p>
+					<div className="execution-panel execution-worktree">
+						<h3 className="font-semibold">
+							{execution.status === "ended" && execution.outcome === "reviewed"
+								? "Reviewed result"
+								: "Local workspace"}
+						</h3>
+						<p>
+							Branch:{" "}
+							<span className="select-text break-all">
+								{execution.branch ?? "Unavailable"}
+							</span>
+						</p>
+						<p>
+							Worktree:{" "}
+							<span className="select-text break-all">
+								{execution.worktree ?? "Unavailable"}
+							</span>
+						</p>
+						{execution.status === "ended" &&
+							execution.outcome === "reviewed" && (
+								<p>
+									Result commit:{" "}
+									<span className="select-text break-all">
+										{execution.resultCommit ?? "Unavailable"}
+									</span>
+								</p>
+							)}
+					</div>
+				</aside>
+				{view === "implementation" && activity && (
+					<div className="execution-swarm console-panel">{activity}</div>
 				)}
 			</div>
-			{execution.artifactIssues.length > 0 && (
-				<div role="status">
-					<h3 className="font-semibold">Artifact issues</h3>
-					<ul>
-						{execution.artifactIssues.map((issue) => (
-							<li className="break-all" key={issue}>
-								{issue}
-							</li>
-						))}
-					</ul>
-				</div>
-			)}
 		</section>
 	);
 }

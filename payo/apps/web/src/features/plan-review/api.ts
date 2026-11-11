@@ -4,6 +4,7 @@ import {
 	PlanUpdateRequest,
 	PlanVersionDetail,
 	PlanVersionList,
+	ResumeRequest,
 	RunIdResponse,
 	RunReview,
 	type RunSummary,
@@ -116,12 +117,14 @@ export async function requestChanges(
 export async function resumeRun(
 	token: string,
 	runId: string,
+	input?: ResumeRequest,
 ): Promise<{ runId: string }> {
 	return getJson(
 		`/runs/${encodeURIComponent(runId)}/resume`,
 		token,
 		"POST",
 		(data) => RunIdResponse.parse(data),
+		input ? ResumeRequest.parse(input) : undefined,
 	);
 }
 

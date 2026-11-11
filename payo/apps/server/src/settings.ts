@@ -1,13 +1,14 @@
 import {
 	activeEnvironmentOverrides,
-	readPayoConfigDocument,
+	type readPayoConfigDocument,
 	resolvePayoConfigDocument,
-	writePayoConfigDocument,
+	type writePayoConfigDocument,
 } from "@payo/config";
 import {
 	ConfigSettingsSnapshot,
 	SaveConfigSettingsRequest,
 } from "@payo/contracts";
+import { validatePublicationPolicy } from "@payo/factory";
 import { assertRealModeRoleModels } from "./config.ts";
 
 export interface ConfigSettingsService {
@@ -21,12 +22,14 @@ export interface ConfigSettingsOptions {
 	env: NodeJS.ProcessEnv;
 	cwd: string;
 	devFakes: boolean;
+	readConfig: typeof readPayoConfigDocument;
+	writeConfig: typeof writePayoConfigDocument;
 }
 
 export function createConfigSettingsService(
 	options: ConfigSettingsOptions,
 ): ConfigSettingsService {
-	const { configFile, env, cwd, devFakes } = options;
+	const { configFile, env, cwd, devFakes, readConfig, writeConfig } = options;
 
 	function withOverrides(read: {
 		configFile: string;
@@ -41,14 +44,15 @@ export function createConfigSettingsService(
 
 	return {
 		async snapshot() {
-			return withOverrides(readPayoConfigDocument(configFile));
+			return withOverrides(readConfig(configFile));
 		},
 
 		async save(request) {
 			const input = SaveConfigSettingsRequest.parse(request);
 			const candidate = resolvePayoConfigDocument(input.document, env, cwd);
 			assertRealModeRoleModels(candidate.roles, devFakes);
-			const written = await writePayoConfigDocument(
+			validatePublicationPolicy(candidate.publication);
+			const written = await writeConfig(
 				configFile,
 				input.document,
 				input.revision,

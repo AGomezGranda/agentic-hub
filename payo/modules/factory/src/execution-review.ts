@@ -1,6 +1,5 @@
 import {
 	type ArtifactRef,
-	type ExecutionCheckpoint,
 	ExecutionManifest as ExecutionManifestSchema,
 	ExecutionRunConfig as ExecutionRunConfigSchema,
 	ExecutionScopeMap,
@@ -13,7 +12,11 @@ import {
 } from "@payo/contracts";
 import { fanOut, runAgentStep } from "@payo/kernel";
 import { readArtifact } from "./artifacts.ts";
-import { storeExecutionCheckpoint } from "./execution-artifacts.ts";
+import {
+	decideImplementationReview,
+	MAX_DIFF_BYTES,
+} from "./domain/execution.ts";
+import { checkpoint as writeReviewCheckpoint } from "./execution/checkpoint.ts";
 import type {
 	ExecutionHandle,
 	ExecutionReviewRoleSnapshots,
@@ -27,11 +30,6 @@ import {
 	IMPLEMENTATION_LENSES,
 	type ImplementationLens,
 } from "./execution-roles.ts";
-import {
-	applyExecutionCheckpoint,
-	decideImplementationReview,
-	MAX_DIFF_BYTES,
-} from "./execution-state.ts";
 
 export const IMPLEMENTATION_REVIEW_LENSES = Object.keys(
 	IMPLEMENTATION_LENSES,
@@ -148,6 +146,7 @@ export async function reviewMutableImplementation(
 		scope === "final"
 			? {
 					scope,
+					issueAnswers: checkpoint.issueAnswers ?? [],
 					pr: manifest.pr,
 					phases: manifest.phases,
 					phaseIndex: checkpoint.phaseIndex,
@@ -161,6 +160,7 @@ export async function reviewMutableImplementation(
 				}
 			: {
 					scope,
+					issueAnswers: checkpoint.issueAnswers ?? [],
 					phase,
 					phaseIndex: checkpoint.phaseIndex,
 					startCommit,
@@ -377,6 +377,8 @@ export async function reviewMutableImplementation(
 			state,
 			{
 				scope,
+				round: checkpoint.round,
+				phaseIndex: checkpoint.phaseIndex,
 				fingerprint: before.fingerprint,
 				afterFingerprint: afterReview.fingerprint,
 				discarded: true,
@@ -410,6 +412,8 @@ export async function reviewMutableImplementation(
 		state,
 		{
 			scope,
+			round: checkpoint.round,
+			phaseIndex: checkpoint.phaseIndex,
 			fingerprint: before.fingerprint,
 			startCommit,
 			diff: diffRef,
@@ -666,22 +670,6 @@ function isReviewRoleSnapshots(
 			(settings.model === null || typeof settings.model === "string")
 		);
 	});
-}
-
-async function writeReviewCheckpoint(
-	state: MutableExecutionHandle,
-	update: Partial<ExecutionCheckpoint>,
-): Promise<void> {
-	const current = state.checkpoint;
-	const next = applyExecutionCheckpoint(current, current.revision, {
-		...current,
-		...update,
-		revision: current.revision + 1,
-	});
-	await state.log.write([
-		await storeExecutionCheckpoint(state.deps.store, next),
-	]);
-	state.checkpoint = next;
 }
 
 function parseJson(bytes: Uint8Array): unknown {

@@ -6,12 +6,15 @@ import {
 } from "node:child_process";
 import { appendFile, mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import type {
-	AgentEvent,
-	AgentSpec,
-	DoctorCheck,
-	Usage,
-	UsageRecord,
+import {
+	type AgentEvent,
+	type AgentSpec,
+	type CostBasis,
+	type CostDetails,
+	compareCostAmounts,
+	type DoctorCheck,
+	type Usage,
+	type UsageRecord,
 } from "@payo/contracts";
 import type { AgentRunner } from "@payo/kernel";
 
@@ -36,6 +39,9 @@ export interface PiMapState {
 	lastStopReason: string | null;
 	lastError: string | null;
 	usage: UsageRecord;
+	costDetails: CostDetails;
+	missingNativeCost: boolean;
+	seenUsageEntryIds: Set<string>;
 	done: boolean;
 }
 
@@ -108,6 +114,9 @@ export function createPiRunner(options: PiRunnerOptions): AgentRunner {
 				lastStopReason: null,
 				lastError: null,
 				usage: { tokensIn: 0, tokensOut: 0, cost: 0 },
+				costDetails: { amounts: [], complete: false },
+				missingNativeCost: false,
+				seenUsageEntryIds: new Set(),
 				done: false,
 			};
 
@@ -361,8 +370,8 @@ export function mapPiRecord(record: unknown, state: PiMapState): AgentEvent[] {
 			state.finalText = text;
 			events.push({ type: "message", text: clamp(text, MAX_TEXT) });
 		}
-		state.usage = addUsage(state.usage, asRecord(message.usage));
-		events.push({ type: "usage", usage: state.usage });
+		addUsage(state, asRecord(message.usage));
+		events.push(usageSnapshot(state, false));
 		return events;
 	}
 
@@ -393,29 +402,57 @@ export function mapPiRecord(record: unknown, state: PiMapState): AgentEvent[] {
 		];
 	}
 
+	if (value.type === "compaction_end") {
+		addUsage(state, asRecord(asRecord(value.result)?.usage));
+		return [usageSnapshot(state, false)];
+	}
+
+	if (value.type === "entry_appended") {
+		// Compaction copies arrive here too; only the canonical compaction_end usage counts.
+		const entry = asRecord(value.entry);
+		if (entry === null || entry.type !== "usage") return [];
+		const id = asString(entry.id);
+		if (id !== null) {
+			if (state.seenUsageEntryIds.has(id)) return [];
+			state.seenUsageEntryIds.add(id);
+		}
+		addUsage(state, asRecord(entry.usage));
+		return [usageSnapshot(state, false)];
+	}
+
 	if (value.type !== "agent_settled") return [];
 	if (state.done) return [];
 	state.done = true;
+	const events: AgentEvent[] = [];
+	const observed =
+		state.costDetails.amounts.length > 0 || state.missingNativeCost;
+	if (observed) {
+		const complete =
+			value.aborted !== true &&
+			state.costDetails.amounts.length > 0 &&
+			!state.missingNativeCost;
+		events.push(usageSnapshot(state, complete));
+	}
 	if (value.aborted === true && !state.signal.aborted) {
-		return [
-			{
-				type: "error",
-				message: clamp(state.lastError ?? "pi aborted", MAX_TEXT),
-			},
-		];
+		events.push({
+			type: "error",
+			message: clamp(state.lastError ?? "pi aborted", MAX_TEXT),
+		});
+		return events;
 	}
 	if (state.lastStopReason === "error") {
-		return [
-			{
-				type: "error",
-				message: clamp(state.lastError ?? "pi stopped with an error", MAX_TEXT),
-			},
-		];
+		events.push({
+			type: "error",
+			message: clamp(state.lastError ?? "pi stopped with an error", MAX_TEXT),
+		});
+		return events;
 	}
 	if (state.finalText !== null) {
-		return [{ type: "result", text: clamp(state.finalText, MAX_TEXT) }];
+		events.push({ type: "result", text: clamp(state.finalText, MAX_TEXT) });
+		return events;
 	}
-	return [{ type: "error", message: "pi ended without assistant text" }];
+	events.push({ type: "error", message: "pi ended without assistant text" });
+	return events;
 }
 
 export async function checkPi(options: {
@@ -568,17 +605,68 @@ function messageText(content: unknown): string {
 		.join("");
 }
 
+const COST_CURRENCY = "USD"; // Pi reports cost in USD.
+
 function addUsage(
-	current: UsageRecord,
+	state: PiMapState,
 	usage: Record<string, unknown> | null,
-): UsageRecord {
-	return {
+): void {
+	state.usage = {
 		tokensIn: addUsageValue(
-			current.tokensIn,
+			state.usage.tokensIn,
 			sumUsage([usage?.input, usage?.cacheRead, usage?.cacheWrite]),
 		),
-		tokensOut: addUsageValue(current.tokensOut, sumUsage([usage?.output])),
-		cost: addUsageValue(current.cost, sumUsage([asRecord(usage?.cost)?.total])),
+		tokensOut: addUsageValue(state.usage.tokensOut, sumUsage([usage?.output])),
+		cost: addUsageValue(
+			state.usage.cost,
+			sumUsage([asRecord(usage?.cost)?.total]),
+		),
+	};
+	addCostAmount(state, usage);
+}
+
+function addCostAmount(
+	state: PiMapState,
+	usage: Record<string, unknown> | null,
+): void {
+	if (usage === null) {
+		state.missingNativeCost = true;
+		return;
+	}
+	const cost = asRecord(usage.cost);
+	const total = cost?.total;
+	if (typeof total !== "number" || !Number.isFinite(total) || total < 0) {
+		state.missingNativeCost = true;
+		return;
+	}
+	const basis: CostBasis =
+		cost?.totalFromProvider === true ? "provider-reported" : "estimated";
+	const previous = state.costDetails.amounts.find(
+		(amount) => amount.currency === COST_CURRENCY && amount.basis === basis,
+	);
+	const amounts = state.costDetails.amounts
+		.filter((amount) => amount !== previous)
+		.concat({
+			currency: COST_CURRENCY,
+			basis,
+			amount: (previous?.amount ?? 0) + total,
+		})
+		.sort(compareCostAmounts);
+	state.costDetails = { amounts, complete: false };
+}
+
+function usageSnapshot(state: PiMapState, complete: boolean): AgentEvent {
+	return {
+		type: "usage",
+		usage: {
+			tokensIn: state.usage.tokensIn,
+			tokensOut: state.usage.tokensOut,
+			cost: state.usage.cost,
+			costDetails: {
+				amounts: state.costDetails.amounts.map((amount) => ({ ...amount })),
+				complete,
+			},
+		},
 	};
 }
 

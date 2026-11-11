@@ -1,8 +1,8 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readPayoConfigDocument } from "@payo/config";
-import { afterEach, expect, it } from "vitest";
+import { readPayoConfigDocument, writePayoConfigDocument } from "@payo/config";
+import { afterEach, expect, it, vi } from "vitest";
 import { createConfigSettingsService } from "./settings.ts";
 
 const dirs: string[] = [];
@@ -20,6 +20,8 @@ function service(
 	options: { env?: NodeJS.ProcessEnv; cwd?: string; devFakes?: boolean } = {},
 ) {
 	return createConfigSettingsService({
+		readConfig: readPayoConfigDocument,
+		writeConfig: writePayoConfigDocument,
 		configFile,
 		env: options.env ?? {},
 		cwd: options.cwd ?? "/work",
@@ -75,6 +77,38 @@ it("rejects a real-mode candidate without an effective model before writing", as
 	expect(readFileSync(configFile, "utf8")).toBe(original);
 });
 
+it("uses injected config persistence and classifies missing models without writing", async () => {
+	const snapshot = {
+		configFile: "/unused/config.toml",
+		revision: "a".repeat(64),
+		document: {},
+	};
+	const writeConfig = vi.fn(async () => snapshot);
+	const settings = createConfigSettingsService({
+		configFile: snapshot.configFile,
+		env: {},
+		cwd: "/work",
+		devFakes: false,
+		readConfig: () => snapshot,
+		writeConfig,
+	});
+	expect(await settings.snapshot()).toMatchObject(snapshot);
+	await expect(
+		settings.save({ revision: snapshot.revision, document: {} }),
+	).rejects.toMatchObject({
+		code: "invalid_request",
+		message: expect.stringMatching(/real mode requires a model.*planner/),
+	});
+	expect(writeConfig).not.toHaveBeenCalled();
+	const document = { model: { provider: "anthropic", id: "claude" } };
+	await settings.save({ revision: snapshot.revision, document });
+	expect(writeConfig).toHaveBeenCalledWith(
+		snapshot.configFile,
+		document,
+		snapshot.revision,
+	);
+});
+
 it("accepts an unset model in fake mode", async () => {
 	const configFile = tempConfig(
 		"[model]\nprovider = 'anthropic'\nid = 'claude'\n",
@@ -124,4 +158,31 @@ it("does not leak values when a stale revision fails", async () => {
 	expect(readPayoConfigDocument(configFile).document).toEqual({
 		server: { port: 7444 },
 	});
+});
+
+it("rejects invalid ticket policy before writing and preserves the saved document", async () => {
+	const original = "[publication]\nremote = 'upstream'\n";
+	const configFile = tempConfig(original);
+	const settings = service(configFile);
+	const before = await settings.snapshot();
+	await expect(
+		settings.save({
+			revision: before.revision,
+			document: { publication: { commit_template: "{description}" } },
+		}),
+	).rejects.toMatchObject({
+		code: "invalid_request",
+		message: expect.stringContaining("publication.commit_template"),
+	});
+	expect(readFileSync(configFile, "utf8")).toBe(original);
+	const document = {
+		publication: {
+			commit_template: "[{ticketId}] Fix {description}",
+			pr_body_template: "Summary\n{summary}\nChecks\n{checks}",
+		},
+		tools: { gh: "/opt/gh" },
+	};
+	expect(
+		(await settings.save({ revision: before.revision, document })).document,
+	).toEqual(document);
 });

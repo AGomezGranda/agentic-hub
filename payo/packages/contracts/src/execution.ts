@@ -1,5 +1,7 @@
 import { z } from "zod";
+import { Finding } from "./factory.ts";
 import { ArtifactRef, Id } from "./primitives.ts";
+import { ExecutionNamingSnapshot } from "./publication.ts";
 
 const text = z
 	.string()
@@ -152,6 +154,7 @@ const RoleProvenance = z.object({ path: text, sha: text });
 
 export const ExecutionRunConfig = z.object({
 	kind: z.literal("factory-execution"),
+	naming: ExecutionNamingSnapshot.optional(),
 	sourceRunId: Id,
 	sourceBaseBranch: text,
 	plan: ArtifactRef,
@@ -208,8 +211,17 @@ export const ExecutionCommitIntent = z.object({
 });
 export type ExecutionCommitIntent = z.infer<typeof ExecutionCommitIntent>;
 
+export const ExecutionIssueAnswer = z.object({
+	issue: text,
+	answer: text,
+});
+export type ExecutionIssueAnswer = z.infer<typeof ExecutionIssueAnswer>;
+
 export const ExecutionCheckpoint = z.object({
+	naming: ExecutionNamingSnapshot.optional(),
+	issueAnswers: z.array(ExecutionIssueAnswer).optional(),
 	revision: z.int().nonnegative(),
+	implementationFeedback: text.nullable().optional(),
 	stage: ExecutionStage,
 	phaseIndex: z.int().nonnegative(),
 	scope: ExecutionScope,
@@ -255,6 +267,8 @@ const CheckStatus = z.enum([
 ]);
 
 export const ExecutionSummary = z.object({
+	naming: ExecutionNamingSnapshot.optional(),
+	publicationIneligibleReason: z.string().optional(),
 	runId: Id,
 	sourceRunId: Id,
 	prId: Id,
@@ -274,12 +288,36 @@ export const ExecutionSummary = z.object({
 	worktree: text.nullable(),
 	statusDetail: text.nullable(),
 	escalationReason: text.nullable(),
-	checks: z.array(z.object({ name: text, status: CheckStatus })),
+	pausedOperation: ExecutionStage.optional(),
+	planIssues: z.array(text).optional(),
+	issueAnswers: z.array(ExecutionIssueAnswer).optional(),
+	checks: z.array(
+		z.object({
+			name: text,
+			status: CheckStatus,
+			output: z.string().optional(),
+		}),
+	),
 	review: z
 		.object({
 			lenses: z.array(text),
 			uncheckedLenses: z.array(text),
 			findings: z.int().nonnegative(),
+			blockers: z.array(Finding).optional(),
+			details: z
+				.object({
+					findings: z.array(Finding),
+					verdicts: ImplementationVerificationOutput.shape.verdicts,
+					coverage: z.array(z.object({ lens: text, checked: z.array(text) })),
+					scope: ExecutionScope.nullable(),
+					phaseIndex: z.int().nonnegative().nullable(),
+					round: z.int().nonnegative().nullable(),
+					startCommit: text.nullable(),
+					fingerprint: text.nullable(),
+					discarded: z.boolean(),
+					checksAreLatest: z.boolean(),
+				})
+				.optional(),
 			unresolved: z.int().nonnegative(),
 			acceptedFindingIds: z.array(Id).default([]),
 			unresolvedFindingIds: z.array(Id).default([]),

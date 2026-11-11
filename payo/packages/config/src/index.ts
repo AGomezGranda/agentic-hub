@@ -13,6 +13,7 @@ import {
 	type ExecutionCheck,
 	isExactLoopbackOrigin,
 	PayoConfigDocument,
+	type PublicationPolicy,
 } from "@payo/contracts";
 import { parse, stringify } from "smol-toml";
 import type * as z from "zod";
@@ -44,7 +45,10 @@ export interface PayoConfig {
 	maxConcurrentAgents: number;
 	webOrigins: string[];
 	checks: ExecutionCheck[];
-	tools: { pi: string; acli: string; git: string };
+	tools: { pi: string; acli: string; git: string; gh: string };
+	publication: Omit<PublicationPolicy, "prBodyTemplate"> & {
+		prBodyTemplate?: string;
+	};
 	piProvider: string;
 	model: ModelSelection | null;
 	roles: Record<PayoRole, PayoRoleSetting> & { implementer?: PayoRoleSetting };
@@ -183,6 +187,7 @@ export function resolvePayoConfigDocument(
 		fileConfig.server?.web_origins ?? [],
 	);
 	const tools = {
+		gh: fileConfig.tools?.gh ?? "gh",
 		pi: environmentExecutable(
 			env.PAYO_PI_BIN,
 			fileConfig.tools?.pi ?? "pi",
@@ -246,6 +251,19 @@ export function resolvePayoConfigDocument(
 		webOrigins,
 		checks: fileConfig.execution?.checks ?? [],
 		tools,
+		publication: {
+			remote: fileConfig.publication?.remote ?? "origin",
+			branchTemplate:
+				fileConfig.publication?.branch_template ?? "{ticketId}/{slug}",
+			commitTemplate:
+				fileConfig.publication?.commit_template ?? "[{ticketId}] {description}",
+			prTitleTemplate:
+				fileConfig.publication?.pr_title_template ??
+				"[{ticketId}] {description}",
+			...(fileConfig.publication?.pr_body_template === undefined
+				? {}
+				: { prBodyTemplate: fileConfig.publication.pr_body_template }),
+		},
 		piProvider: configuredProvider,
 		model:
 			modelId === undefined

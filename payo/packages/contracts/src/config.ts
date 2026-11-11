@@ -78,11 +78,21 @@ export const PayoConfigDocument = z.strictObject({
 				.optional(),
 		})
 		.optional(),
+	publication: z
+		.strictObject({
+			remote: nonBlank.optional(),
+			branch_template: z.string().optional(),
+			commit_template: z.string().optional(),
+			pr_title_template: z.string().optional(),
+			pr_body_template: z.string().optional(),
+		})
+		.optional(),
 	tools: z
 		.strictObject({
 			pi: nonBlank.optional(),
 			acli: nonBlank.optional(),
 			git: nonBlank.optional(),
+			gh: nonBlank.optional(),
 		})
 		.optional(),
 	model: modelSelectionSchema.optional(),

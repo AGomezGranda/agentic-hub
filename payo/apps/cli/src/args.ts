@@ -15,7 +15,30 @@ export type Command =
 			repo?: string;
 			baseBranch?: string;
 	  }
-	| { command: "implement"; runId: string; prId: string; base?: string }
+	| {
+			command: "implement";
+			runId: string;
+			prId: string;
+			base?: string;
+			preview: boolean;
+			confirm?: string;
+			ticketId?: string | null;
+			slug?: string;
+	  }
+	| {
+			command: "execution-naming";
+			runId: string;
+			confirm?: string;
+			slug: string;
+	  }
+	| {
+			command: "publish";
+			runId: string;
+			preview: boolean;
+			confirm?: string;
+			title?: string;
+			bodyFile?: string;
+	  }
 	| { command: "status"; runId: string }
 	| { command: "logs"; runId: string; follow: boolean }
 	| { command: "answer"; runId: string; questionId: string; text: string }

@@ -3,16 +3,20 @@ import { createProcessChecks } from "@payo/checks-process";
 import type { WorkItem, WorkItemRequest } from "@payo/contracts";
 import type { RoleSource } from "@payo/factory";
 import { EXECUTION_PREPARER_SOURCE } from "@payo/factory";
+import { createGitHubCodeHost } from "@payo/gh";
 import {
 	createExecutionWorkspace,
 	createGitExec,
 	createGitWorkspace,
+	createRepositoryPublication,
 } from "@payo/git";
 import { createAcliTicketSource } from "@payo/jira-acli";
 import type {
 	AgentRunner,
 	Checks,
+	CodeHost,
 	ExecutionWorkspace,
+	RepositoryPublication,
 	RunStore,
 	WorkItemSource,
 	Workspace,
@@ -25,6 +29,7 @@ import {
 	envelope,
 	fakeExecutionRunner,
 	fakeExecutionWorkspace,
+	fakePublicationPorts,
 	fakeWorkItems,
 	fakeWorkspace,
 	SCENARIOS,
@@ -36,6 +41,8 @@ export interface AdapterSet {
 	runner: () => AgentRunner;
 	workItems: WorkItemSource;
 	workspace: Workspace;
+	repository?: RepositoryPublication;
+	codeHost?: CodeHost;
 	roleSources: Record<
 		"planner" | "reviewer" | "verifier" | "reviser",
 		RoleSource
@@ -162,9 +169,12 @@ export async function createAdapterSet(
 ): Promise<AdapterSet> {
 	if (config.devFakes) {
 		const scenario = scenarioOf(config);
+		const publication = fakePublicationPorts();
 		return {
 			runner: () => createFakeRunner(scriptsFor(scenario)),
 			workItems: createWorkItemSource(fakeWorkItems([workItem])),
+			repository: publication.repository,
+			codeHost: publication.codeHost,
 			workspace: fakeWorkspace(join(config.dataDir, "workspaces")),
 			roleSources: fakeRoleSources,
 			executionRunner: () =>
@@ -196,6 +206,8 @@ export async function createAdapterSet(
 	});
 	return {
 		runner: () => pi,
+		repository: createRepositoryPublication({ bin: config.gitBin }),
+		codeHost: createGitHubCodeHost({ bin: config.ghBin }),
 		workItems: createWorkItemSource(
 			createAcliTicketSource({ bin: config.acliBin }),
 		),

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { decideImplementationReview } from "./execution-state.ts";
+import { decideImplementationReview } from "./domain/execution.ts";
 
 const finding = (id: string, severity: "P0" | "P1" | "P2" = "P2") => ({
 	id,

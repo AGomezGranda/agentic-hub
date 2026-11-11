@@ -3,9 +3,11 @@ import {
 	ExecutionManifest as ExecutionManifestSchema,
 	ExecutionRunConfig as ExecutionRunConfigSchema,
 	ExecutionSummary as ExecutionSummarySchema,
+	Finding,
 	PhaseReceipt as PhaseReceiptSchema,
 } from "@payo/contracts";
 import { readArtifact } from "./artifacts.ts";
+import { hasExecutionPlanConflict } from "./domain/execution.ts";
 import {
 	type ExecutionHandle,
 	mutableExecutionHandle,
@@ -59,6 +61,7 @@ export async function readExecutionSummary(
 
 	const checks: Array<{
 		name: string;
+		output?: string;
 		status: "passed" | "failed" | "timed_out" | "cancelled" | "spawn_failed";
 	}> = [];
 	const checksRef = latest("factory-execution-check-results-v1");
@@ -74,6 +77,17 @@ export async function readExecutionSummary(
 				)
 					checks.push({
 						name: result.name,
+						...(result.status !== "passed"
+							? {
+									output: [result.stderr, result.stdout]
+										.filter(
+											(value): value is string =>
+												typeof value === "string" && !!value.trim(),
+										)
+										.map((value) => value.slice(-2000))
+										.join("\n"),
+								}
+							: {}),
 						status: result.status as (typeof checks)[number]["status"],
 					});
 			}
@@ -82,20 +96,33 @@ export async function readExecutionSummary(
 		}
 	}
 
-	let review: {
-		lenses: string[];
-		uncheckedLenses: string[];
-		findings: number;
-		unresolved: number;
-		acceptedFindingIds: string[];
-		unresolvedFindingIds: string[];
-		round: number;
-	} | null = null;
+	let review: import("@payo/contracts").ExecutionSummary["review"] = null;
 	const reviewRef = latest("factory-execution-review-v1");
 	if (reviewRef) {
 		const value = await readJson(reviewRef, "implementation review");
 		if (isRecord(value)) {
+			const details = ExecutionSummarySchema.shape.review
+				.unwrap()
+				.shape.details.unwrap()
+				.safeParse({
+					findings: value.findings,
+					verdicts: value.verdicts ?? [],
+					coverage: value.lenses ?? [],
+					scope: value.scope ?? null,
+					phaseIndex: value.phaseIndex ?? null,
+					round: value.round ?? null,
+					startCommit: value.startCommit ?? null,
+					fingerprint: value.fingerprint ?? null,
+					discarded: value.discarded ?? false,
+					checksAreLatest:
+						isRecord(value.checks) && value.checks.sha256 === checksRef?.sha256,
+				});
+			if (!details.success)
+				artifactIssues.push(
+					"implementation review details failed schema validation",
+				);
 			review = {
+				...(details.success ? { details: details.data } : {}),
 				lenses: Array.isArray(value.lenses)
 					? value.lenses.flatMap((item) =>
 							isRecord(item) && typeof item.lens === "string"
@@ -109,6 +136,15 @@ export async function readExecutionSummary(
 						)
 					: [],
 				findings: Array.isArray(value.findings) ? value.findings.length : 0,
+				blockers: Array.isArray(value.findings)
+					? value.findings.flatMap((item) => {
+							const finding = Finding.safeParse(item);
+							return finding.success &&
+								state.checkpoint.unresolvedFindingIds.includes(finding.data.id)
+								? [finding.data]
+								: [];
+						})
+					: [],
 				unresolved: state.checkpoint.unresolvedFindingIds.length,
 				acceptedFindingIds: [...state.checkpoint.acceptedFindingIds],
 				unresolvedFindingIds: [...state.checkpoint.unresolvedFindingIds],
@@ -145,7 +181,36 @@ export async function readExecutionSummary(
 		}
 	}
 
+	let planIssues: string[] = [];
+	if (
+		state.checkpoint.stage === "Escalated" &&
+		hasExecutionPlanConflict(state.checkpoint)
+	) {
+		const operation = state.checkpoint.inFlight?.operation;
+		const report = latest(
+			operation === "Implement"
+				? "factory-execution-implementation-report-v1"
+				: operation === "Repair"
+					? "factory-execution-repair-report-v1"
+					: "factory-execution-review-v1",
+		);
+		const value = report ? await readJson(report, "plan issue report") : null;
+		if (isRecord(value) && Array.isArray(value.planIssues))
+			planIssues = value.planIssues.filter(
+				(item): item is string => typeof item === "string" && !!item.trim(),
+			);
+		if (planIssues.length === 0 && state.checkpoint.escalation)
+			planIssues = [state.checkpoint.escalation.reason];
+	}
+
 	return ExecutionSummarySchema.parse({
+		naming: state.checkpoint.naming ?? config.naming,
+		...(!(state.checkpoint.naming ?? config.naming)
+			? {
+					publicationIneligibleReason:
+						"Legacy execution has no confirmed naming snapshot",
+				}
+			: {}),
 		runId: run.runId,
 		sourceRunId: config.sourceRunId,
 		prId: config.prId,
@@ -165,6 +230,12 @@ export async function readExecutionSummary(
 		worktree: state.checkpoint.workspace?.path ?? null,
 		statusDetail: state.checkpoint.statusDetail,
 		escalationReason: state.checkpoint.escalation?.reason ?? null,
+		pausedOperation:
+			state.checkpoint.stage === "Escalated"
+				? state.checkpoint.inFlight?.operation
+				: undefined,
+		planIssues,
+		issueAnswers: state.checkpoint.issueAnswers,
 		checks,
 		review,
 		artifactIssues,
@@ -173,4 +244,19 @@ export async function readExecutionSummary(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+export function readExecutionGates(
+	handle: ExecutionHandle,
+): import("@payo/contracts").RunSummary["openGates"] {
+	const state = mutableExecutionHandle(handle);
+	return [...state.log.current().gates.values()]
+		.filter((gate) => gate.status === "open")
+		.map((gate) => ({
+			gateId: gate.gateId,
+			stepId: gate.stepId,
+			kind: gate.kind,
+			allowedCommands: [...gate.allowedCommands],
+			reason: gate.reason,
+		}));
 }

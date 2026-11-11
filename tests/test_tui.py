@@ -57,6 +57,33 @@ def setup_fixture(
         make_skill(src, "demo")
 
 
+def test_shared_target_batch_actions_run_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    setup_fixture(tmp_path, monkeypatch, multi_agent=True)
+    shared = (tmp_path / ".agents/skills", "symlink")
+    monkeypatch.setattr(agents, "AGENTS", dict.fromkeys(agents.AGENTS, shared))
+    install = Mock(wraps=agents.install_one)
+    remove = Mock(wraps=agents.remove_one)
+    monkeypatch.setattr(agents, "install_one", install)
+    monkeypatch.setattr(agents, "remove_one", remove)
+
+    async def scenario() -> None:
+        app = tui.AgenticHubApp()
+        async with app.run_test() as pilot:
+            notify = Mock()
+            monkeypatch.setattr(app, "notify", notify)
+            await pilot.press("I")
+            install.assert_called_once_with("fake1", "demo")
+            assert all(agents.status(h, "demo") == "linked" for h in agents.AGENTS)
+            await pilot.press("R")
+            remove.assert_called_once_with("fake1", "demo")
+            assert all(agents.status(h, "demo") == "missing" for h in agents.AGENTS)
+            assert "removed (1/1)" in notify.call_args.args[0]
+
+    asyncio.run(scenario())
+
+
 def test_skills_is_default_and_navigation_does_not_write(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

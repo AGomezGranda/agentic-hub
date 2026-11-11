@@ -1,6 +1,6 @@
 import { FactoryCheckpoint, PlanVersion } from "@payo/contracts";
 import { describe, expect, it } from "vitest";
-import { decideReview } from "./state.ts";
+import { decideReview } from "./domain/planning.ts";
 
 const finding = {
 	id: "f",
@@ -121,7 +121,7 @@ it("loads the last checkpoint from events rather than deduplicated artifacts", a
 		"@payo/kernel"
 	);
 	const { storeCheckpoint } = await import("./artifacts.ts");
-	const { loadCheckpoint } = await import("./state.ts");
+	const { loadCheckpoint } = await import("./artifacts.ts");
 	const store = createMemoryRunStore();
 	const log = openRunLog(
 		store,
@@ -197,7 +197,7 @@ it("rejects checkpoint bytes that do not match their artifact reference", async 
 		"@payo/kernel"
 	);
 	const { storeCheckpoint } = await import("./artifacts.ts");
-	const { loadCheckpoint } = await import("./state.ts");
+	const { loadCheckpoint } = await import("./artifacts.ts");
 	const store = createMemoryRunStore();
 	const log = openRunLog(
 		store,

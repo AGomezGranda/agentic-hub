@@ -36,13 +36,13 @@ export function ImplementPrForm({
 	});
 	return (
 		<section
-			aria-label="Implementation"
+			aria-label="Planned PRs"
 			className="space-y-3 border-b border-[var(--line)] pb-6"
 		>
-			<h2 className="text-xl font-semibold">Implementation</h2>
+			<h2 className="text-xl font-semibold">Planned PRs</h2>
 			<p className="text-sm text-[var(--muted)]">
 				{approved
-					? "Choose a PR to implement in a local worktree."
+					? "Choose a PR to open its implementation and code review workspace. Work runs in a local worktree."
 					: "Review the phases assigned to each PR before approving the plan."}
 			</p>
 			{approved && (
@@ -114,7 +114,7 @@ export function ImplementPrForm({
 								>
 									{launch.isPending && launch.variables === pr.id
 										? "Starting…"
-										: `Start ${pr.id} locally`}
+										: `Implement ${pr.id}`}
 								</Button>
 							)}
 							{launch.isError && launch.variables === pr.id && (

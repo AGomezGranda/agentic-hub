@@ -5,13 +5,14 @@ import { ExecutionCheckpoint, ExecutionRunConfig } from "@payo/contracts";
 import {
 	answer,
 	approve,
-	beginExecution,
 	openExecution,
 	openFactory,
+	readPlan,
 	resume,
 	start,
+	writePlan,
 } from "@payo/factory";
-import { createLimiter } from "@payo/kernel";
+import { commit, createLimiter, startRun } from "@payo/kernel";
 import { createSqliteRunStore } from "@payo/store-sqlite";
 import { expect, it } from "vitest";
 import {
@@ -74,6 +75,9 @@ async function setup(scripts = [envelope(plan), ...clean()]) {
 		]),
 		workspace: fakeWorkspace("/workspace"),
 		dataDir,
+		readPlan: (runId: string) => readPlan(dataDir, runId),
+		writePlan: (runId: string, markdown: string) =>
+			writePlan(dataDir, runId, markdown),
 		roleSources,
 	};
 	return { deps, input, path: join(dataDir, "runs", "run", "plan.md") };
@@ -429,23 +433,53 @@ it("reopens an accepted phase receipt and gates before the next writer", async (
 		roles[role] = { model: null, timeoutMs: 1_000 };
 		roleProvenance[role] = { path: sourceRole.path, sha: sourceRole.sha };
 	}
-	const execution = await beginExecution(
-		{ store: deps.store, newId: () => crypto.randomUUID() },
-		{
-			sourceRunId: "run",
-			prId: "pr-multi",
-			baseCommit: "base-commit",
-			checks: [{ name: "unit", command: "true", args: [], timeout_ms: 1_000 }],
-			roles,
-			roleArtifacts,
-			roleProvenance,
-			maxConcurrentAgents: 2,
-		},
+	const runId = crypto.randomUUID();
+	const config = ExecutionRunConfig.parse({
+		kind: "factory-execution",
+		plan: source.checkpoint.plan,
+		sourceBaseBranch: "main",
+		sourceRunId: "run",
+		prId: "pr-multi",
+		baseCommit: "base-commit",
+		checks: [{ name: "unit", command: "true", args: [], timeout_ms: 1_000 }],
+		roles,
+		roleArtifacts,
+		roleProvenance,
+		maxConcurrentAgents: 2,
+	});
+	const legacy = await startRun(deps.store, {
+		runId,
+		repo: "repo",
+		baseBranch: "main",
+		config: { factory: config },
+	});
+	const initialCheckpoint = await deps.store.putArtifact(
+		new TextEncoder().encode(
+			JSON.stringify({
+				revision: 0,
+				stage: "Prepare",
+				phaseIndex: 0,
+				scope: "phase",
+				cycle: 1,
+				round: 0,
+				manifest: null,
+				workspace: null,
+				evidence: { diff: null, checks: null, review: null },
+				commitIntent: null,
+				acceptedFindingIds: [],
+				pendingFindingIds: [],
+				unresolvedFindingIds: [],
+				receipts: [],
+				inFlight: null,
+				escalation: null,
+				statusDetail: null,
+			}),
+		),
+		{ kind: "factory-execution-checkpoint-v1", mediaType: "application/json" },
 	);
-	const runId = execution.log.current().runId;
-	const config = ExecutionRunConfig.parse(
-		execution.log.current().config.factory,
-	);
+	await commit(deps.store, legacy, [
+		{ type: "artifact.recorded", artifact: initialCheckpoint, attemptId: null },
+	]);
 	const manifest = await deps.store.putArtifact(
 		new TextEncoder().encode(
 			JSON.stringify({

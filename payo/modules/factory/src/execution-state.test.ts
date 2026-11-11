@@ -3,9 +3,12 @@ import {
 	accountRepair,
 	applyExecutionCheckpoint,
 	assertExecutionTransition,
+	executionResumeConflict,
+	executionResumeStage,
 	initialExecutionCheckpoint,
 	validateExecutionManifest,
-} from "./execution-state.ts";
+	validationAction,
+} from "./domain/execution.ts";
 
 const markdown = `# Plan
 
@@ -28,6 +31,53 @@ const manifest = {
 	prerequisites: [{ description: "Source base", ref: "main" }],
 	issues: [],
 };
+
+it("only repairs or retries checks while a validation cycle remains", () => {
+	expect(validationAction("passed", 3)).toBe("review");
+	expect(validationAction("failed", 2)).toBe("repair");
+	expect(validationAction("dirty", 2)).toBe("retry");
+	expect(validationAction("failed", 3)).toBe("escalate");
+	expect(validationAction("dirty", 3)).toBe("escalate");
+});
+
+it("resumes preparation or rechecks retained work according to checkpoint evidence", () => {
+	const checkpoint = initialExecutionCheckpoint();
+	expect(() => executionResumeStage(checkpoint)).toThrow("not resumable");
+	checkpoint.inFlight = { operation: "Repair", stepIds: ["step"] };
+	expect(executionResumeStage(checkpoint)).toBe("Prepare");
+	checkpoint.manifest = {
+		sha256: "a".repeat(64),
+		size: 1,
+		kind: "manifest",
+		mediaType: "application/json",
+	};
+	expect(executionResumeStage(checkpoint)).toBe("Check");
+	checkpoint.inFlight.operation = "Implement";
+	expect(executionResumeStage(checkpoint)).toBe("Implement");
+	checkpoint.scope = "final";
+	expect(executionResumeStage(checkpoint)).toBe("Finalize");
+});
+
+it("rejects unrelated gates and allows retry against the pinned plan", () => {
+	const checkpoint = initialExecutionCheckpoint();
+	expect(executionResumeConflict(checkpoint, [])).toBe(
+		"execution is not resumable",
+	);
+	checkpoint.stage = "Escalated";
+	checkpoint.inFlight = { operation: "Repair", stepIds: ["owned"] };
+	const gate = { gateId: "gate", stepId: "other", status: "open" };
+	expect(executionResumeConflict(checkpoint, [gate])).toBe(
+		"unrelated open gate gate",
+	);
+	expect(
+		executionResumeConflict(checkpoint, [{ ...gate, status: "resolved" }]),
+	).toBeNull();
+	expect(
+		executionResumeConflict(checkpoint, [{ ...gate, stepId: "owned" }]),
+	).toBeNull();
+	checkpoint.statusDetail = "repair-plan-issue";
+	expect(executionResumeConflict(checkpoint, [])).toBeNull();
+});
 
 describe("execution checklist", () => {
 	it("accepts a legal transition and rejects the rest", () => {

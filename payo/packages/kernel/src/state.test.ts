@@ -1,4 +1,4 @@
-import type { RunEventBody } from "@payo/contracts";
+import type { RunEventBody, UsageRecord } from "@payo/contracts";
 import { describe, expect, it } from "vitest";
 import { fold, reduce } from "./state.ts";
 import { body, seqd, sha } from "./testing.ts";
@@ -356,6 +356,22 @@ const agentEvent = (attemptId: string): RunEventBody => ({
 	event: { type: "message", text: "hi" },
 });
 
+const observed = (amount: number, complete = false): UsageRecord => ({
+	tokensIn: 10,
+	tokensOut: 2,
+	cost: amount,
+	costDetails: {
+		amounts: [{ currency: "USD", basis: "estimated", amount }],
+		complete,
+	},
+});
+
+const usageEvent = (attemptId: string, usage: UsageRecord): RunEventBody => ({
+	type: "attempt.event",
+	attemptId,
+	event: { type: "usage", usage },
+});
+
 describe("reduce attempt.event", () => {
 	const running = fold(
 		seqd([
@@ -385,6 +401,48 @@ describe("reduce attempt.event", () => {
 		expect(() => reduce(running, { ...agentEvent("zz"), seq: 4 })).toThrow(
 			/unknown attempt/,
 		);
+	});
+
+	it("retains usage on the attempt through a fresh map, leaving the previous state alone", () => {
+		const reported = observed(0.5);
+
+		const next = reduce(running, { ...usageEvent("a1", reported), seq: 4 });
+
+		expect(next.attempts.get("a1")?.usage).toEqual(reported);
+		expect(next.attempts).not.toBe(running.attempts);
+		expect(running.attempts.get("a1")?.usage).toBeNull();
+		expect(next.steps).toBe(running.steps);
+		expect(next.gates).toBe(running.gates);
+	});
+
+	it("replaces an earlier cumulative snapshot with a later one", () => {
+		const first = reduce(running, {
+			...usageEvent("a1", observed(0.5)),
+			seq: 4,
+		});
+		const second = reduce(first, {
+			...usageEvent("a1", observed(0.75, true)),
+			seq: 5,
+		});
+
+		expect(first.attempts.get("a1")?.usage).toEqual(observed(0.5));
+		expect(second.attempts.get("a1")?.usage).toEqual(observed(0.75, true));
+	});
+
+	it("keeps the terminal snapshot and marks a recovered interrupted reading incomplete", () => {
+		const terminal = observed(0.75, true);
+		const interrupted = reduce(running, {
+			...usageEvent("a1", terminal),
+			seq: 4,
+		});
+		const done = reduce(interrupted, {
+			...body.attemptFinished("a1", "interrupted"),
+			seq: 5,
+		});
+
+		expect(done.attempts.get("a1")?.usage).toMatchObject({
+			costDetails: { amounts: terminal.costDetails?.amounts, complete: false },
+		});
 	});
 });
 

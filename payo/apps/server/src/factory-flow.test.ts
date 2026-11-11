@@ -9,12 +9,14 @@ import {
 	executeFactory,
 	openFactory,
 	QUALITY_EXPECTATIONS,
+	readPlan,
 	readPlanVersions,
 	requestChanges,
 	restorePlan,
 	resume,
 	start,
 	updatePlan,
+	writePlan,
 } from "@payo/factory";
 import { createLimiter, createMemoryRunStore, sha256Hex } from "@payo/kernel";
 import type { FakeStep } from "@payo/runner-fake";
@@ -635,6 +637,7 @@ async function setup(scripts: FakeStep[][]) {
 		verifier: { model: null, timeoutMs: 1000 },
 		reviser: { model: null, timeoutMs: 1000 },
 	};
+	const dataDir = await mkdtemp(join(tmpdir(), "factory-"));
 	const deps = {
 		newId: (): string => crypto.randomUUID(),
 		store: createMemoryRunStore(),
@@ -648,7 +651,10 @@ async function setup(scripts: FakeStep[][]) {
 			},
 		]),
 		workspace: fakeWorkspace("/workspace"),
-		dataDir: await mkdtemp(join(tmpdir(), "factory-")),
+		dataDir,
+		readPlan: (runId: string) => readPlan(dataDir, runId),
+		writePlan: (runId: string, markdown: string) =>
+			writePlan(dataDir, runId, markdown),
 		roleSources,
 	};
 	const input = {

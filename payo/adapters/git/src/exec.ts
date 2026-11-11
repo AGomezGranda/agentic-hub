@@ -64,6 +64,10 @@ export async function resolveBaseCommit(
 		);
 		const commit = result.stdout.trim();
 		if (result.exitCode === 0 && commit.length > 0) return commit;
+		if (result.exitCode !== 1)
+			throw new Error(
+				`git rev-parse ${ref} failed (exit ${result.exitCode}): ${result.stderr.trim() || "no commit returned"}`,
+			);
 	}
 	throw new BaseNotFoundError(`base ${base} not found in ${repo}`);
 }

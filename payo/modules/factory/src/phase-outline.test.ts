@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { resolveImplementation } from "./phase-outline.ts";
+import { resolveImplementation } from "./domain/phase-outline.ts";
 
 const pr = (id: string, ...phases: string[]) => ({ id, title: id, phases });
 

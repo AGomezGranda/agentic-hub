@@ -15,6 +15,7 @@ import { NewRunForm } from "@web/features/runs/NewRunForm.tsx";
 import { RunList } from "@web/features/runs/RunList.tsx";
 import { SettingsPage } from "@web/features/settings/SettingsPage.tsx";
 import {
+	bearerAuthorization,
 	getServerPort,
 	PayoApiError,
 	setServerPort,
@@ -102,6 +103,7 @@ function PayoConsole() {
 		if (!value) return;
 		const port = Number(portDraft);
 		try {
+			bearerAuthorization(value);
 			setServerPort(port);
 		} catch (error) {
 			setConnectError(

@@ -65,7 +65,17 @@ def test_config_path_rejects_non_absolute_values(value: str) -> None:
 
 def test_real_template_renders(tmp_path: Path) -> None:
     text = hub_setup.render_config(hub_setup.TEMPLATE.read_text(), tmp_path)
-    assert tomllib.loads(text)["model"]["provider"] == "anthropic"
+    parsed = tomllib.loads(text)
+    assert parsed["model"]["provider"] == "openai"
+    assert parsed["roles"]["implementer"]["model"] == parsed["model"]
+    assert parsed["execution"]["checks"] == [
+        {
+            "name": "payo",
+            "command": "pnpm",
+            "args": ["--dir", "payo", "check"],
+            "timeout_ms": 300000,
+        }
+    ]
 
 
 def test_setup_template_allows_local_web_origins(tmp_path: Path) -> None:

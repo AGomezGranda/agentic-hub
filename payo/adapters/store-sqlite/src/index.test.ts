@@ -12,8 +12,16 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { type RunStore, StaleSeqError } from "@payo/kernel";
-import { body, runStoreContract } from "@payo/kernel/testing";
+import type { RunEventBody, UsageRecord } from "@payo/contracts";
+import {
+	commit,
+	openRun,
+	projectRunCosts,
+	type RunStore,
+	StaleSeqError,
+	startRun,
+} from "@payo/kernel";
+import { body, runStoreContract, testRunInput } from "@payo/kernel/testing";
 import { describe, expect, it } from "vitest";
 import { createSqliteRunStore } from "./index.ts";
 
@@ -171,6 +179,66 @@ describe("createSqliteRunStore", () => {
 				/EISDIR/,
 			);
 			await store.close();
+		} finally {
+			rmSync(dataDir, { recursive: true, force: true });
+		}
+	});
+
+	it("keeps a reported subtotal once across close, recovery and a second open", async () => {
+		const dataDir = tempDir();
+		try {
+			const enriched: UsageRecord = {
+				tokensIn: 5,
+				tokensOut: 2,
+				cost: 0.4,
+				costDetails: {
+					amounts: [{ currency: "USD", basis: "estimated", amount: 0.4 }],
+					complete: true,
+				},
+			};
+			const usageEvent: RunEventBody = {
+				type: "attempt.event",
+				attemptId: "a1",
+				event: { type: "usage", usage: enriched },
+			};
+			const first = await createSqliteRunStore({ dataDir });
+			const started = await startRun(first, testRunInput("r1"));
+			await commit(first, started, [
+				body.stepStarted("s1"),
+				body.attemptStarted("a0", "s1"),
+				body.attemptFinished("a0"),
+				body.attemptStarted("a1", "s1"),
+				usageEvent,
+			]);
+			await first.close();
+
+			const second = await createSqliteRunStore({ dataDir });
+			await openRun(second, "r1");
+			const events = await second.read("r1");
+			const before = projectRunCosts(events);
+
+			expect(before.cost).toEqual({
+				amounts: [{ currency: "USD", basis: "estimated", amount: 0.4 }],
+				coverage: "partial",
+				incompleteAttempts: 2,
+				attempts: 2,
+			});
+			expect(
+				before.steps[0]?.attempts.find((a) => a.attemptId === "a1")?.usage,
+			).toMatchObject({
+				cost: 0.4,
+				costDetails: {
+					amounts: [{ currency: "USD", basis: "estimated", amount: 0.4 }],
+					complete: false,
+				},
+			});
+
+			await openRun(second, "r1");
+			const again = projectRunCosts(await second.read("r1"));
+
+			expect(again).toEqual(before);
+			expect(await second.read("r1")).toHaveLength(events.length);
+			await second.close();
 		} finally {
 			rmSync(dataDir, { recursive: true, force: true });
 		}

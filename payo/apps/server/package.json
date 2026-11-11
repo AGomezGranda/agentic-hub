@@ -13,6 +13,7 @@
 		"@payo/kernel": "workspace:*",
 		"@payo/runner-fake": "workspace:*",
 		"@payo/runner-pi": "workspace:*",
-		"@payo/store-sqlite": "workspace:*"
+		"@payo/store-sqlite": "workspace:*",
+		"@payo/gh": "workspace:*"
 	}
 }

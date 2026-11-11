@@ -680,3 +680,44 @@ it("keeps environment overrides authoritative after writing", async () => {
 		activeEnvironmentOverrides({ PAYO_MODEL: "m", PAYO_PI_PROVIDER: "p" }),
 	).toEqual(["PAYO_PI_PROVIDER", "PAYO_MODEL"]);
 });
+
+it("resolves publication defaults and round-trips overrides without new environment precedence", async () => {
+	const configFile = join(tempHome(), "config.toml");
+	const document = {
+		publication: {
+			remote: "upstream",
+			branch_template: "{ticketId}/fix-{slug}",
+			commit_template: "[{ticketId}] Fix {description}",
+			pr_title_template: "[{ticketId}] Add {description}",
+			pr_body_template: "## Summary\n{summary}\n\n{checks}",
+		},
+		tools: { gh: "/opt/gh" },
+	};
+	const empty = resolvePayoConfigDocument({}, {}, cwd);
+	expect(empty.tools.gh).toBe("gh");
+	expect(empty.publication).toEqual({
+		remote: "origin",
+		branchTemplate: "{ticketId}/{slug}",
+		commitTemplate: "[{ticketId}] {description}",
+		prTitleTemplate: "[{ticketId}] {description}",
+	});
+	const before = readPayoConfigDocument(configFile);
+	await writePayoConfigDocument(configFile, document, before.revision);
+	expect(readPayoConfigDocument(configFile).document).toEqual(document);
+	const resolved = loadPayoConfig(
+		{
+			PAYO_CONFIG_FILE: configFile,
+			PAYO_GH_BIN: "ignored",
+			PAYO_PUBLICATION_REMOTE: "ignored",
+		},
+		cwd,
+	);
+	expect(resolved.tools.gh).toBe("/opt/gh");
+	expect(resolved.publication).toEqual({
+		remote: "upstream",
+		branchTemplate: document.publication.branch_template,
+		commitTemplate: document.publication.commit_template,
+		prTitleTemplate: document.publication.pr_title_template,
+		prBodyTemplate: document.publication.pr_body_template,
+	});
+});

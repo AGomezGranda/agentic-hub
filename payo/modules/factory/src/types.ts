@@ -36,6 +36,8 @@ export interface FactoryDeps {
 	workItems: WorkItemSource;
 	workspace: Workspace;
 	dataDir: string;
+	readPlan: (runId: string) => Promise<string>;
+	writePlan: (runId: string, markdown: string) => Promise<void>;
 	roleSources: Record<
 		"planner" | "reviewer" | "verifier" | "reviser",
 		RoleSource

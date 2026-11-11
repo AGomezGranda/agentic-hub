@@ -17,8 +17,10 @@ export const lenses = {
 } as const;
 
 export const architectureRubricPaths = [
+	"skills/architecture-audit/references/standard.md",
 	"skills/architecture-audit/references/boundaries.md",
 	"skills/architecture-audit/references/responsibilities.md",
+	"skills/architecture-audit/references/structure.md",
 ] as const;
 
 export const codeQualityRubricPaths = [

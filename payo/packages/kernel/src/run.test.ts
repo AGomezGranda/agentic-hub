@@ -1,4 +1,4 @@
-import type { RunEventBody } from "@payo/contracts";
+import type { RunEventBody, UsageRecord } from "@payo/contracts";
 import { describe, expect, it } from "vitest";
 import { commit, openRun, recover, resolveRunConfig, startRun } from "./run.ts";
 import { fold } from "./state.ts";
@@ -12,6 +12,22 @@ import { body, seqd, testRunInput } from "./testing.ts";
 function newBacking(): MemoryBacking {
 	return { events: new Map(), artifacts: new Map() };
 }
+
+const observed = (amount: number): UsageRecord => ({
+	tokensIn: 10,
+	tokensOut: 2,
+	cost: amount,
+	costDetails: {
+		amounts: [{ currency: "USD", basis: "estimated", amount }],
+		complete: true,
+	},
+});
+
+const usageEvent = (attemptId: string, usage: UsageRecord): RunEventBody => ({
+	type: "attempt.event",
+	attemptId,
+	event: { type: "usage", usage },
+});
 
 describe("resolveRunConfig", () => {
 	it("lets overrides win at depth, keeps the rest of the defaults", () => {
@@ -77,6 +93,68 @@ describe("recover", () => {
 
 		const recovered = await commit(store, running, bodies);
 		expect(recover(recovered)).toEqual([]);
+	});
+
+	it("keeps an observed subtotal but marks it incomplete, and recovers only once", async () => {
+		const store = createMemoryRunStore(newBacking());
+		const started = await startRun(store, testRunInput("r1"));
+		const running = await commit(store, started, [
+			body.stepStarted("s1"),
+			body.attemptStarted("a1", "s1"),
+			usageEvent("a1", observed(0.4)),
+		]);
+
+		const bodies = recover(running);
+
+		expect(bodies[0]).toEqual({
+			type: "attempt.finished",
+			attemptId: "a1",
+			outcome: "interrupted",
+			usage: {
+				...observed(0.4),
+				costDetails: { ...observed(0.4).costDetails, complete: false },
+			},
+		});
+		const recovered = await commit(store, running, bodies);
+		expect(recovered.attempts.get("a1")?.usage).toMatchObject({
+			cost: 0.4,
+			costDetails: {
+				amounts: [{ currency: "USD", basis: "estimated", amount: 0.4 }],
+				complete: false,
+			},
+		});
+		expect(recover(recovered)).toEqual([]);
+	});
+
+	it("keeps a prior snapshot when an existing interrupted finish has only unknowns", () => {
+		const state = fold(
+			seqd([
+				body.runCreated(),
+				body.stepStarted("s1"),
+				body.attemptStarted("a1", "s1"),
+				usageEvent("a1", observed(0.6)),
+				{
+					type: "attempt.finished",
+					attemptId: "a1",
+					outcome: "interrupted",
+					usage: {
+						tokensIn: "unknown",
+						tokensOut: "unknown",
+						cost: "unknown",
+					},
+				},
+			]),
+		);
+
+		expect(state.attempts.get("a1")?.usage).toEqual({
+			tokensIn: 10,
+			tokensOut: 2,
+			cost: 0.6,
+			costDetails: {
+				amounts: [{ currency: "USD", basis: "estimated", amount: 0.6 }],
+				complete: false,
+			},
+		});
 	});
 });
 

@@ -9,7 +9,8 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
-import { readPlan, renderAnswers, writePlan } from "./plans.ts";
+import { readPlan, writePlan } from "./infrastructure/plans.ts";
+import { renderAnswers } from "./plans.ts";
 
 it("preserves edits and replaces the generated answers once", () => {
 	const once = renderAnswers("# Edited\n", { q: "yes" });

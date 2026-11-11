@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { AgentEvent, AgentSpec, jsonEnvelope } from "./agent.ts";
+import { UsageRecord } from "./primitives.ts";
 
 const sha = "a".repeat(64);
 const usage = { tokensIn: 10, tokensOut: "unknown", cost: 0 } as const;
@@ -147,6 +148,124 @@ describe("AgentEvent", () => {
 		const callId = "c".repeat(257);
 		expect(
 			AgentEvent.safeParse({ type: "tool_call", callId, name: "read" }).success,
+		).toBe(false);
+	});
+});
+
+describe("UsageRecord costDetails", () => {
+	const enriched = {
+		tokensIn: 10,
+		tokensOut: 5,
+		cost: 0.003,
+		costDetails: {
+			amounts: [
+				{ currency: "EUR", basis: "estimated", amount: 1 },
+				{ currency: "USD", basis: "estimated", amount: 0.003 },
+				{ currency: "USD", basis: "provider-reported", amount: 0.004 },
+			],
+			complete: true,
+		},
+	};
+
+	it("accepts a legacy usage record unchanged", () => {
+		expect(UsageRecord.safeParse(usage).success).toBe(true);
+	});
+
+	it("accepts an enriched cumulative snapshot and preserves zero", () => {
+		expect(UsageRecord.safeParse(enriched).success).toBe(true);
+		expect(
+			UsageRecord.safeParse({
+				...enriched,
+				cost: 0,
+				costDetails: {
+					amounts: [{ currency: "USD", basis: "estimated", amount: 0 }],
+					complete: true,
+				},
+			}).success,
+		).toBe(true);
+	});
+
+	it("accepts an incomplete snapshot without amounts", () => {
+		expect(
+			UsageRecord.safeParse({
+				...usage,
+				costDetails: { amounts: [], complete: false },
+			}).success,
+		).toBe(true);
+	});
+
+	it.each([
+		["a negative amount", { currency: "USD", basis: "estimated", amount: -1 }],
+		[
+			"a non-finite amount",
+			{ currency: "USD", basis: "estimated", amount: Infinity },
+		],
+		[
+			"a lowercase currency",
+			{ currency: "usd", basis: "estimated", amount: 1 },
+		],
+		["a short currency", { currency: "US", basis: "estimated", amount: 1 }],
+		["an unknown basis", { currency: "USD", basis: "unknown", amount: 1 }],
+	])("rejects %s", (_label, amount) => {
+		expect(
+			UsageRecord.safeParse({
+				...usage,
+				costDetails: { amounts: [amount], complete: false },
+			}).success,
+		).toBe(false);
+	});
+
+	it("rejects duplicate currency/basis buckets", () => {
+		expect(
+			UsageRecord.safeParse({
+				...usage,
+				costDetails: {
+					amounts: [
+						{ currency: "USD", basis: "estimated", amount: 1 },
+						{ currency: "USD", basis: "estimated", amount: 2 },
+					],
+					complete: false,
+				},
+			}).success,
+		).toBe(false);
+	});
+
+	it("rejects unsorted amounts", () => {
+		expect(
+			UsageRecord.safeParse({
+				...usage,
+				costDetails: {
+					amounts: [
+						{ currency: "USD", basis: "provider-reported", amount: 1 },
+						{ currency: "USD", basis: "estimated", amount: 2 },
+					],
+					complete: false,
+				},
+			}).success,
+		).toBe(false);
+	});
+
+	it("rejects empty amounts marked complete", () => {
+		expect(
+			UsageRecord.safeParse({
+				...usage,
+				costDetails: { amounts: [], complete: true },
+			}).success,
+		).toBe(false);
+	});
+
+	it("carries costDetails through an agent event", () => {
+		expect(
+			AgentEvent.safeParse({ type: "usage", usage: enriched }).success,
+		).toBe(true);
+		expect(
+			AgentEvent.safeParse({
+				type: "usage",
+				usage: {
+					...enriched,
+					costDetails: { amounts: [], complete: true },
+				},
+			}).success,
 		).toBe(false);
 	});
 });

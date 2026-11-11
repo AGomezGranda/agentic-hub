@@ -106,6 +106,19 @@ it("streams authenticated events across UTF-8 chunk boundaries from the cursor",
 	expect(seen).toEqual(["Plan café ☕"]);
 });
 
+it("rejects a malformed token before opening the stream", async () => {
+	const fetchImpl = vi.fn();
+	await expect(
+		streamRunEvents({
+			runId: RUN_ID,
+			token: "token“",
+			fetchImpl,
+			onEvent: vi.fn(),
+		}),
+	).rejects.toMatchObject({ status: 401, code: "invalid_token" });
+	expect(fetchImpl).not.toHaveBeenCalled();
+});
+
 it("stops after run.ended and reports unauthorized stream responses", async () => {
 	const ended = {
 		type: "run.ended",

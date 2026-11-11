@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{COURSE_TITLE}} · Learn</title>
+  <link rel="stylesheet" href="assets/styles.css">
+</head>
+<body>
+  <a class="skip" href="#main">Skip to learning</a>
+  <header class="masthead"><span class="brand">learn /</span><span>{{COURSE_TITLE}}</span></header>
+  <main id="main">
+    <p class="eyebrow">Your learning workspace · {{UPDATED_DATE}}</p>
+    <h1>{{MISSION_HEADLINE}}</h1>
+    <p class="lead">{{MISSION_DESCRIPTION}}</p>
+    <section class="focus" aria-labelledby="focus-title">
+      <p class="eyebrow">Current focus</p>
+      <h2 id="focus-title">{{CURRENT_FOCUS}}</h2>
+      <p>{{NEXT_ACTION}}</p>
+      {{CURRENT_LESSON_LINK_OR_DIAGNOSIS_NOTE}}
+    </section>
+    <div class="columns">
+      <section aria-labelledby="map-title">
+        <h2 id="map-title">Understanding, with evidence</h2>
+        <p class="muted">Reading is exposure. These labels reflect demonstrated work.</p>
+        <div class="table-wrap" tabindex="0" role="region" aria-label="Concept evidence, scroll if needed">
+          <table>
+            <thead><tr><th scope="col">Concept</th><th scope="col">Evidence</th><th scope="col">Next check</th></tr></thead>
+            <tbody>{{CONCEPT_ROWS}}</tbody>
+          </table>
+        </div>
+      </section>
+      <aside aria-labelledby="review-title">
+        <h2 id="review-title">Return to these</h2>
+        {{REVIEW_LIST_OR_EMPTY_NOTE}}
+        <p class="muted">Review dates guide your next session; they do not send reminders.</p>
+      </aside>
+    </div>
+    <section aria-labelledby="lessons-title"><h2 id="lessons-title">Lessons</h2>{{LESSON_LIST_OR_EMPTY_NOTE}}</section>
+    <section aria-labelledby="milestone-title"><h2 id="milestone-title">What you are working toward</h2>{{EXIT_CRITERIA}}</section>
+  </main>
+  <footer>Read and explore here. Return to your agent chat for feedback and saved progress.</footer>
+</body>
+</html>

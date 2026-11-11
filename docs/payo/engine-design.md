@@ -38,7 +38,7 @@ payo/
     (later)        pr-review/, incident/, evaluation/
   adapters/
     runner-pi/  runner-fake/  (later runner-claude/, runner-codex/)
-    jira-acli/  git/  gh/  store-sqlite/
+    jira-acli/  git/  checks-process/  store-sqlite/  (later gh/)
   apps/
     server/        the only composition root; HTTP + SSE; `payo serve`
     cli/           thin client: `payo start ABC-123`, `payo start --prompt …`, `payo approve`, …
@@ -62,6 +62,12 @@ The current code implements `AgentRunner`, `WorkItemSource`, planning
 `Workspace`, execution-only `ExecutionWorkspace`, `Checks`, and `RunStore` in
 `packages/kernel`, with real adapters under `adapters/`. GitHub `CodeHost`
 operations remain outside this slice.
+
+Inside `modules/factory/src`, `domain/` holds pure planning/execution rules,
+`planning/` and `execution/` own their lifecycle flows, and `infrastructure/plans.ts`
+owns mutable plan-file access. The server's `run-application.ts` coordinates
+commands and queries; `http.ts` handles transport and `composition.ts` wires
+dependencies. Package and factory boundary tests enforce these divisions.
 
 ## Ownership
 
@@ -130,7 +136,7 @@ interface RunStore {
 }
 ```
 
-`AgentEvent` is a normalised union: `started`, `message`, `tool_call`, `tool_result`, `usage`, `result`, `error`. Each adapter also keeps its native log as an artifact. The Pi adapter spawns `pi --mode json` with `--tools`, `--model` and a per-attempt `--session-dir`, and reads stdout as strict LF-split JSONL. It passes `--no-context-files --no-extensions --no-skills --no-prompt-templates --no-mcp` so the developer's global Pi setup (AGENTS.md, subagents) never leaks into a step. The role text is passed as the prompt from the factory's snapshot; `--skill` is intentionally not used so a run cannot drift from the recorded skill SHA. The child runs with `cwd` set to the run worktree and stdin ignored, so it inspects the right tree and does not wait for input. Raw JSONL is stored as an `agent-raw-log` artifact. The model provider is Enterprise Claude through Pi's built-in `anthropic` OAuth login, which works with these flags. Pi reports tokens and an API-equivalent cost; the engine records that cost as an estimate, not as billing.
+`AgentEvent` is a normalised union: `started`, `message`, `tool_call`, `tool_result`, `usage`, `result`, `error`. Each adapter also keeps its native log as an artifact. The Pi adapter spawns `pi --mode json` with `--tools`, `--model` and a per-attempt `--session-dir`, and reads stdout as strict LF-split JSONL. It passes `--no-context-files --no-extensions --no-skills --no-prompt-templates --no-mcp` so the developer's global Pi setup (AGENTS.md, subagents) never leaks into a step. The role text is passed as the prompt from the factory's snapshot; `--skill` is intentionally not used so a run cannot drift from the recorded skill SHA. The child runs with `cwd` set to the run worktree and stdin ignored, so it inspects the right tree and does not wait for input. Raw JSONL is stored as an `agent-raw-log` artifact. Provider/model selection is configurable per role; Pi owns the corresponding authentication and provider setup. Pi reports tokens and an API-equivalent cost; the engine records that cost as an estimate, not as billing.
 
 ## Role specs
 
@@ -159,7 +165,11 @@ Invalid output is retried once with the validation error, then escalated.
 
 By default, data lives in `~/.payo/`: `payo.db` and `artifacts/`; `[paths].data_dir` or `PAYO_DATA_DIR` can select another absolute path. Prompt request text is stored as a `factory-work-item-request-v1` artifact under the resolved data directory; `run.created.config` contains only its reference, not the original plaintext. Agents may echo the prompt in attempt events, which authenticated event consumers can read, so this is not a confidentiality boundary. Plans live there, not in the target repo. Planning worktrees and execution worktrees live under `~/.payo/worktrees/<run>/`; an execution retains its local `payo/<execution-id>` branch.
 
-Usage and cost stay `unknown` when a harness does not report them, never `0`.
+Usage is a replacement snapshot for the whole attempt, emitted before the terminal event; adapters accumulate native per-call deltas first. Optional `costDetails` holds cumulative subtotals grouped by `(currency, basis)` plus a `complete` flag. A settled result or native error can keep the adapter's completeness; cancellation, timeouts, interruption, thrown validation, or a stream that ends without a result make the money incomplete. A missing report keeps earlier known subtotals; it never becomes zero.
+
+The cost tree is work → runs → steps → attempts, derived from attempts rather than persisted as parent totals. `attempts` counts every started attempt, including failed and retried work. Coverage is `complete` when every included attempt has complete qualified amounts, `partial` when known subtotals accompany incomplete attempts, and `unknown` when nothing usable was reported. Legacy records without `costDetails` remain readable, but their scalar cost has no currency or basis and contributes no qualified total. `AttemptRecord.model` records the requested model, not billing provenance, and reported cost is not an invoice guarantee.
+
+`projectRunCosts` (kernel) projects one run log; `readWorkCosts` (factory) combines a planning run with every stored execution child. Both are read-time views: newly created children appear on the next query, and each run reports the `asOfSeq` it included. Discovery reads logs without recovering, scheduling, or reading artifacts.
 
 ## Durability rules
 
@@ -214,8 +224,11 @@ Every phase, repair, and review role is a fresh attempt/session. Immutable
 artifacts and receipts carry context; transcripts do not. Restart creates a
 recovery gate. Resume verifies branch/path/base/history and saved intent, then
 reconciles interrupted writer changes or reruns check/review evidence. It never
-replays accepted phases or silently recreates a missing dirty worktree. Plan
-conflicts require a corrected, newly approved source run.
+replays accepted phases or silently recreates a missing dirty worktree. Operator
+issue answers can clarify reported plan issues on resume without changing the
+pinned plan; changed requirements need a corrected, newly approved source run.
+The web correction action starts a new planning run and keeps the original
+execution paused, with no automatic transfer of retained edits.
 
 Writable Pi is a trusted local-code execution boundary, not a sandbox: a writer
 can run code with the server user's permissions and inherited environment.

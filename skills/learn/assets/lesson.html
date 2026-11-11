@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{LESSON_TITLE}} · Learn</title>
+  <link rel="stylesheet" href="../assets/styles.css">
+</head>
+<body>
+  <a class="skip" href="#main">Skip to lesson</a>
+  <header class="masthead"><a class="brand" href="../index.html">learn /</a><span>{{COURSE_TITLE}}</span></header>
+  <main id="main" class="lesson">
+    <p class="eyebrow">Lesson {{LESSON_NUMBER}} · {{SESSION_SCOPE}}</p>
+    <h1>{{LESSON_TITLE}}</h1>
+    <p class="lead">{{OUTCOME_AND_MISSION_CONNECTION}}</p>
+    <section class="focus" aria-labelledby="starting-title">
+      <h2 id="starting-title">Before you begin</h2><p>{{PREREQUISITES_AND_STARTING_POINT}}</p>
+    </section>
+    <section aria-labelledby="problem-title"><h2 id="problem-title">The problem</h2>{{CONCRETE_PROBLEM}}</section>
+    <section aria-labelledby="mechanism-title"><h2 id="mechanism-title">How it works, and why</h2>{{MECHANISM_DERIVATION_AND_VISUAL}}</section>
+    <section aria-labelledby="example-title"><h2 id="example-title">Work through a case</h2>{{WORKED_EXAMPLE_WITH_REASONING}}</section>
+    <section aria-labelledby="limits-title"><h2 id="limits-title">Where the model breaks</h2>{{ASSUMPTIONS_COUNTEREXAMPLE_AND_TRADEOFFS}}</section>
+    <section class="focus" aria-labelledby="practice-title">
+      <p class="eyebrow">From explanation to understanding</p>
+      <h2 id="practice-title">Your turn</h2>{{INDEPENDENT_TASK_WITHOUT_SOLUTION}}
+      <p class="muted">Send your reasoning or work in the agent chat. This page does not submit answers or save progress.</p>
+    </section>
+    {{OPTIONAL_ENRICHMENT_OR_EMPTY}}
+    <section aria-labelledby="sources-title"><h2 id="sources-title">Go to the source</h2>{{ANNOTATED_SOURCES}}</section>
+    <nav aria-label="Lesson navigation"><a href="../index.html">Back to learning workspace</a>{{EXISTING_SIBLING_LINKS_OR_EMPTY}}</nav>
+  </main>
+  <footer>Ask your tutor about any step you cannot reconstruct. Reading a solution is practice, not assessment.</footer>
+</body>
+</html>

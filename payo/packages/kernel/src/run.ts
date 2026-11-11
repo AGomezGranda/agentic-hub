@@ -1,6 +1,7 @@
 import { type Json, RunConfig, RunEventBody } from "@payo/contracts";
 import { fold, type RunState, reduce } from "./state.ts";
 import type { RunStore } from "./store.ts";
+import { incompleteUsage, UNKNOWN_USAGE } from "./usage.ts";
 
 /** Recursive merge of plain objects; arrays and scalars in `overrides` replace the defaults. */
 export function resolveRunConfig(
@@ -55,7 +56,9 @@ export function recover(state: RunState): RunEventBody[] {
 			type: "attempt.finished",
 			attemptId: attempt.attemptId,
 			outcome: "interrupted",
-			usage: { tokensIn: "unknown", tokensOut: "unknown", cost: "unknown" },
+			// Keep observed spend; recovery cannot claim the attempt was fully observed.
+			usage:
+				attempt.usage === null ? UNKNOWN_USAGE : incompleteUsage(attempt.usage),
 		});
 		bodies.push({
 			type: "gate.raised",

@@ -5,10 +5,55 @@ import pytest
 from agentic_hub import agents, catalog
 
 
-def test_codex_uses_native_skill_location() -> None:
-    target, mode = agents.AGENTS["codex"]
+@pytest.mark.parametrize("agent", ["pi", "opencode", "codex"])
+def test_shared_native_skill_location(agent: str) -> None:
+    target, mode = agents.AGENTS[agent]
     assert target == Path.home() / ".agents/skills"
     assert mode == "symlink"
+
+
+@pytest.mark.parametrize("fanout", [False, True])
+def test_shared_skill_lifecycle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fanout: bool
+) -> None:
+    src, fake_agents = setup_agents(tmp_path, monkeypatch)
+    shared_hosts = ("pi", "opencode", "codex")
+    for host in shared_hosts:
+        fake_agents[host] = (tmp_path / ".agents/skills", "symlink")
+    skill = make_fanout_skill(src, "demo") if fanout else make_skill(src, "demo")
+    make_fanout_branches(src, (*shared_hosts, "claude"))
+    (skill / "REFERENCE.md").write_text("Shared reference.\n")
+    source = (skill / "SKILL.md").read_text()
+
+    for host in shared_hosts:
+        assert agents.install_one(host, "demo")
+        target = agents.target_path(host, "demo")
+        installed = (target / "SKILL.md").read_text()
+        assert (target / "REFERENCE.md").read_text() == "Shared reference.\n"
+        if fanout:
+            assert "Use only the section matching the current harness" in installed
+            for branch in shared_hosts:
+                assert f"[{branch} branch content]" in installed
+            assert "[claude branch content]" not in installed
+        else:
+            assert target.is_symlink()
+        assert all(agents.status(h, "demo") == "linked" for h in shared_hosts)
+
+    assert agents.install_one("claude", "demo")
+    if fanout:
+        claude_text = (agents.target_path("claude", "demo") / "SKILL.md").read_text()
+        assert "[claude branch content]" in claude_text
+        assert "[pi branch content]" not in claude_text
+        branch = src / "_shared/fanning-out/codex.md"
+        branch.write_text("Updated Codex branch.\n")
+        assert all(agents.status(h, "demo") == "stale" for h in shared_hosts)
+        assert agents.install_one("pi", "demo")
+        assert all(agents.status(h, "demo") == "linked" for h in shared_hosts)
+
+    assert (skill / "SKILL.md").read_text() == source
+    assert agents.remove_one("opencode", "demo")
+    assert all(agents.status(h, "demo") == "missing" for h in shared_hosts)
+    assert agents.status("claude", "demo") == "linked"
 
 
 def test_codex_installs_native_skill_with_host_branch(

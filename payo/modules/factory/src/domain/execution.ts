@@ -11,6 +11,52 @@ import {
 export const MAX_DIFF_BYTES = 4 * 1024 * 1024;
 export const MAX_VALIDATION_CYCLES = 3;
 
+export function validationAction(
+	status: "passed" | "failed" | "dirty",
+	cycle: number,
+): "review" | "retry" | "repair" | "escalate" {
+	if (status === "passed") return "review";
+	if (cycle >= MAX_VALIDATION_CYCLES) return "escalate";
+	return status === "dirty" ? "retry" : "repair";
+}
+
+export function executionResumeStage(
+	checkpoint: ExecutionCheckpoint,
+): ExecutionStage {
+	if (!checkpoint.inFlight) throw new Error("execution is not resumable");
+	if (!checkpoint.manifest) return "Prepare";
+	if (checkpoint.commitIntent) return "Review";
+	if (checkpoint.scope === "final") return "Finalize";
+	return ["Check", "Review", "Repair"].includes(checkpoint.inFlight.operation)
+		? "Check"
+		: "Implement";
+}
+
+export function executionResumeConflict(
+	checkpoint: ExecutionCheckpoint,
+	gates: Iterable<{ status: string; stepId: string; gateId: string }>,
+): string | null {
+	if (checkpoint.stage !== "Escalated" || !checkpoint.inFlight)
+		return "execution is not resumable";
+	const owned = new Set(checkpoint.inFlight.stepIds);
+	for (const gate of gates)
+		if (gate.status === "open" && !owned.has(gate.stepId))
+			return `unrelated open gate ${gate.gateId}`;
+	return null;
+}
+
+export function hasExecutionPlanConflict(
+	checkpoint: Pick<ExecutionCheckpoint, "statusDetail" | "escalation">,
+): boolean {
+	const reason = checkpoint.escalation?.reason.toLowerCase() ?? "";
+	return (
+		checkpoint.statusDetail === "repair-plan-issue" ||
+		reason.includes("approved-plan conflict") ||
+		reason.includes("reported plan issues") ||
+		reason.includes("reports approved-plan issues")
+	);
+}
+
 // Same-stage writes record in-flight/status detail; Review may start the next phase.
 const transitions: Record<ExecutionStage, readonly ExecutionStage[]> = {
 	Prepare: ["Prepare", "Implement", "Escalated"],

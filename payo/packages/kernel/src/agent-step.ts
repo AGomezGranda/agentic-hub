@@ -15,15 +15,10 @@ import type { AgentRunner } from "./agent.ts";
 import { describeReason, type Limiter } from "./fanout.ts";
 import type { RunLog } from "./run-log.ts";
 import type { RunStore } from "./store.ts";
+import { incompleteUsage, UNKNOWN_USAGE } from "./usage.ts";
 
 export const RETRY_NOTE =
 	"Fix the output in the previous-output input, following the validation-error input.";
-
-const UNKNOWN_USAGE: UsageRecord = {
-	tokensIn: "unknown",
-	tokensOut: "unknown",
-	cost: "unknown",
-};
 
 // One commit per 32 streamed rows instead of one per row.
 const ATTEMPT_EVENT_BATCH = 32;
@@ -202,7 +197,7 @@ async function executeAttempt(
 					type: "attempt.finished",
 					attemptId,
 					outcome: run.outcome,
-					usage: watch.usage ?? UNKNOWN_USAGE,
+					usage: attemptUsage(watch),
 					error: run.error,
 				},
 			]);
@@ -216,7 +211,7 @@ async function executeAttempt(
 						type: "attempt.finished",
 						attemptId,
 						outcome: "failed",
-						usage: watch.usage ?? UNKNOWN_USAGE,
+						usage: incompleteUsage(watch.usage ?? UNKNOWN_USAGE),
 						error: describeReason(error),
 					},
 				])
@@ -227,6 +222,14 @@ async function executeAttempt(
 		watch.dispose();
 		if (dir !== undefined) await rm(dir, { recursive: true, force: true });
 	}
+}
+
+// A settled result or native error keeps the adapter's completeness; every other exit is incomplete.
+function attemptUsage(watch: Watch): UsageRecord {
+	const usage = watch.usage ?? UNKNOWN_USAGE;
+	const settled =
+		watch.terminal?.kind === "result" || watch.terminal?.kind === "error";
+	return settled ? usage : incompleteUsage(usage);
 }
 
 // shortcut: the raw log is unbounded; cap it when a real attempt produces a log large enough to matter.
@@ -285,6 +288,7 @@ async function streamAttempt(
 					}
 					pending.push({ type: "attempt.event", attemptId, event });
 					if (
+						event.type === "usage" ||
 						watch.terminal !== undefined ||
 						pending.length >= ATTEMPT_EVENT_BATCH
 					)

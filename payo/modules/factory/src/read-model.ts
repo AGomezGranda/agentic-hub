@@ -7,9 +7,8 @@ import {
 } from "@payo/contracts";
 import { sha256Hex } from "@payo/kernel";
 import { loadPlanVersions, readArtifact } from "./artifacts.ts";
+import { resolveImplementation } from "./domain/phase-outline.ts";
 import { CommandError } from "./errors.ts";
-import { resolveImplementation } from "./phase-outline.ts";
-import { readPlan } from "./plans.ts";
 import { type FactoryHandle, mutableFactoryHandle } from "./types.ts";
 
 export async function readPlanVersions(handle: FactoryHandle) {
@@ -85,7 +84,7 @@ async function projectPlan(
 
 		if (checkpoint.stage === "Approval" || checkpoint.stage === "Escalated") {
 			const runId = log.current().runId;
-			const markdown = await readPlan(deps.dataDir, runId);
+			const markdown = await deps.readPlan(runId);
 			return {
 				available: true as const,
 				markdown,

@@ -1,5 +1,6 @@
 import hashlib
 import logging
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Literal
 
@@ -15,8 +16,8 @@ Status = Literal["linked", "stale", "missing", "conflict", "error"]
 # agent -> (target dir, mode)
 AGENTS: dict[str, tuple[Path, Mode]] = {
     "claude": (HOME / ".claude/skills", "symlink"),
-    "pi": (HOME / ".pi/agent/skills", "symlink"),
-    "opencode": (HOME / ".config/opencode/skill", "symlink"),
+    "pi": (HOME / ".agents/skills", "symlink"),
+    "opencode": (HOME / ".agents/skills", "symlink"),
     "codex": (HOME / ".agents/skills", "symlink"),
 }
 
@@ -24,14 +25,22 @@ CODEX_MARKER_PREFIX = "<!-- agentic-hub: generated sha256:"
 CODEX_MARKER_SUFFIX = " -->"
 
 # Marks the spot in a SKILL.md's "### Fanning out" section where the
-# per-host fan-out prose is spliced in at install time (skills/_shared/
-# fanning-out/<agent>.md). A skill without this marker is never spliced;
+# fan-out prose for the target's hosts is spliced in at install time
+# (skills/_shared/fanning-out/<agent>.md). A skill without this marker is never spliced;
 # it stays plain `symlink` (or flattened `codex`) on every host.
 FANOUT_MARKER = "<!-- agentic-hub: fanout -->"
 
 # Reference files bundled into a Codex prompt; anything under these dirs
 # (scripts, illustrative assets) is never inlined.
 _EXCLUDED_REF_DIRS = {"scripts", "assets"}
+
+
+def unique_targets(agent_names: Iterable[str]) -> list[str]:
+    """Keep one representative per install directory and mode, in input order."""
+    targets: dict[tuple[Path, Mode], str] = {}
+    for agent in agent_names:
+        targets.setdefault(AGENTS[agent], agent)
+    return list(targets.values())
 
 
 def target_path(agent: str, name: str) -> Path:
@@ -54,17 +63,24 @@ def is_our_codex_file(path: Path) -> bool:
 
 
 def _fanout_branch(agent: str) -> str:
-    """This host's fan-out prose (skills/_shared/fanning-out/<agent>.md).
-
-    A missing or unreadable branch file is a hard install-time error, not a
-    silent fallback -- a host installing with no fan-out instructions at all
-    is exactly the failure this mechanism exists to prevent.
-    """
-    path = catalog.SKILLS_DIR / "_shared" / "fanning-out" / f"{agent}.md"
-    try:
-        return path.read_text(encoding="utf-8")
-    except OSError as e:
-        raise ValueError(f"agent {agent!r} has no fan-out branch at {path}") from e
+    """Include every host sharing this target; missing branches fail installation."""
+    hosts = [host for host in AGENTS if AGENTS[host] == AGENTS[agent]]
+    branches = []
+    for host in hosts:
+        path = catalog.SKILLS_DIR / "_shared" / "fanning-out" / f"{host}.md"
+        try:
+            branches.append(path.read_text(encoding="utf-8"))
+        except OSError as e:
+            raise ValueError(f"agent {host!r} has no fan-out branch at {path}") from e
+    if len(hosts) == 1:
+        return branches[0]
+    return (
+        "Use only the section matching the current harness; ignore the others.\n\n"
+        + "\n\n".join(
+            f"#### {host}\n\n{branch.rstrip()}"
+            for host, branch in zip(hosts, branches, strict=True)
+        )
+    )
 
 
 def _splice(text: str, agent: str) -> str:
@@ -98,7 +114,7 @@ def is_our_spliced_skill(path: Path) -> bool:
 
 def _spliced_output(name: str, agent: str) -> str:
     """Full generated SKILL.md text for a spliced host: source SKILL.md
-    with the FANOUT_MARKER line replaced by this host's branch prose, and
+    with the FANOUT_MARKER line replaced by the target's host branches, and
     a generated/hash marker (`_codex_marker`, same convention as Codex's
     flat file) stamped immediately above the branch -- inside the
     document rather than at line 1, since a real SKILL.md's frontmatter

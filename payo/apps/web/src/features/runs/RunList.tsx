@@ -10,7 +10,16 @@ export interface RunListProps {
 }
 
 type Grouping = "status" | "repository";
-type RunGroup = { label: string; runs: RunSummary[] };
+type WorkItem = { id: string; runs: [RunSummary, ...RunSummary[]] };
+type RunGroup = { label: string; items: WorkItem[] };
+
+function workStatus(item: WorkItem) {
+	return item.runs.some((run) => run.openGates.length > 0)
+		? "Needs you"
+		: item.runs.some((run) => run.status === "active")
+			? "Active"
+			: "Ended";
+}
 
 function repositoryName(repo: string) {
 	const segments = repo.split(/[\\/]/).filter(Boolean);
@@ -25,28 +34,43 @@ export function RunList({
 	onSelect,
 }: RunListProps) {
 	const [grouping, setGrouping] = useState<Grouping>("status");
-	const needsYouRuns = runs.filter((run) => run.openGates.length > 0);
-	const activeRuns = runs.filter(
-		(run) => run.status === "active" && run.openGates.length === 0,
-	);
+	const families = new Map<string, WorkItem>();
+	for (const run of runs) {
+		const id = run.execution?.sourceRunId ?? run.runId;
+		const family = families.get(id);
+		if (!family) {
+			families.set(id, { id, runs: [run] });
+			continue;
+		}
+		if (run.execution) family.runs.push(run);
+		else family.runs.unshift(run);
+		families.set(id, family);
+	}
+	const items = Array.from(families.values());
+	const needsYouRuns = items.filter((item) => workStatus(item) === "Needs you");
+	const activeRuns = items.filter((item) => workStatus(item) === "Active");
 	let groups: RunGroup[];
 
 	if (grouping === "status") {
 		groups = [
-			{ label: "Needs you", runs: needsYouRuns },
-			{ label: "Active", runs: activeRuns },
-			{ label: "Ended", runs: runs.filter((run) => run.status === "ended") },
+			{ label: "Needs you", items: needsYouRuns },
+			{ label: "Active", items: activeRuns },
+			{
+				label: "Ended",
+				items: items.filter((item) => workStatus(item) === "Ended"),
+			},
 		];
 	} else {
-		const repositoryRuns = new Map<string, RunSummary[]>();
-		for (const run of runs) {
-			const groupRuns = repositoryRuns.get(run.repo) ?? [];
-			groupRuns.push(run);
-			repositoryRuns.set(run.repo, groupRuns);
+		const repositoryItems = new Map<string, WorkItem[]>();
+		for (const item of items) {
+			const repo = item.runs[0].repo;
+			const groupItems = repositoryItems.get(repo) ?? [];
+			groupItems.push(item);
+			repositoryItems.set(repo, groupItems);
 		}
-		groups = Array.from(repositoryRuns.entries())
+		groups = Array.from(repositoryItems.entries())
 			.sort(([left], [right]) => left.localeCompare(right))
-			.map(([repo, groupRuns]) => ({ label: repo, runs: groupRuns }));
+			.map(([repo, items]) => ({ label: repo, items }));
 	}
 
 	return (
@@ -56,14 +80,14 @@ export function RunList({
 					<p className="text-[10px] font-bold tracking-[0.14em] text-[var(--muted)]">
 						YOUR WORK
 					</p>
-					<h2 className="mt-1 text-base font-semibold">Recent runs</h2>
+					<h2 className="mt-1 text-base font-semibold">Work items</h2>
 				</div>
 				<span className="shrink-0 rounded-sm bg-[var(--surface-raised)] px-2.5 py-1 text-xs font-semibold text-[var(--muted)]">
-					{runs.length} loaded runs
+					{items.length} loaded work items
 				</span>
 			</div>
 			<section
-				aria-label="Loaded run summary"
+				aria-label="Loaded work summary"
 				className="mb-4 grid grid-cols-2 gap-2"
 			>
 				<div className="rounded-sm border border-[var(--line)] bg-[var(--surface)] px-3 py-2">
@@ -85,7 +109,7 @@ export function RunList({
 			</section>
 			<fieldset className="mb-4 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
 				<legend className="mb-2 text-xs font-semibold text-[var(--muted)]">
-					Group runs by
+					Group work by
 				</legend>
 				{(["status", "repository"] as const).map((mode) => (
 					<label
@@ -116,12 +140,20 @@ export function RunList({
 						{runs.some((run) => run.runId === selectedRunId) ? null : (
 							<option value={selectedRunId}>Current run</option>
 						)}
-						{runs.map((run) => (
-							<option key={run.runId} value={run.runId}>
-								{run.workItem?.title ?? run.runId}
-								{run.execution ? ` · Execution ${run.execution.prId}` : ""} ·{" "}
-								{run.repo}
-							</option>
+						{items.map((item) => (
+							<optgroup
+								key={item.id}
+								label={item.runs[0].workItem?.title ?? item.id}
+							>
+								{item.runs.map((run) => (
+									<option key={run.runId} value={run.runId}>
+										{run.execution
+											? `PR workspace ${run.execution.prId}`
+											: "Plan"}{" "}
+										· {run.repo}
+									</option>
+								))}
+							</optgroup>
 						))}
 					</select>
 				</label>
@@ -137,14 +169,14 @@ export function RunList({
 					) : runs.length === 0 ? (
 						<p className="text-sm text-[var(--muted)]">No runs yet</p>
 					) : null}
-					{groups.map(({ label, runs: groupRuns }) => (
+					{groups.map(({ label, items: groupItems }) => (
 						<section key={label} aria-label={label} className="min-w-0">
 							<h3
 								className={`mb-2 text-[10px] font-bold text-[var(--muted)] ${grouping === "status" ? "uppercase tracking-[0.13em]" : "break-all tracking-normal"}`}
 							>
 								{grouping === "status" ? (
 									<>
-										{label} · {groupRuns.length}
+										{label} · {groupItems.length}
 									</>
 								) : (
 									<>
@@ -155,22 +187,57 @@ export function RunList({
 											{label}
 										</span>
 										<span className="mt-1 block font-semibold">
-											{groupRuns.length}{" "}
-											{groupRuns.length === 1 ? "run" : "runs"}
+											{groupItems.length}{" "}
+											{groupItems.length === 1 ? "work item" : "work items"}
 										</span>
 									</>
 								)}
 							</h3>
 							<ul className="min-w-0 space-y-2">
-								{groupRuns.map((run) => (
-									<RunRow
-										key={run.runId}
-										run={run}
-										selected={run.runId === selectedRunId}
-										showRepository={grouping === "status"}
-										onSelect={onSelect}
-									/>
-								))}
+								{groupItems.map((item) => {
+									const first = item.runs[0];
+									if (item.runs.length === 1 && !first.execution)
+										return (
+											<RunRow
+												key={item.id}
+												run={first}
+												selected={first.runId === selectedRunId}
+												showRepository={grouping === "status"}
+												onSelect={onSelect}
+											/>
+										);
+									return (
+										<li
+											key={item.id}
+											className="min-w-0 rounded-sm border border-[var(--line)] p-3"
+										>
+											<p className="text-sm font-semibold">
+												{first.workItem?.title ?? "Work item unresolved"}
+											</p>
+											<p className="mt-1 text-xs text-[var(--muted)]">
+												{workStatus(item)}
+												{grouping === "status" ? ` · ${first.repo}` : ""}
+											</p>
+											{first.execution && (
+												<p className="mt-2 text-xs text-[var(--muted)]">
+													Source plan is not in the loaded results.
+												</p>
+											)}
+											<ul className="mt-2 border-l border-[var(--line)] pl-2">
+												{item.runs.map((run) => (
+													<RunRow
+														key={run.runId}
+														run={run}
+														selected={run.runId === selectedRunId}
+														showRepository={false}
+														nested
+														onSelect={onSelect}
+													/>
+												))}
+											</ul>
+										</li>
+									);
+								})}
 							</ul>
 						</section>
 					))}
@@ -184,15 +251,21 @@ function RunRow({
 	run,
 	selected,
 	showRepository,
+	nested = false,
 	onSelect,
 }: {
 	run: RunSummary;
 	selected: boolean;
 	showRepository: boolean;
+	nested?: boolean;
 	onSelect: (runId: string) => void;
 }) {
 	const item = run.workItem;
-	const title = item?.title ?? "Work item unresolved";
+	const title = nested
+		? run.execution
+			? `PR workspace ${run.execution.prId}`
+			: "Plan"
+		: (item?.title ?? "Work item unresolved");
 	const subtitle =
 		item?.key ?? (item?.source === "prompt" ? "Prompt" : run.runId);
 	const openGateCount = run.openGates.length;
@@ -237,7 +310,9 @@ function RunRow({
 					</p>
 					<p className="mt-1 min-w-0 truncate text-xs text-[var(--muted)]">
 						{subtitle}
-						{run.execution ? ` · Execution ${run.execution.prId}` : ""}
+						{run.execution && !nested
+							? ` · PR workspace ${run.execution.prId}`
+							: ""}
 						{showRepository ? (
 							<>
 								{" · "}
@@ -264,10 +339,10 @@ function RunRow({
 						</span>
 					</span>
 					<span
-						title={run.stage ?? "Stage pending"}
+						title={run.execution?.stage ?? run.stage ?? "Stage pending"}
 						className="max-w-full truncate rounded-sm bg-[var(--surface-raised)] px-2 py-1 text-[10px] font-semibold text-[var(--muted)]"
 					>
-						{run.stage ?? "Stage pending"}
+						{run.execution?.stage ?? run.stage ?? "Stage pending"}
 					</span>
 				</div>
 				<p className="mt-2 break-all text-[11px] text-[var(--muted)]">

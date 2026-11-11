@@ -329,6 +329,14 @@ it("parses SSE blocks across chunks and tracks IDs", () => {
 	expect(parser.push(": heartbeat\n\n")).toEqual([]);
 });
 
+it("parses split CRLF and fields without spaces", () => {
+	const parser = new SseParser();
+	const blocks = ["id: 1\r", "\ndata:{}\r", "\n\r", "\n"].flatMap((chunk) =>
+		parser.push(chunk),
+	);
+	expect(blocks).toEqual([{ id: 1, data: "{}" }]);
+});
+
 it("sends the SSE cursor and stops at run.ended", async () => {
 	let url = "";
 	let headers: Record<string, string> = {};
@@ -356,6 +364,40 @@ it("sends the SSE cursor and stops at run.ended", async () => {
 	expect(headers.Authorization).toBe("Bearer secret");
 	expect(seen).toEqual(["run.ended"]);
 });
+
+it.each(["invalid JSON", "callback failure"])(
+	"cancels the stream on %s",
+	async (failure) => {
+		const cancel = vi.fn();
+		const event = {
+			type: "run.ended",
+			outcome: "approved",
+			seq: 4,
+			at: "2026-10-30T00:00:00.000Z",
+		};
+		const stream = new ReadableStream({
+			start(controller) {
+				controller.enqueue(
+					new TextEncoder().encode(
+						`data: ${failure === "invalid JSON" ? "{" : JSON.stringify(event)}\n\n`,
+					),
+				);
+			},
+			cancel,
+		});
+		const client = new CliClient(
+			"http://localhost",
+			"secret",
+			(async () => new Response(stream)) as typeof fetch,
+		);
+		await expect(
+			client.stream(runId, () => {
+				throw new Error("callback failed");
+			}),
+		).rejects.toThrow();
+		expect(cancel).toHaveBeenCalledOnce();
+	},
+);
 
 it("prints the token only for the explicit token command", async () => {
 	const dir = await dataDir();

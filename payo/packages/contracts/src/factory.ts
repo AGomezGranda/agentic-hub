@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CostSummary, RunCostTree } from "./cost.ts";
 import { ArtifactRef, Id } from "./primitives.ts";
 
 const unique = <T extends { id: string }>(items: T[]) =>
@@ -207,3 +208,11 @@ export const FactoryRunConfig = z.preprocess((input) => {
 	};
 }, FactoryRunConfigSchema);
 export type FactoryRunConfig = z.infer<typeof FactoryRunConfigSchema>;
+
+export const WorkCostTree = z.object({
+	sourceRunId: Id,
+	planning: RunCostTree,
+	executions: z.array(z.object({ prId: Id, run: RunCostTree })),
+	total: CostSummary,
+});
+export type WorkCostTree = z.infer<typeof WorkCostTree>;

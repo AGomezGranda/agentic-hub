@@ -1,45 +1,13 @@
 import { randomUUID } from "node:crypto";
-import type {
-	DoctorReport,
-	ImplementRequest,
-	PlanRestoreRequest,
-	PlanUpdateRequest,
-	PlanVersionDetail,
-	RunEvent,
-	RunReview,
-	RunSummary,
-	WorkItemRequest,
-} from "@payo/contracts";
+import type { DoctorReport } from "@payo/contracts";
+import { FactoryRunConfig as FactoryRunConfigSchema } from "@payo/contracts";
 import {
-	ExecutionRunConfig as ExecutionRunConfigSchema,
-	FactoryRunConfig as FactoryRunConfigSchema,
-} from "@payo/contracts";
-import {
-	acceptPlanUpdate,
-	answer as answerRun,
-	approve as approveRun,
-	assertChangeable,
-	assertExecutionResumable,
-	assertResumable,
-	beginExecution,
-	beginFactory,
-	type ExecutionHandle,
-	executeExecution,
-	executeFactory,
 	type FactoryDeps,
-	type FactoryHandle,
-	findExistingExecution,
-	openExecution,
-	openFactory,
 	QUALITY_EXPECTATIONS,
-	readExecutionSummary,
-	readPlanVersion,
-	readPlanVersions,
-	readRunReview,
-	requestChanges as requestChangesRun,
-	resumeExecution,
-	resume as resumeRun,
+	readPlan,
 	snapshotRole,
+	validatePublicationPolicy,
+	writePlan,
 } from "@payo/factory";
 import {
 	createLimiter,
@@ -53,36 +21,14 @@ import type { AdapterSet } from "./adapters.ts";
 import { createAdapterSet } from "./adapters.ts";
 import type { ServerConfig } from "./config.ts";
 import { runDoctor } from "./doctor.ts";
-import { ApplicationError } from "./errors.ts";
+import {
+	createRunApplication,
+	type RunApplication,
+} from "./run-application.ts";
 
-export interface Composition {
+export interface Composition extends RunApplication {
 	readonly config: ServerConfig;
 	readonly store: RunStore;
-	implement(sourceRunId: string, input: ImplementRequest): Promise<string>;
-	summary(runId: string): Promise<RunSummary>;
-	review(runId: string): Promise<RunReview>;
-	planVersions(runId: string): Promise<PlanVersionDetail[]>;
-	planVersion(runId: string, number: number): Promise<PlanVersionDetail>;
-	planUpdate(
-		runId: string,
-		input: PlanUpdateRequest | PlanRestoreRequest,
-	): Promise<void>;
-	listRuns(): Promise<RunSummary[]>;
-	readEvents(runId: string, fromSeq?: number): Promise<RunEvent[]>;
-	hasRun(runId: string): boolean;
-	isActive(runId: string): boolean;
-	start(input: {
-		workItemRequest: WorkItemRequest;
-		repo: string;
-		baseBranch: string;
-	}): Promise<string>;
-	answer(
-		runId: string,
-		input: { questionId: string; text: string },
-	): Promise<RunSummary>;
-	approve(runId: string): Promise<RunSummary>;
-	requestChanges(runId: string): Promise<void>;
-	resume(runId: string): Promise<void>;
 	doctor(): Promise<DoctorReport>;
 	waitForIdle(): Promise<void>;
 	shutdown(): Promise<void>;
@@ -128,6 +74,7 @@ export async function createComposition(
 	options: CompositionOptions,
 ): Promise<Composition> {
 	const { config } = options;
+	validatePublicationPolicy(config.publication);
 	if (config.scenario !== null && !config.devFakes)
 		throw new Error("fake scenarios require --dev-fakes");
 	const store =
@@ -146,8 +93,6 @@ export async function createComposition(
 		verifier: runRole(config.roles.verifier),
 		reviser: runRole(config.roles.reviser),
 	};
-	const handles = new Map<string, FactoryHandle>();
-	const executionHandles = new Map<string, ExecutionHandle>();
 	const tasks = new Set<Promise<unknown>>();
 	const controllers = new Set<AbortController>();
 	let stopping = false;
@@ -175,6 +120,8 @@ export async function createComposition(
 		workItems: adapters.workItems,
 		workspace: adapters.workspace,
 		dataDir: config.dataDir,
+		readPlan: (runId) => readPlan(config.dataDir, runId),
+		writePlan: (runId, markdown) => writePlan(config.dataDir, runId, markdown),
 		roleSources: adapters.roleSources,
 	});
 	const executionDeps = () => ({
@@ -230,31 +177,6 @@ export async function createComposition(
 		},
 	});
 
-	for (const runId of ids) {
-		try {
-			const saved = states.get(runId);
-			if (
-				saved &&
-				ExecutionRunConfigSchema.safeParse(saved.config.factory).success
-			)
-				executionHandles.set(
-					runId,
-					await openExecution(executionDeps(), runId),
-				);
-			else handles.set(runId, await openFactory(depsForRun(), runId));
-		} catch (error) {
-			// One unrecoverable record must not block recovery of the others.
-			logFailure(`could not recover run ${runId}`, error);
-		}
-	}
-
-	function handleOf(runId: string): FactoryHandle {
-		const handle = handles.get(runId);
-		if (!handle)
-			throw new ApplicationError("not_found", `run ${runId} not found`);
-		return handle;
-	}
-
 	function track<T>(work: () => Promise<T>): Promise<T> {
 		const promise = work();
 		tasks.add(promise);
@@ -267,6 +189,7 @@ export async function createComposition(
 	}
 
 	function schedule(work: (signal: AbortSignal) => Promise<unknown>): void {
+		if (stopping) return;
 		const controller = new AbortController();
 		controllers.add(controller);
 		const promise = track(() => work(controller.signal));
@@ -279,314 +202,58 @@ export async function createComposition(
 			});
 	}
 
-	async function summaryOf(runId: string): Promise<RunSummary> {
-		const factory = handles.get(runId);
-		const execution = executionHandles.get(runId);
-		if (!factory && !execution)
-			throw new ApplicationError("not_found", `run ${runId} not found`);
-		const state = (factory ?? execution)?.log.current();
-		if (!state)
-			throw new ApplicationError("not_found", `run ${runId} not found`);
-		const events = await store.read(runId);
-		const first = events[0]?.at;
-		const last = events.at(-1)?.at;
-		if (!first || !last)
-			throw new ApplicationError("not_found", `run ${runId} not found`);
-		const workItem = factory?.checkpoint.workItem;
-		const executionSummary = execution
-			? await readExecutionSummary(execution)
-			: undefined;
-		return {
-			runId,
-			repo: state.repo,
-			baseBranch: state.baseBranch,
-			status: state.status,
-			outcome: state.outcome,
-			stage: execution?.checkpoint.stage ?? factory?.checkpoint.stage ?? null,
-			workItem: workItem
-				? {
-						source: workItem.origin.source,
-						title: workItem.title,
-						key: workItem.origin.source === "jira" ? workItem.origin.key : null,
-					}
-				: null,
-			startedAt: first,
-			updatedAt: last,
-			openGates: [...state.gates.values()]
-				.filter((gate) => gate.status === "open")
-				.map((gate) => ({
-					gateId: gate.gateId,
-					stepId: gate.stepId,
-					kind: gate.kind,
-					allowedCommands: [...gate.allowedCommands],
-					reason: gate.reason,
-				})),
-			...(executionSummary ? { execution: executionSummary } : {}),
-		};
-	}
-
 	async function waitForIdle(): Promise<void> {
 		while (tasks.size > 0) {
 			await Promise.allSettled([...tasks]);
 		}
 	}
 
+	const application = await createRunApplication({
+		store,
+		ids,
+		states,
+		depsForRun,
+		executionDeps,
+		publication:
+			adapters.repository && adapters.codeHost
+				? {
+						repository: adapters.repository,
+						codeHost: adapters.codeHost,
+					}
+				: undefined,
+		roles,
+		preparation: {
+			publication: config.publication,
+			checks: config.checks,
+			roles: config.roles,
+			allowUnconfiguredModel: config.devFakes,
+			platformSupported: process.platform !== "win32",
+			maxConcurrentAgents: cap,
+			loadRoleSources: adapters.loadExecutionRoleSources,
+			logFailure,
+		},
+		maxConcurrentAgents: cap,
+		newId: randomUUID,
+		track,
+		schedule,
+		async withSignal(work) {
+			const controller = new AbortController();
+			controllers.add(controller);
+			try {
+				return await work(controller.signal);
+			} finally {
+				controllers.delete(controller);
+			}
+		},
+		isStopping: () => stopping,
+		logFailure,
+	});
 	return {
+		...application,
 		config,
 		store,
-
-		async summary(runId) {
-			return summaryOf(runId);
-		},
-
-		async review(runId) {
-			return readRunReview(handleOf(runId));
-		},
-
-		async planVersions(runId) {
-			return readPlanVersions(handleOf(runId));
-		},
-		async planVersion(runId, number) {
-			return readPlanVersion(handleOf(runId), number);
-		},
-		async planUpdate(runId, input) {
-			if (stopping)
-				throw new ApplicationError("busy", "server is shutting down");
-			const handle = handleOf(runId);
-			await track(() => acceptPlanUpdate(handle, input));
-			schedule((signal) => executeFactory(handle, { signal }));
-		},
-
-		async listRuns() {
-			const summaries = await Promise.all(
-				[...new Set([...handles.keys(), ...executionHandles.keys()])].map(
-					(runId) =>
-						summaryOf(runId).catch((error) => {
-							logFailure(`skipping unreadable run ${runId} in list`, error);
-							return null;
-						}),
-				),
-			);
-			return summaries
-				.filter((run): run is RunSummary => run !== null)
-				.sort(
-					(a, b) =>
-						b.startedAt.localeCompare(a.startedAt) ||
-						b.runId.localeCompare(a.runId),
-				);
-		},
-
-		async readEvents(runId, fromSeq) {
-			if (!handles.has(runId) && !executionHandles.has(runId))
-				throw new ApplicationError("not_found", `run ${runId} not found`);
-			return store.read(runId, fromSeq);
-		},
-
-		hasRun(runId) {
-			return handles.has(runId) || executionHandles.has(runId);
-		},
-
-		isActive(runId) {
-			return (
-				(handles.get(runId) ?? executionHandles.get(runId))?.log.current()
-					.status === "active"
-			);
-		},
-
-		async implement(sourceRunId, input) {
-			if (stopping)
-				throw new ApplicationError("busy", "server is shutting down");
-			const deps = executionDeps();
-			const existing = await findExistingExecution(deps, {
-				sourceRunId,
-				prId: input.prId,
-				baseBranch: input.base,
-				explicitBase: input.base !== undefined,
-			});
-			if (existing) {
-				const runId = existing.log.current().runId;
-				if (!executionHandles.has(runId)) executionHandles.set(runId, existing);
-				return runId;
-			}
-			if (config.checks.length === 0)
-				throw new ApplicationError(
-					"invalid_request",
-					"implement requires a nonempty [execution].checks suite",
-				);
-			if (process.platform === "win32")
-				throw new ApplicationError(
-					"execution_platform_unsupported",
-					"writable execution requires POSIX process-group cleanup",
-				);
-			const implementer = config.roles.implementer;
-			if (!config.devFakes && !implementer?.model)
-				throw new ApplicationError(
-					"invalid_request",
-					"implement requires [roles.implementer].model; configure the writer model before accepting execution",
-				);
-			if (!adapters.executionWorkspace || !adapters.checks)
-				throw new ApplicationError(
-					"execution_unavailable",
-					"execution workspace and engine-check adapters are not configured",
-				);
-			if (!adapters.loadExecutionRoleSources)
-				throw new ApplicationError(
-					"execution_unavailable",
-					"execution role-source loader is not configured",
-				);
-			let sources: Awaited<
-				ReturnType<NonNullable<AdapterSet["loadExecutionRoleSources"]>>
-			>;
-			let pinnedBase: string;
-			const sourceEvents = await store.read(sourceRunId);
-			if (sourceEvents.length === 0)
-				throw new ApplicationError(
-					"not_found",
-					`source run ${sourceRunId} not found`,
-				);
-			const sourceState = fold(sourceEvents);
-			try {
-				pinnedBase = await adapters.executionWorkspace.resolveBase(
-					sourceState.repo,
-					input.base ?? sourceState.baseBranch,
-					new AbortController().signal,
-				);
-			} catch (error) {
-				logFailure("cannot resolve execution base", error);
-				const message = `cannot resolve execution base: ${error instanceof Error ? error.message : String(error)}`;
-				// Without a caller base, the base is the stored run's server-side state, not bad input.
-				throw input.base === undefined
-					? new ApplicationError("execution_unavailable", message)
-					: new ApplicationError("execution_base_unavailable", message);
-			}
-			try {
-				sources = await adapters.loadExecutionRoleSources(
-					sourceState.repo,
-					pinnedBase,
-				);
-			} catch (error) {
-				logFailure("cannot load execution role sources", error);
-				throw new ApplicationError(
-					"execution_unavailable",
-					`cannot load execution role sources: ${error instanceof Error ? error.message : String(error)}`,
-				);
-			}
-			const roleArtifacts = {
-				preparer: await snapshotRole(store, sources.preparer),
-				implementer: await snapshotRole(store, {
-					...sources.implementer,
-					addendum: QUALITY_EXPECTATIONS,
-				}),
-				scout: await snapshotRole(store, {
-					...sources.scout,
-					addendum: QUALITY_EXPECTATIONS,
-				}),
-				reviewer: await snapshotRole(store, {
-					...sources.reviewer,
-					addendum: QUALITY_EXPECTATIONS,
-				}),
-				verifier: await snapshotRole(store, {
-					...sources.verifier,
-					addendum: QUALITY_EXPECTATIONS,
-				}),
-			};
-			const roleSettings = (
-				role: ServerConfig["roles"]["planner"] | undefined,
-			) => ({
-				model: role?.model ? `${role.model.provider}/${role.model.id}` : null,
-				timeoutMs: role?.timeoutMs ?? 300_000,
-			});
-			const roleMap = {
-				preparer: roleSettings(config.roles.verifier),
-				implementer: roleSettings(implementer),
-				scout: roleSettings(config.roles.verifier),
-				reviewer: roleSettings(config.roles.reviewer),
-				verifier: roleSettings(config.roles.verifier),
-			};
-			const handle = await beginExecution(deps, {
-				sourceRunId,
-				prId: input.prId,
-				baseBranch: input.base,
-				baseCommit: pinnedBase,
-				explicitBase: input.base !== undefined,
-				checks: config.checks,
-				roles: roleMap,
-				roleArtifacts,
-				roleProvenance: Object.fromEntries(
-					Object.entries(sources).map(([name, source]) => [
-						name,
-						{
-							path: source.path,
-							sha: source.sha,
-						},
-					]),
-				),
-				maxConcurrentAgents: cap,
-			});
-			const runId = handle.log.current().runId;
-			if (executionHandles.has(runId)) return runId;
-			executionHandles.set(runId, handle);
-			schedule((signal) => executeExecution(handle, { signal }));
-			return runId;
-		},
-
-		async start(input) {
-			if (stopping)
-				throw new ApplicationError("busy", "server is shutting down");
-			const runId = randomUUID();
-			const handle = await beginFactory(depsForRun(), {
-				runId,
-				workItemRequest: input.workItemRequest,
-				repo: input.repo,
-				baseBranch: input.baseBranch,
-				roles,
-				maxConcurrentAgents: cap,
-			});
-			handles.set(runId, handle);
-			schedule((signal) => executeFactory(handle, { signal }));
-			return runId;
-		},
-
-		async answer(runId, input) {
-			const handle = handleOf(runId);
-			if (handle.busy)
-				throw new ApplicationError("busy", "factory command busy");
-			await track(() => answerRun(handle, input));
-			return summaryOf(runId);
-		},
-
-		async approve(runId) {
-			const handle = handleOf(runId);
-			if (handle.busy)
-				throw new ApplicationError("busy", "factory command busy");
-			await track(() => approveRun(handle));
-			return summaryOf(runId);
-		},
-
-		async requestChanges(runId) {
-			const handle = handleOf(runId);
-			assertChangeable(handle);
-			schedule((signal) => requestChangesRun(handle, { signal }));
-		},
-
-		async resume(runId) {
-			const execution = executionHandles.get(runId);
-			if (execution) {
-				assertExecutionResumable(execution);
-				schedule((signal) => resumeExecution(execution, { signal }));
-				return;
-			}
-			const handle = handleOf(runId);
-			assertResumable(handle);
-			schedule((signal) => resumeRun(handle, { signal }));
-		},
-
-		async doctor() {
-			return doctor();
-		},
-
+		doctor,
 		waitForIdle,
-
 		async shutdown() {
 			stopping = true;
 			for (const controller of controllers) controller.abort();

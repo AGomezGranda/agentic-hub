@@ -8,21 +8,40 @@ web_origins = ["http://127.0.0.1:5173", "http://localhost:5173"]
 
 [execution]
 max_concurrent_agents = 4
-# Required when an execution is accepted; optional for planning startup.
-# checks = [
-#   { name = "unit", command = "pnpm", args = ["test"], timeout_ms = 120000 },
-# ]
+# Run from the agentic-hub repository root; adapt for other repositories.
+checks = [
+  { name = "payo", command = "pnpm", args = ["--dir", "payo", "check"], timeout_ms = 300000 },
+]
 
 [tools]
 pi = "pi"
 acli = "acli"
 git = "git"
+gh = "gh"
 
 [model]
 provider = "openai"
 id = "gpt-6-luna"
 
-# Optional execution role; planning startup does not require it.
-# [roles.implementer]
-# timeout_ms = 300000
-# model = { provider = "anthropic", id = "claude-sonnet-4-5" }
+# Required for implementation runs.
+[roles.implementer]
+model = { provider = "openai", id = "gpt-6-luna" }
+
+# Ticketed names retain the exact ticket prefix. Branch suffix: 3–6 lowercase words.
+# Ticketless runs keep payo/<execution-id> and descriptive subjects.
+[publication]
+remote = "origin"
+branch_template = "{ticketId}/{slug}"
+commit_template = "[{ticketId}] {description}"
+pr_title_template = "[{ticketId}] {description}"
+# Literal substitution only. Also supports ticketId, prTitle and executionId.
+# Summaries come from reviewed results, phase receipts and checks.
+pr_body_template = """
+## Summary
+{summary}
+
+## Changes
+{changes}
+
+## Validation
+{checks}"""

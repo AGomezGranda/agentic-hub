@@ -19,6 +19,10 @@ const roleSource: RoleSource = {
 	resources: {
 		"skills/architecture-audit/references/boundaries.md":
 			"Architecture rubric body.",
+		"skills/architecture-audit/references/standard.md":
+			"Architecture standard body.",
+		"skills/architecture-audit/references/structure.md":
+			"Architecture structure body.",
 		"skills/code-quality-audit/references/solid.md": "SOLID rubric body.",
 		"skills/code-quality-audit/references/dry.md": "DRY rubric body.",
 		"skills/architecture-audit/SKILL.md": "Architecture audit skill.",
@@ -27,6 +31,25 @@ const roleSource: RoleSource = {
 		"skills/testing-strategy/references/unit.md": "Testing unit rubric.",
 	},
 };
+
+function expectApprovalAuthority(instructions: string) {
+	expect(instructions).toContain(
+		"The human has approved this exact plan snapshot through Payo's approval gate",
+	);
+	expect(instructions).toContain(
+		"status: draft, pending review/approval wording, and notices that a draft is not authorization",
+	);
+	expect(instructions).toContain(
+		"Continue to report substantive scope conflicts, missing requirements, and unmet technical or operational prerequisites",
+	);
+}
+
+function expectOutputShape(spec: { instructions: string }, shape: string) {
+	expect(spec.instructions).toContain(shape);
+	expect(spec.instructions).toContain(
+		"fields at the top level, without a kind/mediaType/content wrapper",
+	);
+}
 
 async function refs() {
 	const store = createMemoryRunStore();
@@ -120,9 +143,21 @@ describe("execution role specs", () => {
 			outputContract: "factory-execution-manifest-v1",
 			roleSpecSha: "implement-sha",
 		});
+		expectOutputShape(spec, '"pr": {"id": string, "title": string}');
+		expect(spec.instructions).toContain('"acceptanceCriteria": string[]');
+		expect(spec.instructions).toContain(
+			'"prerequisites": [{"description": string',
+		);
 		expect(spec.instructions).toContain("Do not implement or modify files");
 		expect(spec.instructions).toContain("exact nonempty substring");
 		expect(spec.instructions).toContain("one-to-one, in order");
+		expectApprovalAuthority(spec.instructions);
+		expect(spec.instructions).toContain(
+			"Payo has already resolved the approved PR strategy references",
+		);
+		expect(spec.instructions).toContain(
+			"this normalization is not a plan discrepancy",
+		);
 	});
 
 	it("gives the writer only current-phase inputs and explicit engine overrides", async () => {
@@ -161,6 +196,11 @@ describe("execution role specs", () => {
 		expect(spec.instructions).toContain("SOLID rubric body.");
 		expect(spec.instructions).toContain("Do not spawn agents or delegate");
 		expect(spec.instructions).toContain(QUALITY_EXPECTATIONS);
+		expectOutputShape(
+			spec,
+			'"completedCriteria": string[], "planIssues": string[]',
+		);
+		expectApprovalAuthority(spec.instructions);
 	});
 
 	it("wires eight independent review roles with scoped audit material", async () => {
@@ -193,6 +233,9 @@ describe("execution role specs", () => {
 				timeoutMs: 1000,
 			});
 			expect(spec.tools).toBe("read-only");
+			expectOutputShape(spec, '"checked": string[], "findings": [');
+			expect(spec.instructions).toContain('"suggestedFix": string');
+			expectApprovalAuthority(spec.instructions);
 			expect(spec.instructions).toContain(expected);
 			expect(spec.instructions).toContain(
 				"Do not converse with the user, commit, edit files, or spawn/delegate agents",
@@ -235,6 +278,8 @@ describe("execution role specs", () => {
 			timeoutMs: 1000,
 		});
 		expect(architecture.instructions).toContain("Architecture rubric body.");
+		expect(architecture.instructions).toContain("Architecture standard body.");
+		expect(architecture.instructions).toContain("Architecture structure body.");
 		expect(architecture.instructions).not.toContain("DRY rubric body.");
 		expect(quality.instructions).toContain("SOLID rubric body.");
 		expect(quality.instructions).toContain("DRY rubric body.");
@@ -249,6 +294,11 @@ describe("execution role specs", () => {
 			timeoutMs: 1000,
 		});
 		expect(scout.tools).toBe("read-only");
+		expectOutputShape(
+			scout,
+			'"summary": string, "files": [{"path": string, "purpose": string, "instructionPaths": string[]}], "planIssues": string[]',
+		);
+		expectApprovalAuthority(scout.instructions);
 		expect(scout.instructions).toContain(
 			"Do not run git, tests, subprocesses, or agents",
 		);
@@ -266,6 +316,9 @@ describe("execution role specs", () => {
 			timeoutMs: 1000,
 		});
 		expect(verifier.tools).toBe("read-only");
+		expectOutputShape(verifier, '"verdicts": [{"sourceIds": string[]');
+		expect(verifier.instructions).toContain('"planIssues": string[]');
+		expectApprovalAuthority(verifier.instructions);
 		expect(verifier.instructions).toContain(
 			"Cover every finding ID exactly once",
 		);
@@ -291,6 +344,11 @@ describe("execution role specs", () => {
 			tools: "write",
 			outputContract: "factory-execution-repair-v1",
 		});
+		expectApprovalAuthority(repair.instructions);
+		expectOutputShape(
+			repair,
+			'"addressedFindingIds": string[], "unresolvedFindingIds": string[], "planIssues": string[]',
+		);
 		expect(repair.instructions).toContain(
 			"Return each supplied finding ID exactly once",
 		);

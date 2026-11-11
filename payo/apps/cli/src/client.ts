@@ -20,6 +20,7 @@ import {
 	RunReview,
 	RunSummary,
 	RunSummaryList,
+	SseParser,
 	StartRunRequest,
 	StartRunResponse,
 } from "@payo/contracts";
@@ -248,7 +249,6 @@ export class CliClient {
 					const event = RunEventSchema.parse(JSON.parse(block.data));
 					onEvent(event);
 					if (event.type === "run.ended") {
-						await reader.cancel();
 						return;
 					}
 				}
@@ -256,6 +256,8 @@ export class CliClient {
 		} catch (error) {
 			if (options.signal?.aborted) return;
 			throw error;
+		} finally {
+			await reader.cancel().catch(() => {});
 		}
 	}
 
@@ -302,31 +304,4 @@ async function errorFrom(response: Response): Promise<ClientError> {
 	return new ClientError(response.status, code, message);
 }
 
-export interface SseBlock {
-	id?: number;
-	data: string;
-}
-
-export class SseParser {
-	private buffer = "";
-
-	push(chunk: string): SseBlock[] {
-		this.buffer += chunk.replace(/\r\n/g, "\n");
-		const blocks: SseBlock[] = [];
-		let index = this.buffer.indexOf("\n\n");
-		while (index >= 0) {
-			const raw = this.buffer.slice(0, index);
-			this.buffer = this.buffer.slice(index + 2);
-			let id: number | undefined;
-			const data: string[] = [];
-			for (const line of raw.split("\n")) {
-				if (line.startsWith(":")) continue;
-				if (line.startsWith("id: ")) id = Number(line.slice(4));
-				if (line.startsWith("data: ")) data.push(line.slice(6));
-			}
-			if (data.length) blocks.push({ id, data: data.join("\n") });
-			index = this.buffer.indexOf("\n\n");
-		}
-		return blocks;
-	}
-}
+export { SseParser } from "@payo/contracts";

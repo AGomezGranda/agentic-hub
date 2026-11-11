@@ -422,7 +422,7 @@ it("runs the clean fake flow through the CLI, edits, request-changes, answers an
 	}
 }, 30_000);
 
-it("executes two phases through the CLI and resumes a later phase after restart", async () => {
+it("executes confirmed phases and resumes through the CLI after restart", async () => {
 	const dataDir = await mkdtemp(join(tmpdir(), "payo-e2e-execution-"));
 	const configFile = join(dataDir, "payo.toml");
 	await writeFile(
@@ -445,14 +445,32 @@ it("executes two phases through the CLI and resumes a later phase after restart"
 	expect(answer.code, answer.stderr).toBe(0);
 	const approved = await cli(dataDir, first.url, ["approve", sourceRunId]);
 	expect(approved.code, approved.stderr).toBe(0);
-	const accepted = await cli(dataDir, first.url, [
-		"implement",
-		sourceRunId,
-		"--pr",
-		"pr-1",
-	]);
-	expect(accepted.code, accepted.stderr).toBe(0);
-	const executionRunId = accepted.stdout.trim();
+	const token = (await readFile(join(dataDir, "server-token"), "utf8")).trim();
+	const post = (action: string, body: unknown) =>
+		fetch(`${first.url}/api/v1/runs/${sourceRunId}/${action}`, {
+			method: "POST",
+			headers: {
+				Authorization: `Bearer ${token}`,
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify(body),
+		});
+	const previewResponse = await post("implement-preview", {
+		prId: "pr-1",
+		slug: "create-todo-entity",
+	});
+	expect(previewResponse.status).toBe(200);
+	const preview = await previewResponse.json();
+	const accepted = await post("implement", {
+		prId: "pr-1",
+		naming: {
+			previewHash: preview.previewHash,
+			ticketId: preview.ticketId,
+			slug: preview.slug,
+		},
+	});
+	expect(accepted.status).toBe(202);
+	const executionRunId = (await accepted.json()).runId as string;
 	await waitFor(async () => {
 		const events = await logs(dataDir, first.url, executionRunId);
 		return events.includes("implement phase-2") ? true : undefined;
@@ -480,7 +498,7 @@ it("executes two phases through the CLI and resumes a later phase after restart"
 			return text.includes("status: ended (reviewed)") ? text : undefined;
 		}, 30_000);
 		expect(completed).toContain("completed phases: 2/2");
-		expect(completed).toMatch(/result commit: fake-result-commit-2/);
+		expect(completed).toContain(`result commit: ${"0".repeat(39)}2`);
 		expect(await status(dataDir, second.url, sourceRunId)).toContain(
 			"status: ended (approved)",
 		);

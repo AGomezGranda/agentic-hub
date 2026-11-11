@@ -98,7 +98,7 @@ function mockEmptyServer(startResponse?: Response, origin = ORIGIN) {
 async function connect(user: ReturnType<typeof userEvent.setup>) {
 	await user.type(screen.getByLabelText("Server token"), TOKEN);
 	await user.click(screen.getByRole("button", { name: "Connect" }));
-	await screen.findByRole("heading", { name: "Recent runs" });
+	await screen.findByRole("heading", { name: "Work items" });
 }
 
 afterEach(() => {
@@ -118,7 +118,7 @@ it("opens run creation by default and keeps server and recent runs accessible", 
 	expect(screen.getByRole("heading", { name: "New run" })).toBeInTheDocument();
 	expect(screen.queryByRole("link", { name: "Runs" })).toBeNull();
 	expect(
-		screen.getByRole("heading", { name: "Recent runs" }),
+		screen.getByRole("heading", { name: "Work items" }),
 	).toBeInTheDocument();
 	await user.click(screen.getByRole("link", { name: "New run" }));
 	expect(window.location.pathname).toBe("/runs/new");
@@ -227,6 +227,24 @@ it("requires a work-item input before starting", async () => {
 		expect.objectContaining({ method: "POST" }),
 	);
 	expect(screen.getByLabelText("Jira key")).toBeInvalid();
+});
+
+it("keeps a malformed token editable and connects after correction", async () => {
+	window.history.pushState({}, "", `/runs/${RUN_ID}`);
+	const fetchMock = mockEmptyServer();
+	render(<App />);
+	const user = userEvent.setup();
+	const input = screen.getByLabelText("Server token");
+	await user.type(input, "token“");
+	await user.click(screen.getByRole("button", { name: "Connect" }));
+	expect(screen.getByRole("alert")).toHaveTextContent("Paste only the token");
+	expect(input).toHaveValue("token“");
+	expect(fetchMock).not.toHaveBeenCalled();
+	await user.clear(input);
+	await connect(user);
+	expect(
+		await screen.findByRole("button", { name: "Change token" }),
+	).toBeVisible();
 });
 
 it("reports an invalid token distinctly", async () => {
@@ -481,7 +499,7 @@ it("returns home from a run and forgets the token on disconnect", async () => {
 	await user.click(screen.getByRole("link", { name: "Server status" }));
 	await user.click(screen.getByRole("button", { name: "Change token" }));
 	expect(screen.getByLabelText("Server token")).toHaveValue("");
-	expect(screen.queryByRole("heading", { name: "Recent runs" })).toBeNull();
+	expect(screen.queryByRole("heading", { name: "Work items" })).toBeNull();
 });
 
 it("opens only the selected run's swarm and stops its stream on return", async () => {
@@ -577,7 +595,7 @@ it("uses a non-default loopback port for HTTP requests after reconnect", async (
 	await user.type(screen.getByLabelText("Server port"), "8123");
 	await user.click(screen.getByRole("button", { name: "Connect" }));
 
-	await screen.findByRole("heading", { name: "Recent runs" });
+	await screen.findByRole("heading", { name: "Work items" });
 	expect(sessionStorage.getItem("payo.server-port")).toBe("8123");
 	expect(fetchMock).toHaveBeenCalledWith(
 		`${nonDefault}/doctor`,

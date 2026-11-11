@@ -57,6 +57,67 @@ describe("RunEventBody", () => {
 	});
 });
 
+describe("RunEventBody cost metadata", () => {
+	const usage = {
+		tokensIn: 10,
+		tokensOut: 5,
+		cost: 0.003,
+		costDetails: {
+			amounts: [
+				{ currency: "USD", basis: "estimated", amount: 0.003 },
+				{ currency: "USD", basis: "provider-reported", amount: 0.004 },
+			],
+			complete: true,
+		},
+	};
+
+	it("accepts enriched usage on a persisted attempt.event", () => {
+		expect(
+			RunEventBody.safeParse({
+				type: "attempt.event",
+				attemptId: "a1",
+				event: { type: "usage", usage },
+			}).success,
+		).toBe(true);
+	});
+
+	it("accepts enriched usage on attempt.finished and keeps legacy usage valid", () => {
+		expect(
+			RunEventBody.safeParse({
+				type: "attempt.finished",
+				attemptId: "a1",
+				outcome: "succeeded",
+				usage,
+			}).success,
+		).toBe(true);
+		expect(
+			RunEventBody.safeParse({
+				type: "attempt.finished",
+				attemptId: "a1",
+				outcome: "succeeded",
+				usage: { tokensIn: 0, tokensOut: 0, cost: 0 },
+			}).success,
+		).toBe(true);
+	});
+
+	it("rejects invalid cost details at the event boundary", () => {
+		expect(
+			RunEventBody.safeParse({
+				type: "attempt.finished",
+				attemptId: "a1",
+				outcome: "succeeded",
+				usage: {
+					...usage,
+					costDetails: {
+						amounts: [{ currency: "USD", basis: "estimated", amount: -1 }],
+						complete: false,
+					},
+				},
+			}).success,
+		).toBe(false);
+	});
+});
+
 describe("RunEventBody attempt.event and attempt.started", () => {
 	const attemptEvent = {
 		type: "attempt.event",

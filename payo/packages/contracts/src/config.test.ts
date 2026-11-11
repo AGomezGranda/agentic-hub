@@ -217,3 +217,26 @@ describe("settings envelopes", () => {
 		expect(schema.safeParse(input).success).toBe(false);
 	});
 });
+
+it("carries publication shape without enforcing factory template semantics", () => {
+	const document = {
+		tools: { gh: "/opt/gh" },
+		publication: {
+			remote: "origin",
+			branch_template: "{anything}",
+			commit_template: "{description}",
+			pr_title_template: "{description}",
+			pr_body_template: "Summary\n{summary}",
+		},
+	};
+	expect(PayoConfigDocument.parse(document)).toEqual(document);
+	expect(
+		PayoConfigDocument.safeParse({ publication: { unknown: "x" } }).success,
+	).toBe(false);
+	expect(
+		PayoConfigDocument.safeParse({ publication: { remote: 3 } }).success,
+	).toBe(false);
+	expect(PayoConfigDocument.safeParse({ tools: { gh: " " } }).success).toBe(
+		false,
+	);
+});

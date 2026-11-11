@@ -31,6 +31,28 @@ function summary(stage = "Plan", openGates: unknown[] = [], runId = RUN_ID) {
 	};
 }
 
+function costs(runId: string) {
+	const cost = {
+		amounts: [],
+		coverage: "complete",
+		attempts: 0,
+		incompleteAttempts: 0,
+	};
+	return {
+		sourceRunId: runId,
+		planning: {
+			runId,
+			status: "ended",
+			outcome: "approved",
+			asOfSeq: 1,
+			cost,
+			steps: [],
+		},
+		executions: [],
+		total: cost,
+	};
+}
+
 function review() {
 	return {
 		plan: { available: false, reason: "not_available" },
@@ -60,11 +82,13 @@ afterEach(() => {
 	vi.unstubAllGlobals();
 });
 
-it("opens an approved run on its implementation view", async () => {
+it("keeps an approved run in its plan view", async () => {
 	vi.stubGlobal(
 		"fetch",
 		vi.fn(async (input: RequestInfo | URL) => {
 			const url = String(input);
+			if (url.endsWith("/costs"))
+				return json(200, costs(url.split("/").at(-2) ?? RUN_ID));
 			if (url.endsWith("/review")) return json(200, review());
 			if (url.endsWith("/plan-versions")) return json(200, { versions: [] });
 			if (url.endsWith("/events")) return json(200, { events: [] });
@@ -88,9 +112,11 @@ it("opens an approved run on its implementation view", async () => {
 		),
 	);
 	expect(await screen.findByText(/PR choices are unavailable/)).toBeVisible();
-	expect(
-		screen.getByRole("button", { name: "Implementation" }),
-	).toHaveAttribute("aria-pressed", "true");
+	expect(screen.getByRole("region", { name: "Work costs" })).toBeVisible();
+	expect(screen.getByRole("button", { name: "Plan" })).toHaveAttribute(
+		"aria-pressed",
+		"true",
+	);
 });
 
 it("coalesces a burst of stream events into one summary refresh at the latest gate", async () => {
@@ -143,6 +169,8 @@ it("coalesces a burst of stream events into one summary refresh at the latest ga
 	});
 	const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
 		const url = String(input);
+		if (url.endsWith("/costs"))
+			return json(200, costs(url.split("/").at(-2) ?? RUN_ID));
 		if (url.endsWith("/review")) return json(200, review());
 		if (url === `${BASE_URL}/runs/${RUN_ID}`) {
 			summaryRequests += 1;
@@ -214,6 +242,8 @@ it("keeps streamed events after the run ends", async () => {
 		"fetch",
 		vi.fn(async (input: RequestInfo | URL) => {
 			const url = String(input);
+			if (url.endsWith("/costs"))
+				return json(200, costs(url.split("/").at(-2) ?? RUN_ID));
 			if (url.endsWith("/review")) return json(200, review());
 			if (url === `${BASE_URL}/runs/${RUN_ID}/events`)
 				return json(200, { events: [historyEvent] });
@@ -281,6 +311,8 @@ it("does not refresh the summary for attempt events", async () => {
 		"fetch",
 		vi.fn(async (input: RequestInfo | URL) => {
 			const url = String(input);
+			if (url.endsWith("/costs"))
+				return json(200, costs(url.split("/").at(-2) ?? RUN_ID));
 			if (url.endsWith("/review")) return json(200, review());
 			if (url === `${BASE_URL}/runs/${RUN_ID}/events`)
 				return json(200, { events: [] });
@@ -338,6 +370,8 @@ it("reconnects after a dropped stream and resumes from the next sequence", async
 	const streamUrls: string[] = [];
 	const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
 		const url = String(input);
+		if (url.endsWith("/costs"))
+			return json(200, costs(url.split("/").at(-2) ?? RUN_ID));
 		if (url.endsWith("/review")) return json(200, review());
 		if (url === `${BASE_URL}/runs/${RUN_ID}`) return json(200, summary());
 		if (url === `${BASE_URL}/runs/${RUN_ID}/events`)
@@ -410,6 +444,8 @@ it("surfaces unauthorized streams and cancels the previous run stream on selecti
 	let firstStreamCancelled = false;
 	const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
 		const url = String(input);
+		if (url.endsWith("/costs"))
+			return json(200, costs(url.split("/").at(-2) ?? RUN_ID));
 		const runId = url.includes(OTHER_RUN_ID) ? OTHER_RUN_ID : RUN_ID;
 		if (url.endsWith("/review")) return json(200, review());
 		if (url === `${BASE_URL}/runs/${runId}`)
@@ -463,6 +499,8 @@ it("surfaces unauthorized streams and cancels the previous run stream on selecti
 it("loads ended-run history without opening a live stream", async () => {
 	const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
 		const url = String(input);
+		if (url.endsWith("/costs"))
+			return json(200, costs(url.split("/").at(-2) ?? RUN_ID));
 		if (url.endsWith("/review")) return json(200, review());
 		if (url.endsWith("/events")) return json(200, { events: [] });
 		if (url === `${BASE_URL}/runs/${RUN_ID}`)
@@ -495,6 +533,8 @@ it("switches between implementation and activity views", async () => {
 		"fetch",
 		vi.fn(async (input: RequestInfo | URL) => {
 			const url = String(input);
+			if (url.endsWith("/costs"))
+				return json(200, costs(url.split("/").at(-2) ?? RUN_ID));
 			if (url.endsWith("/review")) return json(200, review());
 			if (url.endsWith("/events")) return json(200, { events: [] });
 			if (url === `${BASE_URL}/runs/${RUN_ID}`)
@@ -517,7 +557,7 @@ it("switches between implementation and activity views", async () => {
 		),
 	);
 	await screen.findByText("Ended · approved");
-	await user.click(screen.getByRole("button", { name: "Implementation" }));
+	await user.click(screen.getByRole("button", { name: "Plan" }));
 	expect(screen.getByText("Activity", { selector: "h2" })).not.toBeVisible();
 	expect(await screen.findByRole("heading", { name: "Plan" })).toBeVisible();
 	await user.click(screen.getByRole("link", { name: "View activity" }));
@@ -527,7 +567,7 @@ it("switches between implementation and activity views", async () => {
 	);
 	expect(screen.getByRole("heading", { name: "Activity" })).toBeVisible();
 	expect(screen.getByText("Plan", { selector: "h2" })).not.toBeVisible();
-	await user.click(screen.getByRole("button", { name: "Implementation" }));
+	await user.click(screen.getByRole("button", { name: "Plan" }));
 	expect(screen.getByRole("heading", { name: "Plan" })).toBeVisible();
 	expect(screen.getByText("Activity", { selector: "h2" })).not.toBeVisible();
 });
@@ -569,6 +609,8 @@ it("shows execution progress, follows its source, and refreshes checkpoints with
 	let requests = 0;
 	const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
 		const url = String(input);
+		if (url.endsWith("/costs"))
+			return json(200, costs(url.split("/").at(-2) ?? RUN_ID));
 		if (url === `${BASE_URL}/runs/${RUN_ID}`) {
 			requests++;
 			return json(200, {
@@ -596,7 +638,30 @@ it("shows execution progress, follows its source, and refreshes checkpoints with
 							},
 			});
 		}
-		if (url.endsWith("/events")) return json(200, { events: [] });
+		if (url.endsWith("/events"))
+			return json(200, {
+				events: [
+					{
+						type: "step.started",
+						stepId: STEP_ID,
+						name: "implement",
+						seq: 1,
+						at: timestamp,
+					},
+					{
+						type: "attempt.started",
+						stepId: STEP_ID,
+						attemptId: GATE_ID,
+						role: "implementer",
+						runner: "fake",
+						model: "test-model",
+						roleSpecSha: null,
+						inputArtifacts: [],
+						seq: 2,
+						at: timestamp,
+					},
+				],
+			});
 		if (url.includes("/events/stream"))
 			return new Response(
 				new ReadableStream<Uint8Array>({
@@ -605,7 +670,7 @@ it("shows execution progress, follows its source, and refreshes checkpoints with
 							() =>
 								controller.enqueue(
 									new TextEncoder().encode(
-										[checkpoint(1), checkpoint(2)]
+										[checkpoint(3), checkpoint(4)]
 											.map(
 												(event) =>
 													`id: ${event.seq}\ndata: ${JSON.stringify(event)}\n\n`,
@@ -635,19 +700,30 @@ it("shows execution progress, follows its source, and refreshes checkpoints with
 		),
 	);
 	expect(await screen.findByText("No check results available")).toBeVisible();
+	expect(
+		await screen.findByRole("button", { name: "implementer" }),
+	).toBeVisible();
+	expect(screen.getByText(/test-model/)).toBeVisible();
+	expect(screen.queryByText("No review evidence available")).toBeNull();
+	await user.click(screen.getByRole("button", { name: "Code review" }));
 	expect(screen.getByText("No review evidence available")).toBeVisible();
 	expect(screen.getByText("Review artifact unavailable")).toBeVisible();
 	expect(screen.queryByText(/Phase 1 of/)).toBeNull();
-	await user.click(screen.getByRole("link", { name: /source run/i }));
+	await user.click(screen.getByRole("link", { name: /approved plan/i }));
 	expect(select).toHaveBeenCalledWith(source);
 	await user.click(screen.getByRole("button", { name: "Activity view" }));
-	await user.click(screen.getByRole("button", { name: "Execution view" }));
+	await user.click(screen.getByRole("button", { name: "Implementation" }));
 	expect(await screen.findByText("Final scope")).toBeVisible();
 	expect(screen.getByText("First phase")).toBeVisible();
 	expect(screen.getByText("abc123")).toBeVisible();
+	await user.click(screen.getByRole("button", { name: "Code review" }));
+	expect(screen.queryByText("First phase")).toBeNull();
 	expect(screen.getByText(/3 findings/)).toBeVisible();
-	expect(screen.getByText(/Round 2/)).toBeVisible();
+	expect(screen.getByText(/Review round unavailable/)).toBeVisible();
 	expect(screen.getByText("security")).toBeVisible();
+	await user.click(screen.getByRole("button", { name: "Implementation" }));
+	expect(screen.getByText("First phase")).toBeVisible();
+	expect(screen.queryByText(/3 findings/)).toBeNull();
 	await new Promise((resolve) => setTimeout(resolve, 180));
 	expect(requests).toBe(2);
 	expect(
@@ -693,6 +769,8 @@ it("updates execution progress when activity history is unavailable", async () =
 		"fetch",
 		vi.fn(async (input: RequestInfo | URL) => {
 			const url = String(input);
+			if (url.endsWith("/costs"))
+				return json(200, costs(url.split("/").at(-2) ?? RUN_ID));
 			if (url === `${BASE_URL}/runs/${RUN_ID}`) {
 				requests++;
 				return json(200, {
@@ -814,19 +892,33 @@ it("resumes an execution gate, refreshes after rejection and success", async () 
 		worktree: "/work/tree",
 		statusDetail: null,
 		escalationReason: gate.reason,
-		checks: [],
+		checks: [
+			{
+				name: "unit",
+				status: "failed",
+				output: "Expected two receipts, received one",
+			},
+		],
 		review: null,
 	};
 	let attempts = 0;
 	let summaryRequests = 0;
+	let rejectResume = () => {};
 	vi.stubGlobal(
 		"fetch",
 		vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
 			const url = String(input);
+			if (url.endsWith("/costs"))
+				return json(200, costs(url.split("/").at(-2) ?? RUN_ID));
 			if (url.endsWith("/resume")) {
 				attempts++;
 				return attempts === 1
-					? json(409, { code: "conflict", message: "Still blocked" })
+					? new Promise<Response>((resolve) => {
+							rejectResume = () =>
+								resolve(
+									json(409, { code: "conflict", message: "Still blocked" }),
+								);
+						})
 					: json(200, { runId: RUN_ID });
 			}
 			if (url === `${BASE_URL}/runs/${RUN_ID}`) {
@@ -858,12 +950,26 @@ it("resumes an execution gate, refreshes after rejection and success", async () 
 		),
 	);
 	expect(await screen.findByText("Interrupted during phase two")).toBeVisible();
+	expect(screen.getByText("Paused · Needs attention")).toBeVisible();
 	expect(screen.getByText("feature/test")).toBeVisible();
+	await user.click(screen.getByText("Failure output for unit"));
+	expect(screen.getByText("Expected two receipts, received one")).toBeVisible();
 	await user.click(screen.getByRole("button", { name: "Activity view" }));
-	await user.click(screen.getByRole("button", { name: "View execution" }));
+	await user.click(screen.getByRole("button", { name: "Open PR workspace" }));
+	expect(screen.getByText("Interrupted during phase two")).toBeVisible();
+	await user.click(screen.getByRole("button", { name: "Code review" }));
 	expect(screen.getByText("Interrupted during phase two")).toBeVisible();
 	await user.click(screen.getByRole("button", { name: "Resume" }));
+	expect(
+		screen.getByRole("button", { name: "Checking workspace…" }),
+	).toBeDisabled();
+	expect(
+		screen.getByText(/Resume continues this run from phase 2/),
+	).toBeVisible();
+	expect(screen.getByText(/Checking the retained workspace/)).toBeVisible();
+	rejectResume();
 	expect(await screen.findByText(/Still blocked/)).toBeVisible();
+	expect(screen.getByText("Execution could not resume")).toBeVisible();
 	expect(await screen.findByText(/Could not refresh this run/)).toBeVisible();
 	expect(screen.getByText("Interrupted during phase two")).toBeVisible();
 	await waitFor(() =>
@@ -938,6 +1044,26 @@ it("shows unavailable result fields and disables a gate without resume permissio
 		<ExecutionView
 			execution={{
 				...execution,
+				status: "active",
+				stage: "Escalated",
+				statusDetail: "manifest-invalid",
+			}}
+			gate={{ ...gate, allowedCommands: ["resume"] }}
+			token={TOKEN}
+			onRefresh={async () => {}}
+			onSelectRun={() => {}}
+		/>,
+	);
+	expect(
+		screen.getByRole("button", { name: "Retry preparation" }),
+	).toBeEnabled();
+	expect(
+		screen.getByText(/Preparation stopped before implementation started/),
+	).toBeVisible();
+	view.rerender(
+		<ExecutionView
+			execution={{
+				...execution,
 				branch: "branch",
 				worktree: "/tree",
 				resultCommit: "final123",
@@ -952,3 +1078,98 @@ it("shows unavailable result fields and disables a gate without resume permissio
 	expect(screen.getByText("/tree")).toBeVisible();
 	expect(screen.getByText("final123")).toBeVisible();
 });
+
+it.each([false, true])(
+	"opens local apps from the shared header (execution: %s)",
+	async (execution) => {
+		let finish: (response: Response) => void = () => {};
+		const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+			const url = String(input);
+			if (url.endsWith("/costs"))
+				return json(200, costs(url.split("/").at(-2) ?? RUN_ID));
+			if (url.endsWith("/open-workspace"))
+				return new Promise<Response>((resolve) => {
+					finish = resolve;
+				});
+			if (url.endsWith("/review")) return json(200, review());
+			if (url.endsWith("/plan-versions")) return json(200, { versions: [] });
+			if (url.endsWith("/events")) return json(200, { events: [] });
+			if (url === `${BASE_URL}/runs/${RUN_ID}`)
+				return json(200, {
+					...summary(),
+					status: "ended",
+					outcome: "approved",
+					...(execution
+						? {
+								execution: {
+									runId: RUN_ID,
+									sourceRunId: RUN_ID,
+									prId: "PR-1",
+									phaseCount: 0,
+									completedPhases: [],
+									resultCommit: null,
+									artifactIssues: [],
+									status: "ended",
+									outcome: "reviewed",
+									stage: "Completed",
+									phaseIndex: 0,
+									scope: "final",
+									branch: "feature/test",
+									worktree: "/work/tree",
+									statusDetail: null,
+									escalationReason: null,
+									checks: [],
+									review: null,
+								},
+							}
+						: {}),
+				});
+			throw new Error(`unexpected request ${url}`);
+		});
+		vi.stubGlobal("fetch", fetchMock);
+		const user = userEvent.setup();
+		render(
+			wrap(
+				<RunWorkspace
+					token={TOKEN}
+					runId={RUN_ID}
+					onDisconnect={() => {}}
+					onSelectRun={() => {}}
+				/>,
+			),
+		);
+		const terminal = await screen.findByRole("button", {
+			name: "Open in Terminal",
+		});
+		const code = screen.getByRole("button", { name: "Open in VS Code" });
+		expect(terminal).toHaveAttribute(
+			"title",
+			`Open ${execution ? "/work/tree" : "/work/repo"} in Terminal`,
+		);
+		await user.click(terminal);
+		expect(terminal).toBeDisabled();
+		expect(code).toBeDisabled();
+		expect(fetchMock).toHaveBeenLastCalledWith(
+			`${BASE_URL}/runs/${RUN_ID}/open-workspace`,
+			expect.objectContaining({
+				method: "POST",
+				body: JSON.stringify({ target: "terminal" }),
+				headers: expect.objectContaining({ Authorization: `Bearer ${TOKEN}` }),
+			}),
+		);
+		finish(json(200, { runId: RUN_ID }));
+		await waitFor(() => expect(code).toBeEnabled());
+		await user.click(code);
+		expect(fetchMock).toHaveBeenLastCalledWith(
+			`${BASE_URL}/runs/${RUN_ID}/open-workspace`,
+			expect.objectContaining({ body: JSON.stringify({ target: "vscode" }) }),
+		);
+		finish(
+			json(503, { code: "launch_failed", message: "VS Code is unavailable" }),
+		);
+		expect(await screen.findByRole("alert")).toHaveTextContent(
+			"VS Code is unavailable",
+		);
+		expect(code).toBeEnabled();
+	},
+);

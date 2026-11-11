@@ -1,0 +1,22 @@
+[
+	[
+		{
+			"number": 1,
+			"html_url": "https://github.com/Owner/repo/pull/1",
+			"state": "open",
+			"merged_at": null,
+			"draft": true,
+			"title": "[ABC-1] Create result",
+			"body": "Summary\n\n<!-- payo-publication:child -->",
+			"base": {
+				"ref": "main",
+				"repo": { "id": 123, "name": "repo", "owner": { "login": "Owner" } }
+			},
+			"head": {
+				"ref": "ABC-1/create-reviewed-result",
+				"sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+				"repo": { "id": 123, "name": "repo", "owner": { "login": "Owner" } }
+			}
+		}
+	]
+]

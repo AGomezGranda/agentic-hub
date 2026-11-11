@@ -12,10 +12,10 @@ hosts' subagent support is unverified.
 
 | Host | Skills | Subagents | Custom agents | State |
 |---|---|---|---|---|
-| **Pi** (primary) | `~/.pi/agent/skills/` | `subagent` tool, `runs.all`, concurrent (cap 20, 64/run) | 4 scopes, incl. `~/.pi/agent/agents/` | fully capable |
+| **Pi** (primary) | `~/.agents/skills/` | `subagent` tool, `runs.all`, concurrent (cap 20, 64/run) | 4 scopes, incl. `~/.pi/agent/agents/` | fully capable |
 | **Claude Code** | `~/.claude/skills/` | `Agent` tool; children cannot nest (unverified) | none shipped | built-in agents only |
 | **Codex** | `~/.agents/skills/` | subagents (when requested) | `~/.codex/agents/` | native skills |
-| **OpenCode** | `~/.config/opencode/skill/` | unverified | unverified | installed on other machines |
+| **OpenCode** | `~/.agents/skills/` | unverified | unverified | installed on other machines |
 
 OpenCode is a live target on other machines. Its subagent support is unconfirmed,
 so skills treat it as serial-only until someone checks.
@@ -71,12 +71,24 @@ never through credentials committed here.
 
 Install with `agentic-hub install <name>`, or `agentic-hub sync` for everything.
 
+Pi, OpenCode, and Codex share one installation in `~/.agents/skills/`.
+Installing or removing a skill for any one of them affects all three; CLI and
+TUI batch actions process the shared directory once. Generated skills include
+labelled dispatch sections for all three harnesses and select the current one
+at use time. Claude Code keeps its own installation in `~/.claude/skills/`.
+
+Existing installations in `~/.pi/agent/skills/` or
+`~/.config/opencode/skill/` are left untouched. Remove obsolete agentic-hub
+installations there after syncing; native-directory copies can shadow shared skills.
+
 | Skill | Use it to |
 |---|---|
+| `address-pr-comments` | Validate PR review feedback, fix accepted findings, and draft replies |
 | `architecture-audit` | Review boundaries, responsibilities, and folder structure in a repo, module, or diff, strictly against a DDD/DI target standard |
 | `code-quality-audit` | Check SOLID, DRY, KISS, typing, and error handling in classes and functions |
 | `create-plan` | Build an implementation plan interactively before writing code |
 | `implement-plan` | Execute an approved plan phase by phase, with checkpoints |
+| `learn` | Build a continuing course with a local HTML UI, deep explanations, Socratic practice, and evidence-backed progress |
 | `mucho-texto` | Write a visual, mid-length summary of a plan, report, or RFC; the source is kept |
 | `remove-comment-slop` | Compress verbose comments and docstrings in Python `src/` and `tests/` without changing behavior |
 | `research-codebase` | Answer how something works, with cited `file:line` evidence (read-only) |
@@ -91,6 +103,9 @@ Other hosts use their own subagents or run serially.
 
 Codex discovers installed folders as skills. Mention one with `$skill-name`, or let
 Codex choose it from its description. Restart Codex if a new skill does not appear.
+
+See the [skills manager guide](docs/agentic-hub/skills-manager.md) for installation
+states, conflict recovery, shared-target migration, and how Payo loads skills.
 
 ## Usage
 
@@ -201,6 +216,11 @@ worktrees are retained on all outcomes, and cleanup belongs to the operator
 once active processes stop. The full walkthrough, including check configuration,
 gates, recovery, and fake-mode scenarios, is in
 [docs/payo/usage.md](docs/payo/usage.md).
+
+The web console can start PR executions, inspect checks and code-review findings,
+clarify reported plan issues, and draft a corrected plan for a new approval.
+Its work-cost panel combines planning and all linked executions, with a breakdown
+by run, step, and attempt and explicit partial/unknown reporting coverage.
 
 Quick setup from the repo root installs both workspaces, writes the payo config
 if none exists (never overwrites; honours an absolute `PAYO_CONFIG_FILE`), and
@@ -375,6 +395,7 @@ spliced in at install time, so common prose carries no host-specific commands.
 - [docs/pi/pi-handler.md](docs/pi/pi-handler.md): Pi declaration ownership, apply, and recovery
 - [docs/pi/pi-extension-recommendations.txt](docs/pi/pi-extension-recommendations.txt): researched Pi extension recommendations; not an install manifest
 - [docs/agentic-hub/behavior-modes.md](docs/agentic-hub/behavior-modes.md): mode contracts, instruction-file selection, status, and recovery
+- [docs/agentic-hub/skills-manager.md](docs/agentic-hub/skills-manager.md): skill installs, statuses, ownership, migration, and Payo role sources
 - [docs/agentic-hub/behavior-modes-acceptance.md](docs/agentic-hub/behavior-modes-acceptance.md): dated behavior-mode acceptance evidence and limitations
 - [docs/payo/usage.md](docs/payo/usage.md): current Payo setup, configuration, workflows, UI, and recovery
 - [docs/payo/engine-design.md](docs/payo/engine-design.md): Payo architecture and implementation scope

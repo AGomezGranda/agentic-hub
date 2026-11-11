@@ -519,6 +519,7 @@ class AgenticHubApp(App):
         name, col = hit
         names = sorted(self._selected) if self._selected else [name]
         targets = list(agents.AGENTS) if force_all or col == "skill" else [col]
+        targets = agents.unique_targets(targets)
         ok = total = 0
         for n in names:
             for agent in targets:

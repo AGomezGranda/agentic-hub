@@ -36,6 +36,16 @@ export class PayoApiError extends Error {
 	}
 }
 
+export function bearerAuthorization(token: string): string {
+	if (!/^[A-Za-z0-9._~+/-]+=*$/.test(token))
+		throw new PayoApiError(
+			401,
+			"invalid_token",
+			"Invalid token. Paste only the token printed by `payo token`, without quotes or extra text.",
+		);
+	return `Bearer ${token}`;
+}
+
 export async function getJson<T>(
 	path: string,
 	token: string,
@@ -48,7 +58,7 @@ export async function getJson<T>(
 		method,
 		headers: {
 			Accept: "application/json",
-			Authorization: `Bearer ${token}`,
+			Authorization: bearerAuthorization(token),
 			...(body === undefined ? {} : { "Content-Type": "application/json" }),
 		},
 		...(body === undefined ? {} : { body: JSON.stringify(body) }),

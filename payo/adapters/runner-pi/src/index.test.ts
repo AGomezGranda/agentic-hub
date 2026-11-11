@@ -69,6 +69,9 @@ function baseState(overrides: Partial<PiMapState> = {}): PiMapState {
 		lastStopReason: null,
 		lastError: null,
 		usage: { tokensIn: 0, tokensOut: 0, cost: 0 },
+		costDetails: { amounts: [], complete: false },
+		missingNativeCost: false,
+		seenUsageEntryIds: new Set(),
 		done: false,
 		...overrides,
 	};
@@ -166,7 +169,7 @@ async function collect(
 }
 
 describe("mapPiRecord", () => {
-	it("maps a valid stream to started, message, usage and result", () => {
+	it("maps a valid stream to started, message, a final usage snapshot and result", () => {
 		const state = baseState();
 
 		const events = mapAll(fixture("valid"), state);
@@ -174,6 +177,7 @@ describe("mapPiRecord", () => {
 		expect(events.map((event) => event.type)).toEqual([
 			"started",
 			"message",
+			"usage",
 			"usage",
 			"result",
 		]);
@@ -184,9 +188,29 @@ describe("mapPiRecord", () => {
 		expect(events[1]).toEqual({ type: "message", text: '{"ok":true}' });
 		expect(events[2]).toEqual({
 			type: "usage",
-			usage: { tokensIn: 13, tokensOut: 5, cost: 0.003 },
+			usage: {
+				tokensIn: 13,
+				tokensOut: 5,
+				cost: 0.003,
+				costDetails: {
+					amounts: [{ currency: "USD", basis: "estimated", amount: 0.003 }],
+					complete: false,
+				},
+			},
 		});
-		expect(events[3]).toEqual({ type: "result", text: '{"ok":true}' });
+		expect(events[3]).toEqual({
+			type: "usage",
+			usage: {
+				tokensIn: 13,
+				tokensOut: 5,
+				cost: 0.003,
+				costDetails: {
+					amounts: [{ currency: "USD", basis: "estimated", amount: 0.003 }],
+					complete: true,
+				},
+			},
+		});
+		expect(events[4]).toEqual({ type: "result", text: '{"ok":true}' });
 	});
 
 	it("sums cumulative usage across two assistant messages", () => {
@@ -196,7 +220,15 @@ describe("mapPiRecord", () => {
 
 		expect(events.filter((event) => event.type === "usage").at(-1)).toEqual({
 			type: "usage",
-			usage: { tokensIn: 11, tokensOut: 5, cost: 0.003 },
+			usage: {
+				tokensIn: 11,
+				tokensOut: 5,
+				cost: 0.003,
+				costDetails: {
+					amounts: [{ currency: "USD", basis: "estimated", amount: 0.003 }],
+					complete: true,
+				},
+			},
 		});
 	});
 
@@ -295,7 +327,7 @@ describe("mapPiRecord", () => {
 			{ type: "agent_settled", aborted: false },
 			state,
 		);
-		expect(result[0]).toMatchObject({
+		expect(result.at(-1)).toMatchObject({
 			type: "result",
 			text: "x".repeat(262144),
 		});
@@ -317,7 +349,7 @@ describe("mapPiRecord", () => {
 			{ type: "agent_settled", aborted: false },
 			errorState,
 		);
-		expect(error[0]).toMatchObject({
+		expect(error.at(-1)).toMatchObject({
 			type: "error",
 			message: "e".repeat(262144),
 		});
@@ -329,6 +361,335 @@ describe("mapPiRecord", () => {
 		expect(
 			mapPiRecord({ type: "agent_settled", aborted: true }, state),
 		).toEqual([{ type: "error", message: "pi aborted" }]);
+	});
+});
+
+function nativeUsage(
+	input: number,
+	output: number,
+	total: number,
+	extra: Record<string, unknown> = {},
+) {
+	return {
+		input,
+		output,
+		cacheRead: 0,
+		cacheWrite: 0,
+		totalTokens: input + output,
+		cost: {
+			input: 0,
+			output: 0,
+			cacheRead: 0,
+			cacheWrite: 0,
+			total,
+			...extra,
+		},
+	};
+}
+
+function assistant(text: string, usage?: unknown) {
+	return {
+		type: "message_end",
+		message: {
+			role: "assistant",
+			model: "claude-sonnet-4",
+			content: [{ type: "text", text }],
+			stopReason: "stop",
+			...(usage === undefined ? {} : { usage }),
+		},
+	};
+}
+
+function usageEvents(events: AgentEvent[]) {
+	return events.flatMap((event) =>
+		event.type === "usage" ? [event.usage] : [],
+	);
+}
+
+describe("mapPiRecord cost accounting", () => {
+	it("treats two assistant calls as cumulative replacement snapshots", () => {
+		const state = baseState();
+		mapPiRecord(assistant("first", nativeUsage(1, 1, 0.002)), state);
+		const snapshots = usageEvents(
+			mapPiRecord(assistant("second", nativeUsage(2, 2, 0.003)), state),
+		);
+
+		expect(snapshots).toHaveLength(1);
+		expect(snapshots[0]?.costDetails?.amounts).toEqual([
+			{ currency: "USD", basis: "estimated", amount: 0.005 },
+		]);
+		expect(snapshots[0]?.costDetails?.complete).toBe(false);
+	});
+
+	it("keeps an earlier known amount when a later report has no cost", () => {
+		const state = baseState();
+		mapPiRecord(assistant("known", nativeUsage(1, 1, 0.002)), state);
+		const [snapshot] = usageEvents(mapPiRecord(assistant("gap"), state));
+
+		expect(snapshot?.costDetails).toEqual({
+			amounts: [{ currency: "USD", basis: "estimated", amount: 0.002 }],
+			complete: false,
+		});
+		expect(snapshot?.cost).toBe("unknown");
+	});
+
+	it("uses a later known cost after a gap while staying incomplete", () => {
+		const state = baseState();
+		mapPiRecord(assistant("gap"), state);
+		const [snapshot] = usageEvents(
+			mapPiRecord(assistant("known", nativeUsage(1, 1, 0.004)), state),
+		);
+
+		expect(snapshot?.costDetails?.amounts).toEqual([
+			{ currency: "USD", basis: "estimated", amount: 0.004 },
+		]);
+		expect(snapshot?.costDetails?.complete).toBe(false);
+	});
+
+	it("separates provider-reported from estimated cost", () => {
+		const state = baseState();
+		mapPiRecord(
+			assistant(
+				"estimated",
+				nativeUsage(1, 1, 0.002, { totalFromProvider: false }),
+			),
+			state,
+		);
+		const events = mapPiRecord(
+			assistant(
+				"reported",
+				nativeUsage(1, 1, 0.003, { totalFromProvider: true }),
+			),
+			state,
+		);
+
+		expect(usageEvents(events)[0]).toMatchObject({
+			costDetails: {
+				amounts: [
+					{ currency: "USD", basis: "estimated", amount: 0.002 },
+					{ currency: "USD", basis: "provider-reported", amount: 0.003 },
+				],
+				complete: false,
+			},
+		});
+	});
+
+	it("keeps a native zero as an explicit USD amount", () => {
+		const state = baseState();
+		const [owned] = usageEvents(
+			mapPiRecord(assistant("free", nativeUsage(1, 1, 0)), state),
+		);
+		const events = mapPiRecord(
+			{ type: "agent_settled", aborted: false },
+			state,
+		);
+
+		expect(owned?.costDetails).toEqual({
+			amounts: [{ currency: "USD", basis: "estimated", amount: 0 }],
+			complete: false,
+		});
+		expect(events[0]).toEqual({
+			type: "usage",
+			usage: expect.objectContaining({
+				costDetails: {
+					amounts: [{ currency: "USD", basis: "estimated", amount: 0 }],
+					complete: true,
+				},
+			}),
+		});
+	});
+
+	it("adds no amount for a message with no native usage, unlike a native zero", () => {
+		const state = baseState();
+		const [snapshot] = usageEvents(mapPiRecord(assistant("missing"), state));
+
+		expect(snapshot?.costDetails).toEqual({ amounts: [], complete: false });
+		expect(state.missingNativeCost).toBe(true);
+	});
+
+	it("never turns the seeded initial zero into an amount", () => {
+		const state = baseState();
+		const events = mapPiRecord(
+			{ type: "agent_settled", aborted: false },
+			state,
+		);
+
+		expect(state.usage.cost).toBe(0);
+		expect(state.costDetails.amounts).toEqual([]);
+		expect(events.map((event) => event.type)).toEqual(["error"]);
+	});
+
+	it("counts assistant, compaction and cache-warming reports once", () => {
+		const state = baseState();
+		const events: AgentEvent[] = [];
+		events.push(
+			...mapPiRecord(assistant("work", nativeUsage(10, 5, 0.002)), state),
+		);
+		events.push(
+			...mapPiRecord(
+				{
+					type: "entry_appended",
+					entry: {
+						type: "usage",
+						id: "usage-cache-warm-1",
+						kind: "cache_warm",
+						provider: "anthropic",
+						model: "claude-sonnet-4",
+						usage: nativeUsage(0, 0, 0.001),
+					},
+				},
+				state,
+			),
+		);
+		events.push(
+			...mapPiRecord(
+				{
+					type: "entry_appended",
+					entry: {
+						type: "usage",
+						id: "usage-cache-warm-1",
+						kind: "cache_warm",
+						provider: "anthropic",
+						model: "claude-sonnet-4",
+						usage: nativeUsage(0, 0, 0.001),
+					},
+				},
+				state,
+			),
+		);
+		events.push(
+			...mapPiRecord(
+				{
+					type: "entry_appended",
+					entry: {
+						type: "compaction",
+						id: "compaction-entry-1",
+						usage: nativeUsage(0, 0, 0.05),
+					},
+				},
+				state,
+			),
+		);
+		events.push(
+			...mapPiRecord(
+				{
+					type: "compaction_end",
+					reason: "threshold",
+					result: { usage: nativeUsage(5, 3, 0.0005) },
+					aborted: false,
+					willRetry: false,
+				},
+				state,
+			),
+		);
+		events.push(
+			...mapPiRecord(
+				{ type: "message_update", usage: nativeUsage(100, 100, 1) },
+				state,
+			),
+		);
+		events.push(
+			...mapPiRecord(
+				{
+					type: "turn_end",
+					message: { usage: nativeUsage(100, 100, 1) },
+				},
+				state,
+			),
+		);
+		events.push(
+			...mapPiRecord(
+				{ type: "agent_end", messages: [], willRetry: false },
+				state,
+			),
+		);
+		events.push(
+			...mapPiRecord({ type: "agent_settled", aborted: false }, state),
+		);
+
+		const final = usageEvents(events).at(-1);
+		expect(final?.costDetails?.amounts[0]?.amount).toBeCloseTo(0.0035);
+		expect(final?.costDetails?.amounts).toEqual([
+			expect.objectContaining({ currency: "USD", basis: "estimated" }),
+		]);
+		expect(final?.costDetails?.complete).toBe(true);
+	});
+
+	it("marks compaction without summary usage incomplete", () => {
+		const state = baseState();
+		mapPiRecord(assistant("work", nativeUsage(1, 1, 0.002)), state);
+		const events = mapPiRecord(
+			{
+				type: "compaction_end",
+				reason: "manual",
+				aborted: true,
+				willRetry: false,
+			},
+			state,
+		);
+
+		expect(state.missingNativeCost).toBe(true);
+		expect(events).toEqual([
+			{
+				type: "usage",
+				usage: expect.objectContaining({
+					costDetails: {
+						amounts: [{ currency: "USD", basis: "estimated", amount: 0.002 }],
+						complete: false,
+					},
+				}),
+			},
+		]);
+	});
+
+	it("emits an incomplete final snapshot before an aborted terminal error", () => {
+		const state = baseState();
+		mapPiRecord(assistant("work", nativeUsage(1, 1, 0.002)), state);
+		const events = mapPiRecord({ type: "agent_settled", aborted: true }, state);
+
+		expect(events.map((event) => event.type)).toEqual(["usage", "error"]);
+		expect(events[0]).toEqual({
+			type: "usage",
+			usage: expect.objectContaining({
+				costDetails: {
+					amounts: [{ currency: "USD", basis: "estimated", amount: 0.002 }],
+					complete: false,
+				},
+			}),
+		});
+		expect(events[1]).toEqual({ type: "error", message: "pi aborted" });
+	});
+
+	it("keeps emitted snapshots immutable as later reports arrive", () => {
+		const state = baseState();
+		const [first] = usageEvents(
+			mapPiRecord(assistant("first", nativeUsage(1, 1, 0.002)), state),
+		);
+		mapPiRecord(assistant("second", nativeUsage(1, 1, 0.003)), state);
+
+		expect(first?.costDetails?.amounts).toEqual([
+			{ currency: "USD", basis: "estimated", amount: 0.002 },
+		]);
+	});
+
+	it("emits the final snapshot before the terminal result", () => {
+		const state = baseState();
+		mapPiRecord(assistant("done", nativeUsage(1, 1, 0.002)), state);
+		const events = mapPiRecord(
+			{ type: "agent_settled", aborted: false },
+			state,
+		);
+
+		expect(events.map((event) => event.type)).toEqual(["usage", "result"]);
+		expect(events[0]).toEqual({
+			type: "usage",
+			usage: expect.objectContaining({
+				costDetails: {
+					amounts: [{ currency: "USD", basis: "estimated", amount: 0.002 }],
+					complete: true,
+				},
+			}),
+		});
 	});
 });
 
@@ -536,6 +897,34 @@ describe("createPiRunner", () => {
 			type: "result",
 			text: "split fixture",
 		});
+	});
+
+	it("replays assistant, compaction and usage-entry reports with a final snapshot", async () => {
+		const root = await tempDir();
+		const stub = spawnStub({ stdout: fixture("usage-accounting") });
+		const runner = createPiRunner({ sessionRoot: root, spawn: stub.spawn });
+
+		const events = await collect(
+			runner.run(specFor(), new AbortController().signal),
+		);
+
+		const usage = events.flatMap((event) =>
+			event.type === "usage" ? [event.usage] : [],
+		);
+		const final = usage.at(-1);
+		expect(
+			final?.costDetails?.amounts.map((a) => [a.currency, a.basis]),
+		).toEqual([
+			["USD", "estimated"],
+			["USD", "provider-reported"],
+		]);
+		expect(final?.costDetails?.amounts[0]?.amount).toBeCloseTo(0.0035);
+		expect(final?.costDetails?.amounts[1]?.amount).toBeCloseTo(0.004);
+		expect(final?.costDetails?.complete).toBe(true);
+		expect(final?.tokensIn).toBe(38);
+		expect(final?.tokensOut).toBe(16);
+		expect(events.at(-2)?.type).toBe("usage");
+		expect(events.at(-1)).toEqual({ type: "result", text: "done" });
 	});
 
 	it("kills the child when the consumer stops early", async () => {

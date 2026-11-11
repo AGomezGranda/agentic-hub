@@ -6,6 +6,7 @@ import type {
 	RunEvent,
 	RunEventBody,
 	StepRecord,
+	UsageRecord,
 } from "@payo/contracts";
 
 export interface RunState {
@@ -54,8 +55,11 @@ export function reduce(state: RunState | null, event: Sequenced): RunState {
 	}
 	// The maps are never mutated, so a lastSeq-only event can share them.
 	if (event.type === "attempt.event") {
-		requireRunning(state.attempts, event.attemptId, "attempt");
-		return { ...state, lastSeq: event.seq };
+		const attempt = requireRunning(state.attempts, event.attemptId, "attempt");
+		if (event.event.type !== "usage") return { ...state, lastSeq: event.seq };
+		const attempts = new Map(state.attempts);
+		attempts.set(event.attemptId, { ...attempt, usage: event.event.usage });
+		return { ...state, lastSeq: event.seq, attempts };
 	}
 
 	const next: RunState = {
@@ -134,7 +138,10 @@ export function reduce(state: RunState | null, event: Sequenced): RunState {
 			next.attempts.set(event.attemptId, {
 				...attempt,
 				status: event.outcome,
-				usage: event.usage,
+				usage:
+					event.outcome === "interrupted"
+						? interruptedUsage(event.usage, attempt.usage)
+						: event.usage,
 				error: event.error,
 			});
 			return next;
@@ -200,6 +207,31 @@ export function fold(events: RunEvent[]): RunState {
 	let state = reduce(null, first);
 	for (const event of rest) state = reduce(state, event);
 	return state;
+}
+
+// Recovery supplies unknowns for values it cannot observe; keep any earlier reading and mark the money incomplete.
+function interruptedUsage(
+	terminal: UsageRecord,
+	previous: UsageRecord | null,
+): UsageRecord {
+	const costDetails = terminal.costDetails ?? previous?.costDetails;
+	const merged: UsageRecord =
+		previous === null
+			? terminal
+			: {
+					tokensIn:
+						terminal.tokensIn === "unknown"
+							? previous.tokensIn
+							: terminal.tokensIn,
+					tokensOut:
+						terminal.tokensOut === "unknown"
+							? previous.tokensOut
+							: terminal.tokensOut,
+					cost: terminal.cost === "unknown" ? previous.cost : terminal.cost,
+					...(costDetails === undefined ? {} : { costDetails }),
+				};
+	if (merged.costDetails === undefined) return merged;
+	return { ...merged, costDetails: { ...merged.costDetails, complete: false } };
 }
 
 function assertFresh<T>(map: Map<string, T>, id: string, what: string): void {

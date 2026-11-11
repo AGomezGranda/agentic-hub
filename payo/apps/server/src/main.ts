@@ -1,5 +1,6 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import { readPayoConfigDocument, writePayoConfigDocument } from "@payo/config";
 import { ensureServerToken } from "./auth.ts";
 import { type Composition, createComposition } from "./composition.ts";
 import {
@@ -10,6 +11,7 @@ import {
 import { pickDirectory } from "./directory-picker.ts";
 import { runDoctor, startupBlockingFailures } from "./doctor.ts";
 import { createHandler } from "./http.ts";
+import { openWorkspace } from "./open-workspace.ts";
 import { createConfigSettingsService } from "./settings.ts";
 
 async function main(): Promise<void> {
@@ -42,6 +44,8 @@ async function main(): Promise<void> {
 
 	const token = await ensureServerToken(config.dataDir);
 	const configSettings = createConfigSettingsService({
+		readConfig: readPayoConfigDocument,
+		writeConfig: writePayoConfigDocument,
 		configFile: config.configFile,
 		env: process.env,
 		cwd: process.cwd(),
@@ -57,6 +61,7 @@ async function main(): Promise<void> {
 			getServices: () => services,
 			configSettings,
 			pickDirectory,
+			openWorkspace,
 		}),
 	);
 

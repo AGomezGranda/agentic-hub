@@ -19,6 +19,10 @@ export {
 } from "./exec.ts";
 export type { ExecutionGitOptions } from "./execution.ts";
 export { createExecutionWorkspace } from "./execution.ts";
+export {
+	createRepositoryPublication,
+	type RepositoryPublicationOptions,
+} from "./publication.ts";
 
 export interface GitWorkspaceOptions {
 	root: string;

@@ -74,6 +74,10 @@ export function useRunActivity(token: string, runId: string) {
 					exact: true,
 				}),
 				queryClient.invalidateQueries({ queryKey: ["runs", token] }),
+				queryClient.invalidateQueries({
+					queryKey: ["costs", token, runId],
+					exact: true,
+				}),
 			]);
 			return queryClient.getQueryData<RunSummary>(summaryKey);
 		};

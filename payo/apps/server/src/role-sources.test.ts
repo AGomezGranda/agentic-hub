@@ -19,6 +19,14 @@ import {
 
 const exec = createGitExec();
 const rubricPaths = [...architectureRubricPaths, ...codeQualityRubricPaths];
+it("requires the architecture standard and structure resources", () => {
+	expect(architectureRubricPaths).toContain(
+		"skills/architecture-audit/references/standard.md",
+	);
+	expect(architectureRubricPaths).toContain(
+		"skills/architecture-audit/references/structure.md",
+	);
+});
 const files: Record<string, string> = {
 	"skills/create-plan/SKILL.md": "create plan v1\n",
 	"skills/review-plan/SKILL.md": "review plan v1\n",

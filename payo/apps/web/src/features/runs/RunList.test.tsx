@@ -99,7 +99,7 @@ it("shows status groups in order with counts for the loaded list", () => {
 		"Active · 1",
 		"Ended · 1",
 	]);
-	expect(screen.getByText(/loaded runs/i)).toBeInTheDocument();
+	expect(screen.getByText(/loaded work items/i)).toBeInTheDocument();
 });
 
 it("groups by exact repository path in lexical order and preserves run order", async () => {
@@ -139,14 +139,14 @@ it("groups by exact repository path in lexical order and preserves run order", a
 	expect(
 		within(firstHeading).getByText("/work/a/project", { exact: true }),
 	).toBeInTheDocument();
-	expect(firstHeading).toHaveTextContent("1 run");
+	expect(firstHeading).toHaveTextContent("1 work item");
 	expect(
 		within(lastHeading).getByText("project", { exact: true }),
 	).toBeInTheDocument();
 	expect(
 		within(lastHeading).getByText("/work/z/project", { exact: true }),
 	).toBeInTheDocument();
-	expect(lastHeading).toHaveTextContent("2 runs");
+	expect(lastHeading).toHaveTextContent("2 work items");
 	const zLinks = within(lastGroup).getAllByRole("link");
 	const firstZLink = zLinks[0];
 	const secondZLink = zLinks[1];
@@ -176,8 +176,8 @@ it("summarizes loaded, attention, and active runs and shows row status metadata"
 		/>,
 	);
 
-	expect(screen.getByText("3 loaded runs")).toBeInTheDocument();
-	const summary = screen.getByRole("region", { name: "Loaded run summary" });
+	expect(screen.getByText("3 loaded work items")).toBeInTheDocument();
+	const summary = screen.getByRole("region", { name: "Loaded work summary" });
 	expect(summary).toHaveTextContent(/Needs you\s*1/);
 	expect(summary).toHaveTextContent(/Active\s*1/);
 	const gatedLink = screen.getByRole("link", { name: /Gated task/ });
@@ -256,8 +256,10 @@ it("keeps the no-runs message in both modes without empty repository groups", as
 	).toHaveLength(0);
 });
 
-it("distinguishes an execution from its planning run in links and the selector", () => {
-	const planning = runSummary(RUN_A);
+it("keeps a plan and its PR together across statuses, grouping modes, and missing parents", async () => {
+	const user = userEvent.setup();
+	const onSelect = vi.fn();
+	const planning = runSummary(RUN_A, { status: "ended", stage: "Approved" });
 	const execution = {
 		...runSummary(RUN_B),
 		execution: {
@@ -281,19 +283,73 @@ it("distinguishes an execution from its planning run in links and the selector",
 			review: null,
 		},
 	};
-	render(
+	const view = render(
 		<RunList
-			runs={[planning, execution]}
+			runs={[execution, planning]}
 			isPending={false}
-			selectedRunId={RUN_A}
-			onSelect={() => {}}
+			selectedRunId={RUN_B}
+			onSelect={onSelect}
 		/>,
 	);
-	expect(screen.getByRole("link", { name: /Execution PR-1/ })).toHaveAttribute(
-		"href",
-		`/runs/${RUN_B}`,
-	);
-	expect(screen.getByRole("option", { name: /Execution PR-1/ })).toHaveValue(
+	expect(
+		screen.getByRole("link", { name: /PR workspace PR-1/ }),
+	).toHaveAttribute("href", `/runs/${RUN_B}`);
+	expect(screen.getByRole("option", { name: /PR workspace PR-1/ })).toHaveValue(
 		RUN_B,
 	);
+	const active = screen.getByRole("region", { name: "Active" });
+	expect(within(active).getByRole("link", { name: /^Plan/ })).toHaveAttribute(
+		"href",
+		`/runs/${RUN_A}`,
+	);
+	expect(within(active).getAllByRole("link")).toHaveLength(2);
+	expect(
+		within(screen.getByRole("region", { name: "Ended" })).queryAllByRole(
+			"link",
+		),
+	).toHaveLength(0);
+	expect(screen.getByText("1 loaded work items")).toBeInTheDocument();
+	const pr = screen.getByRole("link", { name: /PR workspace PR-1/ });
+	expect(pr).toHaveAttribute("aria-current", "page");
+	await user.click(pr);
+	expect(onSelect).toHaveBeenCalledWith(RUN_B);
+	await user.click(screen.getByRole("radio", { name: "Repository" }));
+	expect(
+		within(screen.getByRole("region", { name: "/work/repo" })).getAllByRole(
+			"link",
+		),
+	).toHaveLength(2);
+	view.rerender(
+		<RunList
+			runs={[{ ...execution, openGates: [gate("blocked")] }, planning]}
+			isPending={false}
+			selectedRunId={RUN_B}
+			onSelect={onSelect}
+		/>,
+	);
+	await user.click(screen.getByRole("radio", { name: "Status" }));
+	expect(
+		within(screen.getByRole("region", { name: "Needs you" })).getAllByRole(
+			"link",
+		),
+	).toHaveLength(2);
+	expect(
+		within(screen.getByRole("region", { name: "Active" })).queryAllByRole(
+			"link",
+		),
+	).toHaveLength(0);
+	view.rerender(
+		<RunList
+			runs={[execution]}
+			isPending={false}
+			selectedRunId={RUN_B}
+			onSelect={onSelect}
+		/>,
+	);
+	expect(
+		screen.getByText("Source plan is not in the loaded results."),
+	).toBeVisible();
+	expect(
+		screen.getByRole("link", { name: /PR workspace PR-1/ }),
+	).toHaveAttribute("href", `/runs/${RUN_B}`);
 });

@@ -1,3 +1,4 @@
+import { resolvePayoConfigDocument } from "@payo/config";
 import type { DoctorCheck } from "@payo/contracts";
 import { expect, it } from "vitest";
 import type { ServerConfig } from "./config.ts";
@@ -9,6 +10,8 @@ import {
 
 function config(overrides: Partial<ServerConfig> = {}): ServerConfig {
 	return {
+		ghBin: "gh",
+		publication: resolvePayoConfigDocument({}, {}, "/repo").publication,
 		configFile: "/data/config.toml",
 		dataDir: "/data",
 		repo: "/repo",

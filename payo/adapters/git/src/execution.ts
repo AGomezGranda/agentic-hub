@@ -11,7 +11,7 @@ import {
 	stat,
 	writeFile,
 } from "node:fs/promises";
-import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
 	ExecutionDiffTooLargeError,
 	type ExecutionWorkspace as ExecutionWorkspacePort,
@@ -92,6 +92,13 @@ export function createExecutionWorkspace(
 		async prepare(input, signal): Promise<PreparedExecutionWorkspace> {
 			assertNotAborted(signal);
 			validatePrepareInput(input, configuredRoot);
+			const branch = await run(
+				input.repo,
+				["check-ref-format", "--branch", input.branch],
+				signal,
+			);
+			if (branch.trim() !== input.branch)
+				throw new Error(`invalid execution branch ${input.branch}`);
 			const root = input.worktreeRoot;
 			await mkdir(root, { recursive: true, mode: 0o700 });
 			const realRoot = await realpath(root);
@@ -334,15 +341,7 @@ export function createExecutionWorkspace(
 				diffs.push(output);
 			};
 
-			await capture([
-				"diff",
-				"--binary",
-				"--no-ext-diff",
-				`${baseCommit}...HEAD`,
-				"--",
-			]);
-			await capture(["diff", "--binary", "--no-ext-diff", "--"]);
-			await capture(["diff", "--cached", "--binary", "--no-ext-diff", "--"]);
+			await capture(["diff", "--binary", "--no-ext-diff", baseCommit, "--"]);
 			const status = await run(
 				workspacePath,
 				[
@@ -394,7 +393,11 @@ export function createExecutionWorkspace(
 							repo,
 							signal,
 						);
-						if (ancestor.exitCode !== 0)
+						if (ancestor.exitCode !== 0 && ancestor.exitCode !== 1)
+							throw new Error(
+								`git merge-base failed (exit ${ancestor.exitCode}): ${excerpt(ancestor.stderr || ancestor.stdout)}`,
+							);
+						if (ancestor.exitCode === 1)
 							reason = `ref ${prerequisite.ref} is not an ancestor of the pinned base`;
 					} catch (error) {
 						// Only "not found" is a fact about the ref; timeouts, aborts and spawn errors propagate.
@@ -412,12 +415,19 @@ export function createExecutionWorkspace(
 							reason = `invalid prerequisite path ${path}`;
 							break;
 						}
-						const exists = await git(
-							["cat-file", "-e", `${baseCommit}:${path}`],
+						const entry = await run(
 							repo,
+							[
+								"ls-tree",
+								"--name-only",
+								"-z",
+								baseCommit,
+								"--",
+								`:(literal)${path}`,
+							],
 							signal,
 						);
-						if (exists.exitCode !== 0) {
+						if (entry.length === 0) {
 							reason = `path ${path} is absent at the pinned base`;
 							break;
 						}
@@ -559,9 +569,44 @@ export function createExecutionWorkspace(
 			const listed = parseWorktrees(
 				await run(workspacePath, ["worktree", "list", "--porcelain"], signal),
 			);
-			const ownership = await findWorktreeByPath(listed, workspacePath);
-			if (!ownership?.branch?.startsWith("refs/heads/payo/"))
-				throw new Error("refusing to commit outside a Payo execution branch");
+			const entry = await findWorktreeByPath(listed, workspacePath);
+			const executionId = basename(workspacePath);
+			const ownership = await readOwnership(
+				join(configuredRoot, ".meta", `${executionId}.json`),
+			);
+			if (
+				!ownership ||
+				!EXECUTION_ID.test(executionId) ||
+				ownership.executionId !== executionId ||
+				!COMMIT.test(ownership.baseCommit) ||
+				!(await pathsEqual(workspacePath, join(configuredRoot, executionId))) ||
+				!(await pathsEqual(ownership.path, workspacePath)) ||
+				(await realpath(ownership.repo).catch(() => null)) !== ownership.repo ||
+				entry?.branch !== `refs/heads/${ownership.branch}` ||
+				before.branch !== ownership.branch ||
+				!expectation.trailer.startsWith(`Payo-Execution: ${executionId}/`)
+			)
+				throw new Error("execution workspace ownership metadata mismatch");
+			const repoCommon = resolve(
+				ownership.repo,
+				(
+					await run(ownership.repo, ["rev-parse", "--git-common-dir"], signal)
+				).trim(),
+			);
+			const ancestor = await git(
+				[
+					"merge-base",
+					"--is-ancestor",
+					ownership.baseCommit,
+					expectation.parent,
+				],
+				workspacePath,
+				signal,
+			);
+			if (!(await pathsEqual(common, repoCommon)) || ancestor.exitCode !== 0)
+				throw new Error(
+					"execution workspace repository or base ownership mismatch",
+				);
 			await run(workspacePath, ["add", "--all"], signal);
 			const unstaged = await git(
 				["diff", "--quiet", "--"],
@@ -604,8 +649,10 @@ export function createExecutionWorkspace(
 				throw new Error("commit hook modified the execution workspace");
 			const committed = await this.inspectCommit(workspacePath, signal);
 			if (
+				after.branch !== ownership.branch ||
 				committed.parent !== expectation.parent ||
 				committed.tree !== expectation.tree ||
+				committed.message !== message.trimEnd() ||
 				!committed.message.split(/\r?\n/).includes(expectation.trailer)
 			)
 				throw new Error("created commit does not match durable intent");
@@ -634,7 +681,7 @@ function validatePrepareInput(
 		throw new Error(`repo must be absolute: ${input.repo}`);
 	if (resolve(input.worktreeRoot) !== root)
 		throw new Error(`worktree root mismatch: ${input.worktreeRoot}`);
-	if (input.branch !== `payo/${input.executionId}`)
+	if (!input.branch || input.branch.startsWith("-"))
 		throw new Error(`invalid execution branch ${input.branch}`);
 	if (!COMMIT.test(input.baseCommit))
 		throw new Error(`invalid base commit ${input.baseCommit}`);

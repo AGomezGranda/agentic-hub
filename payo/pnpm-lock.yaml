@@ -30,6 +30,15 @@ importers:
         specifier: workspace:*
         version: link:../../packages/kernel
 
+  adapters/gh:
+    dependencies:
+      '@payo/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
+      '@payo/kernel':
+        specifier: workspace:*
+        version: link:../../packages/kernel
+
   adapters/git:
     dependencies:
       '@payo/contracts':
@@ -98,6 +107,9 @@ importers:
       '@payo/factory':
         specifier: workspace:*
         version: link:../../modules/factory
+      '@payo/gh':
+        specifier: workspace:*
+        version: link:../../adapters/gh
       '@payo/git':
         specifier: workspace:*
         version: link:../../adapters/git

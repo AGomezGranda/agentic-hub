@@ -2,11 +2,13 @@ import {
 	loadPayoConfig,
 	type ModelSelection,
 	PAYO_ROLES,
+	type PayoConfig,
 	type PayoRole,
 	type PayoRoleSetting,
 	resolveDataDir as resolveSharedDataDir,
 } from "@payo/config";
 import type { ExecutionCheck } from "@payo/contracts";
+import { ApplicationError } from "./errors.ts";
 
 export const PRODUCTION_PORT = 7331;
 export const DEFAULT_MAX_CONCURRENT_AGENTS = 4;
@@ -26,6 +28,8 @@ export interface ServerConfig {
 	piBin: string;
 	acliBin: string;
 	gitBin: string;
+	ghBin: string;
+	publication: PayoConfig["publication"];
 	piProvider: string;
 	model: string | null;
 	roles: Record<PayoRole, PayoRoleSetting> & { implementer?: PayoRoleSetting };
@@ -80,6 +84,8 @@ export function loadConfig(
 		piBin: shared.tools.pi,
 		acliBin: shared.tools.acli,
 		gitBin: shared.tools.git,
+		ghBin: shared.tools.gh,
+		publication: shared.publication,
 		piProvider: shared.piProvider,
 		model: shared.model?.id ?? null,
 		roles: shared.roles,
@@ -93,7 +99,8 @@ export function assertRealModeRoleModels(
 	if (devFakes) return;
 	const missing = PAYO_ROLES.filter((role) => roles[role].model === null);
 	if (missing.length > 0)
-		throw new Error(
+		throw new ApplicationError(
+			"invalid_request",
 			`real mode requires a model for every role; missing: ${missing.join(", ")}. Configure [model] or [roles.<role>].model (or PAYO_MODEL and PAYO_PI_PROVIDER).`,
 		);
 }

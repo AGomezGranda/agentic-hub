@@ -10,7 +10,14 @@ import {
 	sha256Hex,
 } from "@payo/kernel";
 import { expect, it } from "vitest";
-import { approve, beginFactory, executeFactory, start } from "./commands.ts";
+import {
+	answer,
+	approve,
+	beginFactory,
+	executeFactory,
+	start,
+} from "./commands.ts";
+import { readPlan, writePlan } from "./infrastructure/plans.ts";
 import {
 	readPlanVersion,
 	readPlanVersions,
@@ -116,6 +123,9 @@ async function setup(scripts: readonly FakeStep[][], execute = true) {
 			async remove() {},
 		},
 		dataDir,
+		readPlan: (runId: string) => readPlan(dataDir, runId),
+		writePlan: (runId: string, markdown: string) =>
+			writePlan(dataDir, runId, markdown),
 		roleSources: {
 			planner: source,
 			reviewer: source,
@@ -141,6 +151,34 @@ async function setup(scripts: readonly FakeStep[][], execute = true) {
 		: await beginFactory(deps, input);
 	return { handle, backing, dataDir, deps };
 }
+
+it("uses injected plan persistence for execution, review, answers, and approval", async () => {
+	const executablePlan = {
+		...plan,
+		markdown: "# Plan\n## Phase 1 — One phase\n",
+		prStrategy: [{ id: "pr", title: "One", phases: ["One phase"] }],
+	};
+	const { handle, deps } = await setup(
+		[envelope(executablePlan), ...finalReviewScripts.slice(1)],
+		false,
+	);
+	deps.dataDir = "/unused-factory-data";
+	let markdown = "";
+	deps.readPlan = async () => markdown;
+	deps.writePlan = async (_runId, value) => {
+		markdown = value;
+	};
+	await executeFactory(handle, { signal: new AbortController().signal });
+	expect(markdown).toBe(executablePlan.markdown);
+	expect((await readRunReview(handle)).plan).toMatchObject({
+		available: true,
+		markdown,
+	});
+	await answer(handle, { questionId: "q1", text: "Keep it simple" });
+	expect(markdown).toContain("Keep it simple");
+	await approve(handle);
+	expect(handle.log.current().outcome).toBe("approved");
+});
 
 it("uses the latest validated snapshot before an approval or escalation gate", async () => {
 	const scripts = [

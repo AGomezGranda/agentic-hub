@@ -5,16 +5,21 @@ import type { AddressInfo } from "node:net";
 import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadPayoConfig, readPayoConfigDocument } from "@payo/config";
+import {
+	loadPayoConfig,
+	readPayoConfigDocument,
+	writePayoConfigDocument,
+} from "@payo/config";
 import {
 	ExecutionRunConfig as ExecutionRunConfigSchema,
 	type RunSummary,
+	WorkCostTree,
 	type WorkItem,
 	type WorkItemRequest,
 } from "@payo/contracts";
 import { QUALITY_EXPECTATIONS } from "@payo/factory";
 import type { FakeStep } from "@payo/runner-fake";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import type { AdapterSet } from "./adapters.ts";
 import { ensureServerToken } from "./auth.ts";
 import { type Composition, createComposition } from "./composition.ts";
@@ -27,6 +32,7 @@ import {
 	fakeWorkspace,
 } from "./factory-fixtures.ts";
 import { createHandler } from "./http.ts";
+import type { WorkspaceOpener } from "./open-workspace.ts";
 import { createConfigSettingsService } from "./settings.ts";
 
 interface Harness {
@@ -45,6 +51,8 @@ async function setup(
 	adapters?: AdapterSet,
 	configContents = "",
 	pickDirectory: DirectoryPicker = async () => null,
+	settingsDevFakes = true,
+	openWorkspace: WorkspaceOpener = async () => {},
 ): Promise<Harness> {
 	const dataDir = await mkdtemp(join(tmpdir(), "payo-http-"));
 	const configFile = env.PAYO_CONFIG_FILE ?? join(dataDir, "config.toml");
@@ -60,10 +68,12 @@ async function setup(
 	};
 	const config: ServerConfig = loadConfig(serverEnv, ["--dev-fakes"], dataDir);
 	const configSettings = createConfigSettingsService({
+		readConfig: readPayoConfigDocument,
+		writeConfig: writePayoConfigDocument,
 		configFile: config.configFile,
 		env: serverEnv,
 		cwd: dataDir,
-		devFakes: config.devFakes,
+		devFakes: settingsDevFakes,
 	});
 	const token = await ensureServerToken(dataDir);
 	const composition = await createComposition({
@@ -83,6 +93,7 @@ async function setup(
 			getServices: () => composition,
 			configSettings,
 			pickDirectory,
+			openWorkspace,
 		}),
 	);
 	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -481,6 +492,29 @@ it("serves and saves the selected config document behind the token", async () =>
 	});
 });
 
+it("returns the missing-model explanation as 400 without changing settings", async () => {
+	const harness = await setup(
+		{},
+		undefined,
+		"[model]\nprovider = 'anthropic'\nid = 'claude'\n",
+		undefined,
+		false,
+	);
+	const initial = await api(harness, "/api/v1/settings/config");
+	const saved = await api(harness, "/api/v1/settings/config", {
+		method: "PUT",
+		body: { revision: initial.body.revision, document: {} },
+	});
+	expect(saved.status).toBe(400);
+	expect(saved.body).toEqual({
+		code: "invalid_request",
+		message: expect.stringMatching(/real mode requires a model.*planner/),
+	});
+	expect(readPayoConfigDocument(harness.configFile).document).toEqual(
+		initial.body.document,
+	);
+});
+
 it("maps a host-invalid config path to 400 without changing the file", async () => {
 	if (process.platform === "win32") return;
 	const harness = await setup({ PAYO_REPO: undefined });
@@ -723,10 +757,27 @@ checks = [{ name = "unit", command = "true", args = [], timeout_ms = 1000 }]
 	);
 	await approveRun(harness, sourceRunId);
 
+	const preview = await api(
+		harness,
+		`/api/v1/runs/${sourceRunId}/implement-preview`,
+		{
+			method: "POST",
+			body: { prId: "pr-1", slug: "create-todo-entity" },
+		},
+	);
+	expect(preview.status).toBe(200);
+	expect(preview.body.previewHash).toEqual(expect.any(String));
 	const request = () =>
 		api(harness, `/api/v1/runs/${sourceRunId}/implement`, {
 			method: "POST",
-			body: { prId: "pr-1" },
+			body: {
+				prId: "pr-1",
+				naming: {
+					previewHash: preview.body.previewHash,
+					ticketId: preview.body.ticketId,
+					slug: preview.body.slug,
+				},
+			},
 		});
 	const accepted = await request();
 	expect(accepted.status).toBe(202);
@@ -759,6 +810,47 @@ checks = [{ name = "unit", command = "true", args = [], timeout_ms = 1000 }]
 			(await summary(harness, executionRunId)).execution?.status === "ended",
 	);
 	const result = await summary(harness, executionRunId);
+	const planningCosts = await api(harness, `/api/v1/runs/${sourceRunId}/costs`);
+	const executionCosts = await api(
+		harness,
+		`/api/v1/runs/${executionRunId}/costs`,
+	);
+	expect(planningCosts.status).toBe(200);
+	expect(executionCosts.status).toBe(200);
+	expect(executionCosts.body).toEqual(planningCosts.body);
+	const costs = WorkCostTree.parse(planningCosts.body);
+	expect(costs.sourceRunId).toBe(sourceRunId);
+	expect(costs.planning.runId).toBe(sourceRunId);
+	expect(costs.executions).toEqual([
+		expect.objectContaining({
+			prId: "pr-1",
+			run: expect.objectContaining({ runId: executionRunId }),
+		}),
+	]);
+	expect(costs.total.attempts).toBe(
+		costs.planning.cost.attempts +
+			(costs.executions[0]?.run.cost.attempts ?? 0),
+	);
+	expect(
+		(await api(harness, `/api/v1/runs/${sourceRunId}/costs`, { token: null }))
+			.status,
+	).toBe(401);
+	expect(
+		(
+			await api(harness, `/api/v1/runs/${sourceRunId}/costs`, {
+				method: "POST",
+			})
+		).status,
+	).toBe(405);
+	expect((await api(harness, "/api/v1/runs/not-an-id/costs")).status).toBe(400);
+	expect(
+		(
+			await api(
+				harness,
+				"/api/v1/runs/7f1f1b1e-2b4c-4f7a-9d3e-2f4a5b6c7d8e/costs",
+			)
+		).status,
+	).toBe(404);
 	expect(result.execution).toMatchObject({
 		runId: executionRunId,
 		sourceRunId,
@@ -796,6 +888,150 @@ checks = [{ name = "unit", command = "true", args = [], timeout_ms = 1000 }]
 	expect(listed.body.runs.map((run: RunSummary) => run.runId)).toContain(
 		executionRunId,
 	);
+});
+
+it("publishes a reviewed execution only on explicit request and reuses the child", async () => {
+	const harness = await setup(
+		{},
+		undefined,
+		`[execution]
+checks = [{ name = "unit", command = "true", args = [], timeout_ms = 1000 }]
+`,
+	);
+	const sourceRunId = await startRun(harness);
+	await waitFor(
+		async () => (await summary(harness, sourceRunId)).stage === "Approval",
+	);
+	await approveRun(harness, sourceRunId);
+	const preview = await api(
+		harness,
+		`/api/v1/runs/${sourceRunId}/implement-preview`,
+		{
+			method: "POST",
+			body: { prId: "pr-1", slug: "create-todo-entity" },
+		},
+	);
+	expect(preview.status).toBe(200);
+	expect(preview.body.ticketId).toBe("ABC-123");
+	const accepted = await api(harness, `/api/v1/runs/${sourceRunId}/implement`, {
+		method: "POST",
+		body: {
+			prId: "pr-1",
+			naming: {
+				previewHash: preview.body.previewHash,
+				ticketId: preview.body.ticketId,
+				slug: preview.body.slug,
+			},
+		},
+	});
+	expect(accepted.status).toBe(202);
+	const executionRunId = accepted.body.runId as string;
+	await waitFor(
+		async () =>
+			(await summary(harness, executionRunId)).execution?.outcome ===
+			"reviewed",
+	);
+	const publicationPreview = await api(
+		harness,
+		`/api/v1/runs/${executionRunId}/publication-preview`,
+		{ method: "POST", body: {} },
+	);
+	expect(publicationPreview.status).toBe(200);
+	expect(publicationPreview.body).toMatchObject({
+		eligible: true,
+		errors: [],
+		title: "[ABC-123] First change",
+		branch: "ABC-123/create-todo-entity",
+	});
+	expect(publicationPreview.body.commits).toHaveLength(2);
+	const publishBody = {
+		previewHash: publicationPreview.body.previewHash as string,
+	};
+	expect(
+		(await harness.composition.store.listRunIds()).filter(
+			(id) => id !== sourceRunId && id !== executionRunId,
+		),
+	).toEqual([]);
+
+	const published = await api(
+		harness,
+		`/api/v1/runs/${executionRunId}/publish`,
+		{ method: "POST", body: publishBody },
+	);
+	expect(published.status).toBe(202);
+	const publicationRunId = published.body.runId as string;
+	expect(publicationRunId).not.toBe(executionRunId);
+	await waitFor(async () => {
+		const run = await summary(harness, publicationRunId);
+		return run.publication?.stage === "Completed";
+	});
+	const child = await summary(harness, publicationRunId);
+	expect(child).toMatchObject({
+		status: "ended",
+		outcome: "published",
+		publication: {
+			sourceRunId,
+			executionRunId,
+			branch: "ABC-123/create-todo-entity",
+			target: {
+				host: "github.com",
+				owner: "payo-fake",
+				name: "repo",
+				baseBranch: "main",
+			},
+			pr: {
+				state: "OPEN",
+				draft: true,
+				headBranch: "ABC-123/create-todo-entity",
+				title: "[ABC-123] First change",
+			},
+			reason: null,
+		},
+		openGates: [],
+	});
+	expect(child.publication?.pr?.body).toContain(
+		`<!-- payo-publication:${publicationRunId} -->`,
+	);
+	const parent = await summary(harness, executionRunId);
+	expect(parent).toMatchObject({
+		status: "ended",
+		outcome: "reviewed",
+		execution: { outcome: "reviewed" },
+	});
+	expect(await harness.composition.readEvents(publicationRunId)).toEqual(
+		expect.arrayContaining([
+			expect.objectContaining({ type: "run.ended", outcome: "published" }),
+		]),
+	);
+	expect(
+		(await api(harness, `/api/v1/runs/${publicationRunId}/costs`)).body,
+	).toEqual((await api(harness, `/api/v1/runs/${sourceRunId}/costs`)).body);
+
+	const repeated = await api(
+		harness,
+		`/api/v1/runs/${executionRunId}/publish`,
+		{ method: "POST", body: publishBody },
+	);
+	expect(repeated.status).toBe(202);
+	expect(repeated.body.runId).toBe(publicationRunId);
+	expect(
+		(await harness.composition.store.listRunIds()).filter(
+			(id) => id !== sourceRunId && id !== executionRunId,
+		),
+	).toEqual([publicationRunId]);
+	const listed = await api(harness, "/api/v1/runs");
+	expect(
+		listed.body.runs.find((run: RunSummary) => run.runId === publicationRunId)
+			?.publication?.executionRunId,
+	).toBe(executionRunId);
+	expect(
+		(
+			await api(harness, `/api/v1/runs/${publicationRunId}/resume`, {
+				method: "POST",
+				body: {},
+			})
+		).status,
+	).toBe(409);
 });
 
 it("rejects implementation when no engine-owned check suite is configured", async () => {
@@ -1138,6 +1374,17 @@ it("rejects invalid commands and does not accept them with 202", async () => {
 	expect(blank.status).toBe(400);
 	expect(blank.body.code).toBe("invalid_request");
 
+	const invalidResume = await api(harness, `/api/v1/runs/${runId}/resume`, {
+		method: "POST",
+		body: { gateId: "gate", answers: [{ issue: "Issue", answer: " " }] },
+	});
+	expect(invalidResume.status).toBe(400);
+	const planningAnswers = await api(harness, `/api/v1/runs/${runId}/resume`, {
+		method: "POST",
+		body: { gateId: "gate", answers: [{ issue: "Issue", answer: "Continue" }] },
+	});
+	expect(planningAnswers.status).toBe(400);
+
 	const notResumable = await api(harness, `/api/v1/runs/${runId}/resume`, {
 		method: "POST",
 	});
@@ -1161,6 +1408,8 @@ it("returns 503 until recovery completes", async () => {
 	writeFileSync(configFile, "");
 	const token = await ensureServerToken(dataDir);
 	const configSettings = createConfigSettingsService({
+		readConfig: readPayoConfigDocument,
+		writeConfig: writePayoConfigDocument,
 		configFile,
 		env: {},
 		cwd: dataDir,
@@ -1175,6 +1424,7 @@ it("returns 503 until recovery completes", async () => {
 			getServices: () => null,
 			configSettings,
 			pickDirectory: async () => null,
+			openWorkspace: async () => {},
 		}),
 	);
 	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -1195,4 +1445,46 @@ it("returns 503 until recovery completes", async () => {
 	} finally {
 		await new Promise<void>((resolve) => server.close(() => resolve()));
 	}
+});
+
+it("opens only the run workspace with a validated target and authorization", async () => {
+	const open = vi.fn<WorkspaceOpener>().mockResolvedValue();
+	const harness = await setup({}, undefined, "", undefined, true, open);
+	const runId = await startRun(harness);
+	const path = `/api/v1/runs/${runId}/open-workspace`;
+	expect(
+		(
+			await api(harness, path, {
+				method: "POST",
+				body: { target: "terminal" },
+				token: null,
+			})
+		).status,
+	).toBe(401);
+	expect((await api(harness, path)).status).toBe(405);
+	for (const body of [
+		{ target: "shell" },
+		{ target: "vscode", path: "/arbitrary" },
+	]) {
+		expect((await api(harness, path, { method: "POST", body })).status).toBe(
+			400,
+		);
+	}
+	expect(open).not.toHaveBeenCalled();
+	for (const target of ["terminal", "vscode"]) {
+		expect(
+			(await api(harness, path, { method: "POST", body: { target } })).status,
+		).toBe(200);
+		expect(open).toHaveBeenLastCalledWith(harness.dataDir, target);
+	}
+	const run = await summary(harness, runId);
+	vi.spyOn(harness.composition, "summary").mockResolvedValue({
+		...run,
+		execution: { worktree: "/execution/tree" },
+	} as RunSummary);
+	expect(
+		(await api(harness, path, { method: "POST", body: { target: "vscode" } }))
+			.status,
+	).toBe(200);
+	expect(open).toHaveBeenLastCalledWith("/execution/tree", "vscode");
 });

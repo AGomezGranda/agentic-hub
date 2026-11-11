@@ -22,12 +22,43 @@ import {
 import { describe, expect, it } from "vitest";
 import { readArtifact, savePlanVersion, storeCheckpoint } from "./artifacts.ts";
 import {
-	beginExecution,
+	beginExecution as acceptExecution,
 	executeExecution,
 	openExecution,
+	prepareExecutionResume,
 	readExecutionSummary,
 	resumeExecution,
 } from "./execution.ts";
+import { correctExecutionNaming, previewExecutionNaming } from "./index.ts";
+
+async function beginExecution(
+	deps: Parameters<typeof acceptExecution>[0],
+	input: Parameters<typeof acceptExecution>[1],
+) {
+	const workspace = deps.workspace ?? {
+		...workspacePort().port,
+		resolveBase: async () => input.baseCommit ?? "abc123",
+	};
+	const preview = await previewExecutionNaming(
+		{ store: deps.store, workspace },
+		input.sourceRunId,
+		{ prId: input.prId, base: input.baseBranch, ticketId: null },
+		{},
+		new AbortController().signal,
+	);
+	if (!preview.previewHash) throw new Error(JSON.stringify(preview.errors));
+	return acceptExecution(
+		{ ...deps, workspace },
+		{
+			...input,
+			naming: {
+				previewHash: preview.previewHash,
+				ticketId: null,
+				slug: preview.slug,
+			},
+		},
+	);
+}
 
 const roleSettings = { model: null, timeoutMs: 1000 };
 const roles = {
@@ -107,7 +138,7 @@ async function sourceRun(
 		baseBranch: "main",
 		config: {
 			factory: {
-				workItemRequest: { source: "jira", key: "T" },
+				workItemRequest: { source: "prompt", artifact: artifact("9") },
 				roles,
 				maxConcurrentAgents: 1,
 				roleArtifacts: {
@@ -152,7 +183,11 @@ async function sourceRun(
 		stage: "Approved",
 		cycle: 1,
 		round: 0,
-		workItem: null,
+		workItem: {
+			origin: { source: "prompt" },
+			title: "Boundary",
+			description: "Add a boundary",
+		},
 		workspace: null,
 		plan: planEvent.artifact,
 		lastAgentPlan: planEvent.artifact,
@@ -229,6 +264,7 @@ function workspacePort(
 	let committedParent: string | null = null;
 	let committedTree = "tree-base";
 	let committedMessage = "";
+	const messages: string[] = [];
 	let failAfterCommitAt = options.failAfterCommit
 		? 1
 		: (options.failAfterCommitAt ?? 0);
@@ -290,6 +326,7 @@ function workspacePort(
 			committedParent = head;
 			committedTree = expectation?.tree ?? `tree-${revision}-${commitNumber}`;
 			committedMessage = message;
+			messages.push(message);
 			if (revision > 0) committedPaths.add("partial.ts");
 			commitNumber++;
 			head = `result-commit-${commitNumber}`;
@@ -303,6 +340,7 @@ function workspacePort(
 	};
 	return {
 		port,
+		messages,
 		mutate() {
 			revision++;
 		},
@@ -901,6 +939,151 @@ describe("execution acceptance", () => {
 });
 
 describe("execution lifecycle", () => {
+	it.each(["A2_B-003", null])(
+		"pins %s naming across phase and final repair commits",
+		async (ticketId) => {
+			const store = createMemoryRunStore();
+			await sourceRun(store);
+			const workspace = workspacePort();
+			const fixture = await executionSetup(store, [], { workspace });
+			const script = multiPhaseRunner(store, workspace, manifestOutput, {
+				finalBlocker: true,
+			});
+			fixture.deps.runner = script.runner;
+			const policy = ticketId
+				? { commitTemplate: "[{ticketId}] Saved {description}" }
+				: {};
+			const preview = await previewExecutionNaming(
+				fixture.deps,
+				"source-run",
+				{ prId: "pr-1", ticketId, slug: "create-todo-entity" },
+				policy,
+				new AbortController().signal,
+			);
+			if (!preview.previewHash) throw new Error(JSON.stringify(preview.errors));
+			const handle = await acceptExecution(fixture.deps, {
+				...fixture.input,
+				policy,
+				naming: {
+					previewHash: preview.previewHash,
+					ticketId,
+					slug: preview.slug,
+				},
+			});
+			const pinned = ExecutionRunConfig.parse(
+				handle.log.current().config.factory,
+			).naming;
+			expect(pinned?.branch).toBe(
+				ticketId
+					? `${ticketId}/create-todo-entity`
+					: `payo/${handle.log.current().runId}`,
+			);
+			const reopened = await openExecution(
+				fixture.deps,
+				handle.log.current().runId,
+			);
+			expect(
+				ExecutionRunConfig.parse(reopened.log.current().config.factory).naming,
+			).toEqual(pinned);
+			await resumeExecution(reopened, { signal: new AbortController().signal });
+			expect(reopened.log.current().outcome).toBe("reviewed");
+			expect(
+				workspace.messages.map((message) => message.split("\n")[0]),
+			).toEqual(
+				ticketId
+					? [`[${ticketId}] Saved Phase 1`, `[${ticketId}] Saved Finalize One`]
+					: ["Phase 1", "Finalize One"],
+			);
+			for (const message of workspace.messages)
+				expect(message).toContain(
+					`Payo-Execution: ${handle.log.current().runId}/`,
+				);
+		},
+	);
+
+	it("previews and pins a pre-workspace slug correction, then refuses changing an established workspace", async () => {
+		const store = createMemoryRunStore();
+		await sourceRun(store);
+		const workspace = workspacePort();
+		let created = false;
+		const fixture = await executionSetup(
+			store,
+			[{ ...manifestOutput, pr: { id: "wrong", title: "Wrong" } }],
+			{ workspace },
+		);
+		fixture.deps.workspace = {
+			...workspace.port,
+			async inspect(path, signal) {
+				if (!created)
+					throw Object.assign(new Error("absent"), { code: "ENOENT" });
+				return workspace.port.inspect(path, signal);
+			},
+			async prepare(input, signal) {
+				const result = await workspace.port.prepare(input, signal);
+				created = true;
+				return result;
+			},
+		};
+		const preview = await previewExecutionNaming(
+			fixture.deps,
+			"source-run",
+			{ prId: "pr-1", ticketId: "ABC-123", slug: "create-todo-entity" },
+			{},
+			new AbortController().signal,
+		);
+		if (!preview.previewHash) throw new Error(JSON.stringify(preview.errors));
+		const handle = await acceptExecution(fixture.deps, {
+			...fixture.input,
+			naming: {
+				previewHash: preview.previewHash,
+				ticketId: "ABC-123",
+				slug: preview.slug,
+			},
+		});
+		const before = await store.read(handle.log.current().runId);
+		const correction = await correctExecutionNaming(
+			handle,
+			{ slug: "another-valid-description" },
+			new AbortController().signal,
+		);
+		expect(await store.read(handle.log.current().runId)).toEqual(before);
+		expect(correction.branch).toBe("ABC-123/another-valid-description");
+		await correctExecutionNaming(
+			handle,
+			{ slug: correction.slug, previewHash: correction.previewHash },
+			new AbortController().signal,
+		);
+		expect(handle.checkpoint.naming).toMatchObject({
+			ticketId: "ABC-123",
+			branch: correction.branch,
+		});
+		expect(
+			ExecutionRunConfig.parse(handle.log.current().config.factory).naming
+				?.branch,
+		).toBe("ABC-123/create-todo-entity");
+		await expect(
+			correctExecutionNaming(
+				handle,
+				{ slug: correction.slug, previewHash: correction.previewHash },
+				new AbortController().signal,
+			),
+		).rejects.toThrow(/stale/);
+		const reopened = await openExecution(
+			fixture.deps,
+			handle.log.current().runId,
+		);
+		expect(reopened.checkpoint.naming).toEqual(handle.checkpoint.naming);
+		await resumeExecution(reopened, { signal: new AbortController().signal });
+		expect(reopened.checkpoint.workspace?.branch).toBe(correction.branch);
+		await expect(
+			correctExecutionNaming(
+				reopened,
+				{ slug: "yet-another-description" },
+				new AbortController().signal,
+			),
+		).rejects.toThrow(/before workspace creation/);
+	});
+
 	it("executes ordered phases with receipt handoffs and a final PR-wide review", async () => {
 		const store = createMemoryRunStore();
 		const planMarkdown = [
@@ -963,6 +1146,23 @@ describe("execution lifecycle", () => {
 				{ id: "phase-2", title: "Phase 2" },
 			],
 			resultCommit: "result-commit-2",
+			review: {
+				details: {
+					scope: "final",
+					phaseIndex: 1,
+					round: expect.any(Number),
+					startCommit: expect.any(String),
+					fingerprint: expect.any(String),
+					checksAreLatest: true,
+					discarded: false,
+					coverage: expect.arrayContaining([
+						expect.objectContaining({
+							lens: "architecture",
+							checked: expect.any(Array),
+						}),
+					]),
+				},
+			},
 		});
 		expect(completed.checkpoint).toMatchObject({
 			stage: "Completed",
@@ -1421,6 +1621,31 @@ describe("execution lifecycle", () => {
 		expect(escalated.checkpoint.unresolvedFindingIds).toEqual([
 			script.findingId,
 		]);
+		expect(
+			(await readExecutionSummary(escalated)).review?.blockers,
+		).toMatchObject([
+			{ id: script.findingId, path: "src/domain.ts", line: 12 },
+		]);
+		expect(
+			(await readExecutionSummary(escalated)).review?.details,
+		).toMatchObject({
+			findings: [
+				expect.objectContaining({
+					id: script.findingId,
+					consequence: expect.any(String),
+				}),
+			],
+			verdicts: [
+				expect.objectContaining({
+					sourceIds: [script.findingId],
+					classification: "BLOCKER",
+					reason: expect.any(String),
+				}),
+			],
+			scope: "phase",
+			phaseIndex: 0,
+			discarded: false,
+		});
 		expect(escalated.log.current().status).toBe("active");
 	});
 
@@ -1476,7 +1701,7 @@ describe("execution lifecycle", () => {
 		await sourceRun(store);
 		const fixture = await executionSetup(store, [
 			{ ...manifestOutput, pr: { id: "pr-empty", title: "Empty" } },
-			implementationOutput,
+			{ ...manifestOutput, pr: { id: "pr-empty", title: "Empty" } },
 		]);
 		const handle = await beginExecution(fixture.deps, fixture.input);
 		const escalated = await executeExecution(handle, {
@@ -1489,14 +1714,185 @@ describe("execution lifecycle", () => {
 		expect(fixture.calls.map((call) => call.role)).toEqual([
 			"execution-preparer",
 		]);
-		await expect(
-			resumeExecution(escalated, { signal: new AbortController().signal }),
-		).rejects.toThrow(
-			/pinned approved plan.*create and approve a corrected planning run/,
-		);
+		await resumeExecution(escalated, { signal: new AbortController().signal });
+		expect(escalated.checkpoint).toMatchObject({
+			stage: "Escalated",
+			statusDetail: "manifest-invalid",
+		});
 		expect(fixture.calls.map((call) => call.role)).toEqual([
 			"execution-preparer",
+			"execution-preparer",
 		]);
+	});
+
+	it.each([
+		["phase reference", "Strategy uses 1 instead of Phase 1.", markdown],
+		[
+			"approval wording",
+			"Authorization conflict: status: draft is not authorization to execute.",
+			`---\nstatus: draft\n---\n${markdown}\n## Correction and execution gate\nNormal review and approval must be completed before replacement execution.\n\n## Review and approval\nThis draft is not authorization to execute.\n`,
+		],
+	])(
+		"retries a preparer's %s issue without changing the approved plan",
+		async (_name, issue, planMarkdown) => {
+			const store = createMemoryRunStore();
+			const source = await sourceRun(store, {
+				phases: ["1"],
+				markdown: planMarkdown,
+			});
+			const fixture = await executionSetup(store, [
+				{ ...manifestOutput, issues: [issue] },
+				manifestOutput,
+				implementationOutput,
+			]);
+			const handle = await beginExecution(fixture.deps, fixture.input);
+			await executeExecution(handle, { signal: new AbortController().signal });
+			expect(handle.checkpoint.statusDetail).toBe("manifest-invalid");
+			expect(fixture.calls.map((call) => call.role)).toEqual([
+				"execution-preparer",
+			]);
+			const reopened = await openExecution(
+				fixture.deps,
+				handle.log.current().runId,
+			);
+			await resumeExecution(reopened, { signal: new AbortController().signal });
+			expect(reopened.checkpoint.stage).toBe("Completed");
+			expect(fixture.calls[1]?.instructions).toContain(
+				"Payo has already resolved the approved PR strategy references",
+			);
+			expect(fixture.calls[1]?.instructions).toContain('["Phase 1"]');
+			expect(fixture.calls[1]?.instructions).toContain(
+				"The human has approved this exact plan snapshot through Payo's approval gate",
+			);
+			expect(fixture.calls[1]?.inputs).toContainEqual({
+				name: "approved-plan",
+				ref: source.ref,
+			});
+		},
+	);
+
+	it("finishes the phase automatically after correcting an incomplete implementation report", async () => {
+		const store = createMemoryRunStore();
+		await sourceRun(store);
+		const fixture = await executionSetup(store, [
+			manifestOutput,
+			{ ...implementationOutput, completedCriteria: [] },
+			implementationOutput,
+		]);
+		const handle = await beginExecution(fixture.deps, fixture.input);
+		await executeExecution(handle, { signal: new AbortController().signal });
+		expect(handle.checkpoint.stage).toBe("Completed");
+		expect(handle.log.current().gates.size).toBe(0);
+		expect(
+			fixture.calls.filter(
+				(call) => call.outputContract === "factory-execution-implementation-v1",
+			),
+		).toHaveLength(2);
+	});
+
+	it("reconciles a report once, retains unresolved issues and resumes the same phase after reopening", async () => {
+		const store = createMemoryRunStore();
+		await sourceRun(store);
+		const issues = [
+			"Issue in Phase 1: Expected: Add a history API. Found: The API exists. Why this matters: Existing clients would break. How should I proceed? Reuse or replace?",
+			"Preserve the saved answers used by existing clients.",
+		];
+		const fixture = await executionSetup(store, [
+			manifestOutput,
+			{ ...implementationOutput, planIssues: issues },
+			{ ...implementationOutput, planIssues: issues },
+			implementationOutput,
+		]);
+		const handle = await beginExecution(fixture.deps, fixture.input);
+		await executeExecution(handle, { signal: new AbortController().signal });
+		const reopened = await openExecution(
+			fixture.deps,
+			handle.log.current().runId,
+		);
+		expect(await readExecutionSummary(reopened)).toMatchObject({
+			planIssues: issues,
+		});
+		expect(fixture.calls.map((call) => call.role)).toEqual([
+			"execution-preparer",
+			"implementer",
+			"implementer",
+		]);
+		const phaseRef = fixture.calls[2]?.inputs.find(
+			(input) => input.name === "phase",
+		)?.ref;
+		if (!phaseRef) throw new Error("missing reconciliation context");
+		expect(
+			JSON.parse(new TextDecoder().decode(await readArtifact(store, phaseRef)))
+				.previousFailure,
+		).toContain(issues[0]);
+		const report = reopened.log
+			.current()
+			.artifacts.findLast(
+				(ref) => ref.kind === "factory-execution-implementation-report-v1",
+			);
+		const read = store.readArtifact;
+		store.readArtifact = async (sha) => {
+			if (sha === report?.sha256) throw new Error("missing report");
+			return read(sha);
+		};
+		expect(await readExecutionSummary(reopened)).toMatchObject({
+			planIssues: [reopened.checkpoint.escalation?.reason],
+			artifactIssues: [expect.stringContaining("plan issue report")],
+		});
+		store.readArtifact = read;
+		const gateId = [...reopened.log.current().gates.values()].find(
+			(gate) => gate.status === "open",
+		)?.gateId;
+		if (!gateId) throw new Error("missing pause gate");
+		const answers = issues.map((issue) => ({
+			issue,
+			answer: "Reuse the existing API and preserve saved answers.",
+		}));
+		await expect(
+			prepareExecutionResume(reopened, {
+				signal: new AbortController().signal,
+				gateId: "stale",
+				answers,
+			}),
+		).rejects.toThrow(/pause changed/);
+		await expect(
+			prepareExecutionResume(reopened, {
+				signal: new AbortController().signal,
+				gateId,
+				answers: [{ issue: "unknown", answer: "Continue" }],
+			}),
+		).rejects.toThrow(/issues changed/);
+		await prepareExecutionResume(reopened, {
+			signal: new AbortController().signal,
+			gateId,
+			answers,
+		});
+		const restored = await openExecution(
+			fixture.deps,
+			reopened.log.current().runId,
+		);
+		expect(restored.checkpoint.issueAnswers).toEqual(answers);
+		expect((await readExecutionSummary(restored)).issueAnswers).toEqual(
+			answers,
+		);
+		await resumeExecution(restored, { signal: new AbortController().signal });
+		expect(restored.checkpoint.stage).toBe("Completed");
+		for (const call of fixture.calls.slice(3)) {
+			const ref = call.inputs.find((input) => input.name === "phase")?.ref;
+			if (!ref) throw new Error(`missing phase input for ${call.role}`);
+			expect(
+				JSON.parse(new TextDecoder().decode(await readArtifact(store, ref)))
+					.issueAnswers,
+			).toEqual(answers);
+		}
+		expect(
+			fixture.calls
+				.slice(3)
+				.some((call) => call.role === "implementation-scout"),
+		).toBe(true);
+		expect(
+			fixture.calls.filter((call) => call.role === "execution-preparer"),
+		).toHaveLength(1);
 	});
 
 	it("escalates implementation output that fails the schema on both attempts", async () => {
@@ -1524,6 +1920,52 @@ describe("execution lifecycle", () => {
 			},
 		});
 	});
+
+	it.each(["timeout", "runner error"])(
+		"preserves the implementation failure reason after a %s and reconciles on resume",
+		async (failure) => {
+			const store = createMemoryRunStore();
+			await sourceRun(store);
+			const workspace = workspacePort();
+			const fail = (_spec: AgentSpec, signal: AbortSignal) =>
+				(async function* () {
+					workspace.mutate();
+					if (failure === "timeout") {
+						await new Promise<void>((resolve) =>
+							signal.addEventListener("abort", () => resolve(), { once: true }),
+						);
+					} else
+						yield { type: "error", message: "runner disconnected" } as const;
+				})();
+			const fixture = await executionSetup(
+				store,
+				[manifestOutput, fail, implementationOutput],
+				{ workspace },
+			);
+			const handle = await beginExecution(fixture.deps, fixture.input);
+			await executeExecution(handle, { signal: new AbortController().signal });
+			expect(handle.checkpoint).toMatchObject({
+				stage: "Escalated",
+				statusDetail: "implementation-report-invalid",
+				escalation: {
+					reason: `implementation failed: ${failure === "timeout" ? "timed out after 1000 ms" : "runner disconnected"}; edits are preserved for reconciliation`,
+				},
+			});
+			expect(
+				(
+					await workspace.port.inspect(
+						"/worktrees/execution",
+						new AbortController().signal,
+					)
+				).changedPaths,
+			).toEqual(["partial.ts"]);
+			await resumeExecution(handle, { signal: new AbortController().signal });
+			expect(handle.checkpoint.stage).toBe("Completed");
+			expect(
+				fixture.calls[2]?.inputs.some((item) => item.name === "current-diff"),
+			).toBe(true);
+		},
+	);
 
 	it("escalates repair output that fails the schema on both attempts", async () => {
 		const store = createMemoryRunStore();
@@ -1598,10 +2040,13 @@ describe("execution lifecycle", () => {
 			kind: "execution-escalation",
 			status: "open",
 		});
+		expect((await readExecutionSummary(escalated)).checks).toMatchObject([
+			{ status: "failed", output: "failure" },
+		]);
 		fixture.workspace.moveHead();
 		await expect(
 			resumeExecution(escalated, { signal: new AbortController().signal }),
-		).rejects.toThrow(/unexpected HEAD/);
+		).rejects.toThrow(/workspace HEAD changed/);
 		expect([...escalated.log.current().gates.values()][0]?.status).toBe("open");
 	});
 

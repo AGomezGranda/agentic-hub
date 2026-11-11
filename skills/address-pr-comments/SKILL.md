@@ -60,8 +60,11 @@ Ask the user to approve or edit. Do not edit code or post anything before this.
 
 ## 4. Fix
 
-- Apply only approved fixes, one commit per logical fix, following the
-  repo's existing patterns and commit style. Single writer.
+- Apply only approved fixes and combine them into a single commit per skill
+  invocation, following the repo's existing patterns and commit style. Single
+  writer. Only suggest multiple commits when there are many fixes or the changes
+  are substantial enough that splitting would materially help review; explain
+  the proposed split in the plan and use it only if the user approves.
 - A ```` ```suggestion ```` block in a valid comment is the fix: apply it verbatim.
 - Run the repo's tests and lint; do not report a fix done on a red run.
 - Fixes reaching 3+ files or new logic get the audit swarm per the standing

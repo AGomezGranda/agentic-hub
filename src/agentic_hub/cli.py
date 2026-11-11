@@ -17,12 +17,12 @@ log = logging.getLogger("agentic-hub")
 def resolve_agents(arg: str | None) -> list[str]:
     """Parse a comma-separated --agent value, defaulting to all known agents."""
     if not arg:
-        return list(agents.AGENTS)
+        return agents.unique_targets(agents.AGENTS)
     names = [a.strip() for a in arg.split(",") if a.strip()]
     for a in names:
         if a not in agents.AGENTS:
             sys.exit(f"unknown agent: {a} (choices: {', '.join(agents.AGENTS)})")
-    return names
+    return agents.unique_targets(names)
 
 
 def pick_interactive() -> list[str]:
@@ -94,10 +94,11 @@ def cmd_remove(args: argparse.Namespace) -> None:
 
 def cmd_sync(args: argparse.Namespace) -> None:
     skills = catalog.discover_skills()
-    log.debug("syncing %d skill(s) to %d agent(s)", len(skills), len(agents.AGENTS))
+    agent_names = agents.unique_targets(agents.AGENTS)
+    log.debug("syncing %d skill(s) to %d target(s)", len(skills), len(agent_names))
     done = attempted = 0
     for name in skills:
-        for agent in agents.AGENTS:
+        for agent in agent_names:
             attempted += 1
             try:
                 done += agents.install_one(agent, name)

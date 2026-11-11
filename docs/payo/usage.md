@@ -17,19 +17,41 @@ Design and roadmap: [engine-design.md](engine-design.md) and
 - Real mode: POSIX (macOS/Linux), a logged-in `pi` for each configured role
   provider, and a target repository whose base branch contains `skills/create-plan/SKILL.md`,
   `skills/review-plan/SKILL.md`, `skills/review-plan/references/lenses.md`,
-  `skills/architecture-audit/references/boundaries.md`,
-  `skills/architecture-audit/references/responsibilities.md`, and the six
+  the four `skills/architecture-audit/references/*.md` files (`standard.md`,
+  `boundaries.md`, `responsibilities.md`, `structure.md`), and the six
   `skills/code-quality-audit/references/*.md` files (`solid.md`, `dry.md`,
   `kiss.md`, `typing.md`, `dependency-injection.md`, `errors.md`). `payo doctor`
-  lists every missing path and the full set to add. Every role must resolve a
-  model for each of the four planning roles from TOML or the legacy model
-  environment variables. The optional implementer model is required only when
+  reports missing planning sources. Each of the four planning roles must resolve
+  a model from TOML or the legacy model environment variables. The optional
+  implementer model is required only when
   accepting an execution. Jira runs additionally require a logged-in `acli`;
   prompt runs do not.
+
+Execution additionally requires `skills/implement-plan/SKILL.md`,
+`skills/review-implementation/SKILL.md`, the `SKILL.md` files for
+`architecture-audit`, `code-quality-audit`, and `testing-strategy`, and all seven
+testing references (`overview.md`, `unit.md`, `integration.md`, `component.md`,
+`contract.md`, `e2e.md`, `async.md`) under `skills/testing-strategy/references/`,
+alongside the planning rubric resources above. These are checked when accepting
+an implementation; a passing planning doctor check does not verify them.
+
+Role sources must be committed at the selected target repository ref. Personal
+skill installs in `~/.agents/skills/` or `~/.claude/skills/` are separate;
+`agentic-hub sync` does not supply Payo's role sources. See the
+[skills manager guide](../agentic-hub/skills-manager.md#payo-role-sources).
 
 ## Install
 
 From the repository root:
+
+```sh
+uv run scripts/setup.py
+```
+
+Setup installs the Python and TypeScript dependencies, creates the starter TOML
+only if absent (honoring an absolute `PAYO_CONFIG_FILE`), and runs Payo preflight.
+It reports missing local prerequisites; it does not install Pi or log you in.
+To install and check only the TypeScript workspace:
 
 ```
 cd payo
@@ -78,11 +100,12 @@ pnpm payo status <execution-run-id>      # phase, gates, branch, and result
 In the browser, review the Implementation outline before approving. Expand each
 PR to inspect its ordered phases and follow phase links into the plan.
 Missing or ambiguous assignments must be resolved before approval. Approved
-runs open on Implementation, where each PR has a local start action and the
-effective base can be changed. The Execution view keeps completed, current,
+runs open on Plan, where each PR has a local start action and the
+effective base can be changed. The Implementation view keeps completed, current,
 and upcoming phase names visible, with final PR review as a separate step.
 It also links back to the source and shows the retained branch, worktree, and
-result commit when reviewed.
+result commit when reviewed. The separate Code review view shows findings,
+verifier decisions, coverage, and the saved evidence context.
 
 `PAYO_SCENARIO` selects another script:
 
@@ -166,9 +189,16 @@ The dev server binds to `127.0.0.1` and requires port `5173` to be free. Keep
 browser URL.
 
 The left **Your work** sidebar groups the loaded runs by status (Needs you,
-Active, and Ended) or by repository. Open a run to switch between **Swarm view**,
-**Decision view**, and **Activity view**; the activity filter shows all events or
-agent attempts. These view preferences are not saved.
+Active, and Ended) or by repository. Planning runs have **Swarm view**, **Plan**,
+and **Activity view** tabs. Execution runs have **Implementation**, **Code review**,
+and **Activity view** tabs; the final verification scope opens Code review by
+default. These view preferences are not saved.
+
+The workspace header offers **Open in Terminal** and **Open in VS Code** on the
+server's machine. Planning opens the repository; execution opens its retained
+worktree once available. On macOS this uses Terminal and Visual Studio Code;
+on Linux it requires `x-terminal-emulator` or `code` on PATH and an available
+desktop session. Other platforms report the action as unsupported.
 
 Choose **Jira** and enter `ABC-123`, or choose **Prompt** and enter a short task
 to start a fake run. At Approval, review the plan and findings, answer the
@@ -182,8 +212,14 @@ again when a command runs, so edits can still race a decision. Findings are
 labelled as potentially stale because their exact plan revision is not recorded.
 
 Approval ends the planning run and removes its planning worktree. It does not
-start a writer automatically. Start implementation explicitly with the CLI
-command below; this creates a separate retained execution worktree.
+start a writer automatically. Start implementation explicitly from a PR's action
+in Plan or with the CLI command below; this creates a separate retained execution
+worktree.
+
+Code review displays each finding's evidence, consequence, suggested fix, and
+verifier classification, plus lens coverage and phase/final scope. The starting
+commit and fingerprint describe saved review evidence; they do not certify the
+current workspace after manual changes. Older saved reviews may lack details.
 
 Use **Settings** in the main navigation to edit the shared config file. The page
 groups controls by TOML section, keeps blank optional fields unset, and treats a
@@ -205,6 +241,24 @@ server failures, and revision conflicts without discarding the draft.
   this browser session until you change it.
 - **Vite reports the port is in use:** stop the other process on `5173`; strict
   port selection will not silently switch origins.
+
+### Work costs
+
+Every workspace shows **Work cost** for its planning run and all linked PR
+executions. Expand **Cost breakdown** to inspect runs, steps, and attempts,
+including failed and retried attempts. While any included run is active, costs
+refresh every five seconds; workspace updates also refresh them.
+
+Amounts stay separate by currency and reporting basis (**Estimated** or
+**Provider reported**). **Complete**, **Partial**, and **Unknown** describe
+reporting coverage. Missing or interrupted reports do not become zero; known
+amounts can remain visible with incomplete coverage and may increase. Legacy
+records without qualified cost details contribute no qualified monetary total.
+Reported amounts are not a billing guarantee.
+
+The authenticated `GET /api/v1/runs/:runId/costs` endpoint returns the same work
+tree from either a planning or execution ID, with per-run `asOfSeq` positions.
+There is no dedicated CLI cost command.
 
 ## Stages and gates
 
@@ -233,8 +287,9 @@ Execution: Approved --implement--> Prepare -> Implement -> Check -> Review
   budget and never replay a phase or add a receipt.
 - **Escalated** raises a gate with `resume`. Execution status includes phase
   progress, receipts, check/review coverage, branch/worktree, and the actionable
-  escalation reason. Plan conflicts require a corrected newly approved
-  planning run; resume cannot edit the pinned plan.
+  escalation reason. Reported plan issues can receive operator clarification
+  before resume. Changing approved requirements requires a corrected newly
+  approved planning run; resume cannot edit the pinned plan.
 
 `status` lists every open gate and the commands it allows. Commands that do not
 fit the current stage fail with a `conflict` error.
@@ -331,9 +386,32 @@ continuing. An interrupted writer receives a fresh reconciliation context with
 its partial diff; interrupted checks and reviewers rerun against the current
 snapshot. Manual edits at a gate invalidate prior evidence. Accepted phase
 receipts remain complete and are not replayed. A missing worktree, unexpected
-HEAD/history, or mismatched commit remains gated. A pinned plan conflict cannot
-be changed by resume; create and approve a corrected planning run, then start a
-new execution.
+HEAD/history, or mismatched commit remains gated. Resume keeps the pinned plan;
+clarifications and plan corrections follow different paths as described below.
+
+### Reported plan issues
+
+At an execution gate reporting plan issues, the browser offers three actions:
+
+- **Clarify implementation:** answer each reported issue, then **Resume with
+  answers**. Saved operator clarifications go to fresh execution contexts, which
+  verify factual claims against the repository. They preserve the approved plan
+  and retained edits; they cannot change approved requirements or bypass safety
+  constraints.
+- **Retry unchanged:** resume with the same plan and retained workspace. The CLI
+  `payo resume <execution-id>` also resumes without adding answers.
+- **Draft a plan correction:** enter the decision that changes required behavior.
+  Payo starts a new prompt-based planning run with the approved plan, strategy,
+  saved answers, reported issues, and your decision as context. Review and approve
+  that plan, then explicitly start a replacement execution. The original execution
+  stays paused and its edits are not transferred automatically.
+
+The authenticated resume API accepts optional `{ gateId, answers: [{ issue,
+answer }] }` for clarifications; the browser submits the current gate and exact
+reported issue text so stale submissions can be rejected. The CLI has no answer
+flags for execution issues; `payo answer` answers planning questions.
+
+### Restart rehearsal and cleanup
 
 To rehearse execution recovery, start the fake server with
 `PAYO_SCENARIO=execution-interruption pnpm payo serve --dev-fakes`, approve a

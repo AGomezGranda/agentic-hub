@@ -13,17 +13,17 @@ export interface RunLog {
  * One open RunLog per run per process: a second writer leaves this log stale, and every later write fails.
  */
 export function openRunLog(store: RunStore, state: RunState): RunLog {
-	let current = state;
+	let current = structuredClone(state);
 	let chain: Promise<unknown> = Promise.resolve();
 	return {
-		current: () => current,
+		current: () => structuredClone(current),
 		async write(bodies) {
 			// shortcut: no resync on StaleSeqError, a second writer wedges the log until reopened; upgrade when step 5 runs more than one writer.
 			// Clone now: commit parses the bodies in a later microtask. Inside async, a non-cloneable body rejects.
 			const batch = structuredClone(bodies);
 			const next = chain.then(async () => {
 				current = await commit(store, current, batch);
-				return current;
+				return structuredClone(current);
 			});
 			chain = next.catch(() => {});
 			return next;

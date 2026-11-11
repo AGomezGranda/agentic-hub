@@ -1,14 +1,18 @@
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type {
-	AgentEvent,
-	AgentSpec,
-	WorkItem,
-	WorkItemRequest,
+import {
+	type AgentEvent,
+	type AgentSpec,
+	GitHubTarget,
+	PullRequestRecord,
+	type WorkItem,
+	type WorkItemRequest,
 } from "@payo/contracts";
 import type {
 	AgentRunner,
+	CodeHost,
 	ExecutionWorkspace,
+	RepositoryPublication,
 	RunStore,
 	WorkItemSource,
 	Workspace,
@@ -53,7 +57,16 @@ export const SCENARIOS = [
 ] as const;
 export type Scenario = (typeof SCENARIOS)[number];
 
+// The base is a valid full SHA so fake executions exercise the real publication contracts.
+export const FAKE_BASE_COMMIT = "0".repeat(40);
+
+interface FakeCommit {
+	head: string;
+	message: string;
+}
+
 interface FakeExecutionWorkspaceState {
+	branch?: string;
 	head: string;
 	commitNumber: number;
 	commit: {
@@ -62,24 +75,34 @@ interface FakeExecutionWorkspaceState {
 		tree: string;
 		message: string;
 	} | null;
+	commits?: FakeCommit[];
+}
+
+const fakeStatePath = (workspacePath: string) =>
+	join(workspacePath, ".payo-fake-state.json");
+
+const emptyFakeState = (): FakeExecutionWorkspaceState => ({
+	head: FAKE_BASE_COMMIT,
+	commitNumber: 0,
+	commit: null,
+	commits: [],
+});
+
+async function readFakeState(
+	workspacePath: string,
+): Promise<FakeExecutionWorkspaceState> {
+	try {
+		return JSON.parse(
+			await readFile(fakeStatePath(workspacePath), "utf8"),
+		) as FakeExecutionWorkspaceState;
+	} catch {
+		return emptyFakeState();
+	}
 }
 
 export function fakeExecutionWorkspace(root: string): ExecutionWorkspace {
-	const statePath = (workspacePath: string) =>
-		join(workspacePath, ".payo-fake-state.json");
-	const readState = async (workspacePath: string) => {
-		try {
-			return JSON.parse(
-				await readFile(statePath(workspacePath), "utf8"),
-			) as FakeExecutionWorkspaceState;
-		} catch {
-			return {
-				head: "fake-base-commit",
-				commitNumber: 0,
-				commit: null,
-			};
-		}
-	};
+	const statePath = fakeStatePath;
+	const readState = readFakeState;
 	const writeState = (
 		workspacePath: string,
 		state: FakeExecutionWorkspaceState,
@@ -93,7 +116,7 @@ export function fakeExecutionWorkspace(root: string): ExecutionWorkspace {
 	};
 	return {
 		async resolveBase() {
-			return "fake-base-commit";
+			return FAKE_BASE_COMMIT;
 		},
 		async prepare(input) {
 			const path = join(root, input.executionId);
@@ -103,6 +126,7 @@ export function fakeExecutionWorkspace(root: string): ExecutionWorkspace {
 			} catch {
 				await writeState(path, {
 					head: input.baseCommit,
+					branch: input.branch,
 					commitNumber: 0,
 					commit: null,
 				});
@@ -118,7 +142,7 @@ export function fakeExecutionWorkspace(root: string): ExecutionWorkspace {
 			const content = await changedContent(workspacePath);
 			return {
 				head: state.head,
-				branch: `payo/${workspacePath.split(/[\\/]/).at(-1)}`,
+				branch: state.branch ?? `payo/${workspacePath.split(/[\\/]/).at(-1)}`,
 				fingerprint: `${state.head}:${content}`,
 				changedPaths: content ? ["synthetic.ts"] : [],
 				historyFingerprint: `fake-history-${state.commitNumber}`,
@@ -160,7 +184,7 @@ export function fakeExecutionWorkspace(root: string): ExecutionWorkspace {
 		async commit(workspacePath, _expected, message, _signal, expectation) {
 			const state = await readState(workspacePath);
 			if (!expectation) throw new Error("durable commit intent is required");
-			const head = `fake-result-commit-${state.commitNumber + 1}`;
+			const head = (state.commitNumber + 1).toString(16).padStart(40, "0");
 			state.commitNumber++;
 			state.commit = {
 				head,
@@ -168,10 +192,92 @@ export function fakeExecutionWorkspace(root: string): ExecutionWorkspace {
 				tree: expectation.tree,
 				message,
 			};
+			state.commits = [...(state.commits ?? []), { head, message }];
 			state.head = head;
 			await writeState(workspacePath, state);
 			await rm(join(workspacePath, "synthetic.ts"), { force: true });
 			return head;
+		},
+	};
+}
+
+/** Deterministic same-repository publication ports for fake mode; no network or gh binary. */
+export function fakePublicationPorts(): {
+	repository: RepositoryPublication;
+	codeHost: CodeHost;
+} {
+	const refs = new Map<string, string>();
+	const pullRequests: PullRequestRecord[] = [];
+	let nextNumber = 1;
+	const target = (baseBranch: string): GitHubTarget =>
+		GitHubTarget.parse({
+			host: "github.com",
+			owner: "payo-fake",
+			name: "repo",
+			repositoryId: "1",
+			baseBranch,
+			baseCommit: FAKE_BASE_COMMIT,
+		});
+	return {
+		repository: {
+			async resolveRemote() {
+				return {
+					fetchUrl: "https://github.com/payo-fake/repo.git",
+					pushUrl: "https://github.com/payo-fake/repo.git",
+				};
+			},
+			async readCommits(path) {
+				const state = await readFakeState(path);
+				const commits = state.commits ?? (state.commit ? [state.commit] : []);
+				return commits.map((commit) => ({
+					sha: commit.head,
+					subject: commit.message.split("\n")[0] ?? "",
+					message: commit.message,
+				}));
+			},
+			async readRemoteHead(_pushUrl, branch) {
+				return refs.get(branch) ?? null;
+			},
+			async pushCommit(_path, _pushUrl, branch, commit) {
+				if (refs.has(branch))
+					throw new Error("publication remote branch already exists");
+				refs.set(branch, commit);
+			},
+		},
+		codeHost: {
+			async resolveRepository(_remoteUrl, baseBranch) {
+				return target(baseBranch);
+			},
+			async findPullRequests(value, headBranch) {
+				return pullRequests.filter(
+					(pr) =>
+						pr.owner === value.owner &&
+						pr.name === value.name &&
+						pr.baseBranch === value.baseBranch &&
+						pr.headBranch === headBranch,
+				);
+			},
+			async createDraftPullRequest(value, input, signal) {
+				signal.throwIfAborted();
+				const headCommit = refs.get(input.headBranch);
+				if (!headCommit) throw new Error("remote branch is missing");
+				const number = nextNumber++;
+				pullRequests.push(
+					PullRequestRecord.parse({
+						number,
+						url: `https://github.com/${value.owner}/${value.name}/pull/${number}`,
+						owner: value.owner,
+						name: value.name,
+						baseBranch: value.baseBranch,
+						headBranch: input.headBranch,
+						headCommit,
+						state: "OPEN",
+						draft: true,
+						title: input.title,
+						body: input.body,
+					}),
+				);
+			},
 		},
 	};
 }
