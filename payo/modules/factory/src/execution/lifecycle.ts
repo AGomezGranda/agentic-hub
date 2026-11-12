@@ -82,14 +82,17 @@ function serializeAcceptance<T>(work: () => Promise<T>): Promise<T> {
 export function beginExecution(
 	deps: ExecutionDeps,
 	input: BeginExecutionInput,
+	signal: AbortSignal = new AbortController().signal,
 ): Promise<ExecutionHandle> {
-	return serializeAcceptance(() => beginExecutionLocked(deps, input));
+	return serializeAcceptance(() => beginExecutionLocked(deps, input, signal));
 }
 
 async function beginExecutionLocked(
 	deps: ExecutionDeps,
 	input: BeginExecutionInput,
+	signal: AbortSignal,
 ): Promise<ExecutionHandle> {
+	signal.throwIfAborted();
 	validateRunId(input.sourceRunId);
 	if (!input.prId.trim()) throw invalid("PR id is required");
 
@@ -118,6 +121,7 @@ async function beginExecutionLocked(
 				approved.state.repo,
 				input.baseBranch ?? approved.state.baseBranch,
 				input.baseCommit,
+				signal,
 			);
 			if (config.data.baseCommit !== requestedCommit)
 				throw conflict(
@@ -144,20 +148,22 @@ async function beginExecutionLocked(
 			slug: input.naming.slug,
 		},
 		input.policy ?? {},
-		new AbortController().signal,
+		signal,
 	);
 	if (!preview.previewHash || preview.previewHash !== input.naming.previewHash)
 		throw conflict("naming preview is stale; refresh confirmation");
+	if (!preview.branch || !preview.baseCommit)
+		throw conflict("naming preview is incomplete; refresh confirmation");
 	const naming = {
 		version: 1 as const,
 		ticketId: input.naming.ticketId,
 		slug: preview.slug,
-		branch: preview.branch!,
+		branch: preview.branch,
 		policy: validatePublicationPolicy(input.policy ?? {}),
 	};
 	selectedPr(approved.plan.version.plan, input.prId);
 	const baseBranch = input.baseBranch ?? approved.state.baseBranch;
-	const baseCommit = preview.baseCommit!;
+	const baseCommit = preview.baseCommit;
 	if (input.baseCommit && input.baseCommit !== baseCommit)
 		throw conflict("naming preview base is stale");
 	const config: ExecutionRunConfig = ExecutionRunConfigSchema.parse({
@@ -178,6 +184,8 @@ async function beginExecutionLocked(
 	const artifacts = new Map<string, ArtifactRef>();
 	for (const ref of [approved.plan.ref, ...Object.values(input.roleArtifacts)])
 		artifacts.set(ref.sha256, ref);
+	const checkpointEvent = await storeExecutionCheckpoint(deps.store, initial);
+	signal.throwIfAborted();
 	const state = await commit(deps.store, null, [
 		{
 			type: "run.created",
@@ -191,7 +199,7 @@ async function beginExecutionLocked(
 			artifact,
 			attemptId: null,
 		})),
-		await storeExecutionCheckpoint(deps.store, initial),
+		checkpointEvent,
 	]);
 	return createExecutionHandle({
 		deps,
@@ -205,18 +213,16 @@ async function selectedBaseCommit(
 	deps: ExecutionDeps,
 	repo: string,
 	baseBranch: string,
-	provided?: string,
+	provided: string | undefined,
+	signal: AbortSignal,
 ): Promise<string> {
+	signal.throwIfAborted();
 	if (provided?.trim()) return provided;
 	if (!deps.workspace)
 		throw invalid(
 			"execution workspace adapter is required to resolve the base commit",
 		);
-	return deps.workspace.resolveBase(
-		repo,
-		baseBranch,
-		new AbortController().signal,
-	);
+	return deps.workspace.resolveBase(repo, baseBranch, signal);
 }
 
 /** Returns an existing deterministic execution before loading roles or resolving an implicit moving base. */
@@ -231,7 +237,9 @@ export async function findExistingExecution(
 		baseCommit?: string;
 		naming?: ImplementRequest["naming"];
 	},
+	signal: AbortSignal = new AbortController().signal,
 ): Promise<ExecutionHandle | null> {
+	signal.throwIfAborted();
 	validateRunId(input.sourceRunId);
 	const approved = await readApprovedExecutionSource(deps, input.sourceRunId);
 
@@ -253,6 +261,7 @@ export async function findExistingExecution(
 			approved.state.repo,
 			input.baseBranch ?? approved.state.baseBranch,
 			input.baseCommit,
+			signal,
 		);
 		if (config.baseCommit !== requestedCommit)
 			throw conflict(

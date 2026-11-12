@@ -6,7 +6,10 @@ import {
 } from "@payo/contracts";
 import type { ExecutionWorkspace } from "@payo/kernel";
 import { readArtifact } from "../artifacts.ts";
-import { applyExecutionCheckpoint } from "../domain/execution.ts";
+import {
+	applyExecutionCheckpoint,
+	assertAcceptanceEvidence,
+} from "../domain/execution.ts";
 import { executionNaming } from "../domain/execution-naming.ts";
 import { renderCommitSubject } from "../domain/naming.ts";
 import {
@@ -37,23 +40,24 @@ export async function finalizePhase(
 	review: Awaited<ReturnType<typeof reviewMutableImplementation>>,
 	signal: AbortSignal,
 ): Promise<void> {
-	const identity = state.checkpoint.workspace;
-	const checksRef = state.checkpoint.evidence.checks;
-	const reviewRef = review.reviewRef;
-	const reportRef = findArtifactRef(
-		state.log.current(),
-		"factory-execution-implementation-report-v1",
-	);
-	const manifestRef = state.checkpoint.manifest;
-	if (
-		!identity ||
-		!checksRef ||
-		!reviewRef ||
-		!reportRef ||
-		!manifestRef ||
-		!review.diffRef
-	)
-		throw new Error("phase acceptance is missing report or review evidence");
+	const evidence = {
+		workspace: state.checkpoint.workspace,
+		checks: state.checkpoint.evidence.checks,
+		review: review.reviewRef,
+		report: findArtifactRef(
+			state.log.current(),
+			"factory-execution-implementation-report-v1",
+		),
+		manifest: state.checkpoint.manifest,
+		diff: review.diffRef,
+	};
+	assertAcceptanceEvidence("phase", evidence);
+	const {
+		checks: checksRef,
+		review: reviewRef,
+		report: reportRef,
+		manifest: manifestRef,
+	} = evidence;
 	const manifest = ExecutionManifestSchema.parse(
 		JSON.parse(
 			new TextDecoder().decode(
@@ -112,11 +116,18 @@ export async function finalizeExecution(
 	review: Awaited<ReturnType<typeof reviewMutableImplementation>>,
 	signal: AbortSignal,
 ): Promise<void> {
-	const checksRef = state.checkpoint.evidence.checks;
-	const reviewRef = review.reviewRef;
-	const manifestRef = state.checkpoint.manifest;
-	if (!checksRef || !reviewRef || !manifestRef || !review.diffRef)
-		throw new Error("final PR acceptance is missing check or review evidence");
+	const evidence = {
+		checks: state.checkpoint.evidence.checks,
+		review: review.reviewRef,
+		manifest: state.checkpoint.manifest,
+		diff: review.diffRef,
+	};
+	assertAcceptanceEvidence("final", evidence);
+	const {
+		checks: checksRef,
+		review: reviewRef,
+		manifest: manifestRef,
+	} = evidence;
 	const manifest = ExecutionManifestSchema.parse(
 		JSON.parse(
 			new TextDecoder().decode(

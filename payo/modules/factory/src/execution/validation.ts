@@ -17,6 +17,7 @@ import { readArtifact } from "../artifacts.ts";
 import {
 	accountRepair,
 	MAX_VALIDATION_CYCLES,
+	repairContinuation,
 	validationAction,
 } from "../domain/execution.ts";
 import type { MutableExecutionHandle } from "../execution-handle.ts";
@@ -484,7 +485,13 @@ async function repairScope(
 			: "repairing-check-failures",
 	});
 	const result = await runAgentStep(
-		{ store: state.deps.store, log: state.log, limiter: deps.limiter },
+		{
+			scheduler: state.deps.scheduler,
+			createRawLog: state.deps.createRawLog,
+			store: state.deps.store,
+			log: state.log,
+			limiter: deps.limiter,
+		},
 		{
 			stepId,
 			stepName: `repair ${scope} validation cycle ${input.cycle}`,
@@ -552,7 +559,11 @@ async function repairScope(
 		return false;
 	}
 	await storeJsonArtifact(state, output, "factory-execution-repair-report-v1");
-	if (output.planIssues.length > 0 || accounting.unresolved.length > 0) {
+	const continuation = repairContinuation(
+		output.planIssues,
+		accounting.unresolved,
+	);
+	if (continuation.stage === "Escalated") {
 		await checkpoint(state, {
 			unresolvedFindingIds: accounting.unresolved,
 			workspace: makeWorkspaceIdentity(identity.path, after, config.baseCommit),
@@ -560,11 +571,9 @@ async function repairScope(
 		await raiseExecutionGate(
 			state,
 			"Repair",
-			output.planIssues.length
-				? `repair reports approved-plan issues: ${output.planIssues.join("; ")}`
-				: `repair left blockers unresolved: ${accounting.unresolved.join(", ")}`,
+			continuation.reason,
 			[stepId],
-			output.planIssues.length ? "repair-plan-issue" : "repair-unresolved",
+			continuation.detail,
 		);
 		return false;
 	}

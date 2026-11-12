@@ -206,14 +206,15 @@ export async function createRunApplication(
 	return {
 		async implementPreview(sourceRunId, input) {
 			const deps = executionDeps();
-			if (!deps.workspace)
+			const workspace = deps.workspace;
+			if (!workspace)
 				throw new ApplicationError(
 					"execution_unavailable",
 					"execution workspace is not configured",
 				);
 			return withSignal((signal) =>
 				previewExecutionNaming(
-					{ store, workspace: deps.workspace! },
+					{ store, workspace },
 					sourceRunId,
 					input,
 					preparation.publication ?? {},
@@ -361,13 +362,17 @@ export async function createRunApplication(
 			return track(() =>
 				withSignal(async (signal) => {
 					const deps = executionDeps();
-					const existing = await findExistingExecution(deps, {
-						sourceRunId,
-						prId: input.prId,
-						naming: input.naming,
-						baseBranch: input.base,
-						explicitBase: input.base !== undefined,
-					});
+					const existing = await findExistingExecution(
+						deps,
+						{
+							sourceRunId,
+							prId: input.prId,
+							naming: input.naming,
+							baseBranch: input.base,
+							explicitBase: input.base !== undefined,
+						},
+						signal,
+					);
 					if (existing) {
 						const runId = existing.log.current().runId;
 						if (!executionHandles.has(runId))

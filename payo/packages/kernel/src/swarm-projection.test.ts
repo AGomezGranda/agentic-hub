@@ -1,6 +1,6 @@
 import { projectSwarm, type RunEventBody } from "@payo/contracts";
 import { describe, expect, it } from "vitest";
-import { fold } from "./state.ts";
+import { fold } from "./domain/state.ts";
 import { body, seqd } from "./testing.ts";
 
 // The web swarm view folds the same events the kernel folds. Compared: step and attempt ids and statuses only (not model or times).

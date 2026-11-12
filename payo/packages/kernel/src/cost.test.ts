@@ -1,19 +1,20 @@
 import {
 	type CostAmount,
 	CostSummary,
+	moneyFromNumber,
 	type RunEvent,
 	type RunEventBody,
 	type UsageRecord,
 } from "@payo/contracts";
 import { describe, expect, it } from "vitest";
-import { projectRunCosts, sumCosts } from "./cost.ts";
+import { projectRunCosts, sumCosts } from "./domain/cost.ts";
 import { body, seqd } from "./testing.ts";
 
 const bucket = (
 	currency: string,
 	basis: "estimated" | "provider-reported",
 	amount: number,
-): CostAmount => ({ currency, basis, amount });
+): CostAmount => ({ currency, basis, amount: moneyFromNumber(amount) });
 
 const money = (amounts: CostAmount[], complete: boolean): UsageRecord => ({
 	tokensIn: 1,
@@ -297,7 +298,7 @@ describe("sumCosts", () => {
 		expect(sumCosts([unknown])).toEqual(unknown);
 	});
 
-	it("adds floating-point amounts with tolerance", () => {
+	it("adds decimal amounts exactly", () => {
 		const tenth = summary({
 			amounts: [bucket("USD", "estimated", 0.1)],
 			coverage: "complete",
@@ -311,10 +312,10 @@ describe("sumCosts", () => {
 			attempts: 1,
 		});
 
-		expect(sumCosts([tenth, fifth]).amounts[0]?.amount).toBeCloseTo(0.3);
+		expect(sumCosts([tenth, fifth]).amounts[0]?.amount).toBe("0.3");
 	});
 
-	it("rejects a non-finite accumulated amount", () => {
+	it("sums amounts beyond the binary number range exactly", () => {
 		const huge = summary({
 			amounts: [bucket("USD", "estimated", Number.MAX_VALUE)],
 			coverage: "complete",
@@ -322,6 +323,8 @@ describe("sumCosts", () => {
 			attempts: 1,
 		});
 
-		expect(() => sumCosts([huge, huge])).toThrow(/not finite/);
+		expect(sumCosts([huge, huge]).amounts[0]?.amount).toBe(
+			(BigInt(moneyFromNumber(Number.MAX_VALUE)) * 2n).toString(),
+		);
 	});
 });

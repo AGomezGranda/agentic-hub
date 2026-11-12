@@ -12,6 +12,7 @@ import {
 	createLimiter,
 	createMemoryRunStore,
 	type RunStore,
+	systemScheduler,
 } from "@payo/kernel";
 import { createSqliteRunStore } from "@payo/store-sqlite";
 import { expect, it } from "vitest";
@@ -155,6 +156,7 @@ async function seed(
 	const dataDir = await mkdtemp(join(tmpdir(), "payo-composition-"));
 	await beginFactory(
 		{
+			scheduler: systemScheduler,
 			newId: () => crypto.randomUUID(),
 			store,
 			runner: createFakeRunner([], "fake"),

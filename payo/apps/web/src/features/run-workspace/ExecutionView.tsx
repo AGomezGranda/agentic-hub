@@ -2,9 +2,11 @@ import type { ExecutionSummary, OpenGateSummary } from "@payo/contracts";
 import { resumeRun } from "@web/features/plan-review/api.ts";
 import { Button } from "@web/shared/ui/Button.tsx";
 import { type ReactNode, useState } from "react";
+import { ExecutionNamingForm } from "./ExecutionNamingForm.tsx";
 import { ExecutionPlanIssues } from "./ExecutionPlanIssues.tsx";
 import { ExecutionProgress } from "./ExecutionProgress.tsx";
 import { ExecutionReview, ExecutionReviewContext } from "./ExecutionReview.tsx";
+import { PublishPrForm } from "./PublishPrForm.tsx";
 
 export function ExecutionView({
 	execution,
@@ -57,7 +59,7 @@ export function ExecutionView({
 			Number(left.status === "passed") - Number(right.status === "passed"),
 	);
 	const checksPanel = (
-		<div className="execution-panel">
+		<div className="workspace-panel">
 			<div className="execution-section-title">
 				<h3>Latest checks</h3>
 				{execution.checks.length > 0 && (
@@ -107,6 +109,18 @@ export function ExecutionView({
 	);
 	const retry = gate && (
 		<div className="execution-retry">
+			{retryPreparation &&
+				execution.naming &&
+				!execution.worktree &&
+				execution.status === "active" && (
+					<ExecutionNamingForm
+						token={token}
+						runId={execution.runId}
+						initialSlug={execution.naming.slug}
+						onRefresh={onRefresh}
+					/>
+				)}
+
 			{view === "implementation" &&
 				review?.blockers?.map((finding) => (
 					<div key={finding.id}>
@@ -157,10 +171,10 @@ export function ExecutionView({
 		</div>
 	);
 	return (
-		<section className="execution-view min-w-0 space-y-4 text-sm">
-			<header className="execution-summary">
+		<section className="workspace-view min-w-0 space-y-4 text-sm">
+			<header className="workspace-summary">
 				<div>
-					<p className="execution-label">
+					<p className="workspace-label">
 						{final
 							? "Final scope"
 							: execution.phaseIndex < execution.phaseCount
@@ -203,8 +217,8 @@ export function ExecutionView({
 					Back to approved plan
 				</a>
 			</header>
-			<div className="execution-layout">
-				<div className="execution-main">
+			<div className="workspace-layout">
+				<div className="workspace-main">
 					{gate && (
 						<section className="execution-alert">
 							{planConflict ? (
@@ -231,35 +245,13 @@ export function ExecutionView({
 						</section>
 					)}
 
-					{view === "review" && <ExecutionReview review={review} />}
-					{view === "implementation" && checksPanel}
-					{execution.artifactIssues.length > 0 && (
-						<div role="status" className="execution-alert">
-							<h3 className="font-semibold">Artifact issues</h3>
-							<ul>
-								{execution.artifactIssues.map((issue) => (
-									<li className="break-all" key={issue}>
-										{issue}
-									</li>
-								))}
-							</ul>
-						</div>
-					)}
-				</div>
-				<aside className="execution-rail" aria-label="Execution context">
-					{view === "review" && (
-						<>
-							{review && <ExecutionReviewContext review={review} />}
-							{checksPanel}
-						</>
-					)}
 					{view === "implementation" && phases.length > 0 && (
 						<ExecutionProgress execution={execution} />
 					)}
 					{view === "implementation" &&
 						!phases.length &&
 						execution.completedPhases.length > 0 && (
-							<div className="execution-panel">
+							<div className="workspace-panel">
 								<h3 className="font-semibold">Completed phases</h3>
 								<ul>
 									{execution.completedPhases.map((phase) => (
@@ -273,7 +265,35 @@ export function ExecutionView({
 								</ul>
 							</div>
 						)}
-					<div className="execution-panel execution-worktree">
+
+					{view === "review" && <ExecutionReview review={review} />}
+					{view === "review" &&
+						execution.status === "ended" &&
+						execution.outcome === "reviewed" && (
+							<PublishPrForm
+								key={execution.runId}
+								token={token}
+								runId={execution.runId}
+								onSelectRun={onSelectRun}
+							/>
+						)}
+
+					{execution.artifactIssues.length > 0 && (
+						<div role="status" className="execution-alert">
+							<h3 className="font-semibold">Artifact issues</h3>
+							<ul>
+								{execution.artifactIssues.map((issue) => (
+									<li className="break-all" key={issue}>
+										{issue}
+									</li>
+								))}
+							</ul>
+						</div>
+					)}
+				</div>
+				<aside className="workspace-rail" aria-label="Execution context">
+					{checksPanel}
+					<div className="workspace-panel execution-worktree">
 						<h3 className="font-semibold">
 							{execution.status === "ended" && execution.outcome === "reviewed"
 								? "Reviewed result"
@@ -301,6 +321,9 @@ export function ExecutionView({
 								</p>
 							)}
 					</div>
+					{view === "review" && review && (
+						<ExecutionReviewContext review={review} />
+					)}
 				</aside>
 				{view === "implementation" && activity && (
 					<div className="execution-swarm console-panel">{activity}</div>

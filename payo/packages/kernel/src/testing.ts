@@ -7,9 +7,9 @@ import type {
 	StepOutcome,
 } from "@payo/contracts";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { commit, openRun, startRun } from "./run.ts";
-import { fold } from "./state.ts";
-import { type RunStore, StaleSeqError, sha256Hex } from "./store.ts";
+import { commit, openRun, startRun } from "./application/run.ts";
+import { fold } from "./domain/state.ts";
+import { type RunStore, StaleSeqError, sha256Hex } from "./index.ts";
 
 export const sha = (char: string): string => char.repeat(64);
 

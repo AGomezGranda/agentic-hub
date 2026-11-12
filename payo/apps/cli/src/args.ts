@@ -138,35 +138,79 @@ function parseStart(
 	};
 }
 
-function parseImplement(
+function parsePublicationCommand(
+	command: "implement" | "publish" | "execution-naming",
 	args: readonly string[],
-): Extract<Command, { command: "implement" }> {
-	const sourceRunId = runId(args[0]);
-	let prId: string | undefined;
-	let base: string | undefined;
-	for (let index = 1; index < args.length; index++) {
-		const arg = args[index];
-		if (arg === "--pr") {
-			if (prId !== undefined)
-				throw new UsageError("--pr may be used only once");
-			prId = valueAfter(args, index, arg);
-			index++;
-		} else if (arg === "--base") {
-			if (base !== undefined)
-				throw new UsageError("--base may be used only once");
-			base = valueAfter(args, index, arg);
-			index++;
-		} else if (arg?.startsWith("-")) {
-			throw new UsageError(`unknown option ${arg}`);
-		} else {
-			throw new UsageError("unexpected positional argument");
-		}
-	}
-	if (!prId)
-		throw new UsageError(
-			"usage: payo implement <approved-run-id> --pr <pr-id> [--base <ref>]",
+): Command {
+	const id = runId(args[0]);
+	const flags = new Map<string, string>();
+	const allowed =
+		command === "implement"
+			? [
+					"--pr",
+					"--base",
+					"--preview",
+					"--confirm",
+					"--ticket-id",
+					"--no-ticket",
+					"--slug",
+				]
+			: command === "publish"
+				? ["--preview", "--confirm", "--title", "--body-file"]
+				: ["--confirm", "--slug"];
+	for (let i = 1; i < args.length; i++) {
+		const flag = args[i] ?? "";
+		if (!allowed.includes(flag)) throw new UsageError(`unknown option ${flag}`);
+		if (flags.has(flag)) throw new UsageError(`${flag} may be used only once`);
+		flags.set(
+			flag,
+			flag === "--preview" || flag === "--no-ticket"
+				? "true"
+				: valueAfter(args, i++, flag),
 		);
-	return { command: "implement", runId: sourceRunId, prId, base };
+	}
+	const preview = flags.has("--preview");
+	const confirm = flags.get("--confirm");
+	if (preview && confirm)
+		throw new UsageError("--preview conflicts with --confirm");
+	if (flags.has("--no-ticket") && flags.has("--ticket-id"))
+		throw new UsageError("--no-ticket conflicts with --ticket-id");
+	if (command === "publish") {
+		if (!preview && !confirm)
+			throw new UsageError("publish requires --preview or --confirm");
+		if (preview && (flags.has("--title") || flags.has("--body-file")))
+			throw new UsageError("content edits require --confirm");
+		return {
+			command,
+			runId: id,
+			preview,
+			confirm,
+			title: flags.get("--title"),
+			bodyFile: flags.get("--body-file"),
+		};
+	}
+	const slug = flags.get("--slug");
+	if (command === "execution-naming") {
+		if (slug === undefined) throw new UsageError("--slug required");
+		return { command, runId: id, slug, confirm };
+	}
+	const prId = flags.get("--pr");
+	if (!prId) throw new UsageError("--pr required");
+	const ticketId = flags.has("--no-ticket") ? null : flags.get("--ticket-id");
+	if (confirm && ticketId === undefined)
+		throw new UsageError("confirmation requires --ticket-id or --no-ticket");
+	if (confirm && ticketId !== null && slug === undefined)
+		throw new UsageError("ticketed confirmation requires --slug");
+	return {
+		command,
+		runId: id,
+		prId,
+		base: flags.get("--base"),
+		preview,
+		...(confirm ? { confirm } : {}),
+		...(ticketId !== undefined ? { ticketId } : {}),
+		...(slug !== undefined ? { slug } : {}),
+	};
 }
 
 export function parseArgs(argv: readonly string[]): Command {
@@ -202,7 +246,9 @@ export function parseArgs(argv: readonly string[]): Command {
 		case "start":
 			return parseStart(rest);
 		case "implement":
-			return parseImplement(rest);
+		case "publish":
+		case "execution-naming":
+			return parsePublicationCommand(command, rest);
 		case "status":
 			if (rest.length !== 1)
 				throw new UsageError("usage: payo status <run-id>");

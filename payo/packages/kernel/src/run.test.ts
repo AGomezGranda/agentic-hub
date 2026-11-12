@@ -1,12 +1,18 @@
 import type { RunEventBody, UsageRecord } from "@payo/contracts";
 import { describe, expect, it } from "vitest";
-import { commit, openRun, recover, resolveRunConfig, startRun } from "./run.ts";
-import { fold } from "./state.ts";
+import {
+	commit,
+	openRun,
+	recover,
+	resolveRunConfig,
+	startRun,
+} from "./application/run.ts";
+import { fold } from "./domain/state.ts";
 import {
 	createMemoryRunStore,
 	type MemoryBacking,
 	StaleSeqError,
-} from "./store.ts";
+} from "./index.ts";
 import { body, seqd, testRunInput } from "./testing.ts";
 
 function newBacking(): MemoryBacking {
@@ -18,7 +24,7 @@ const observed = (amount: number): UsageRecord => ({
 	tokensOut: 2,
 	cost: amount,
 	costDetails: {
-		amounts: [{ currency: "USD", basis: "estimated", amount }],
+		amounts: [{ currency: "USD", basis: "estimated", amount: String(amount) }],
 		complete: true,
 	},
 });
@@ -119,7 +125,7 @@ describe("recover", () => {
 		expect(recovered.attempts.get("a1")?.usage).toMatchObject({
 			cost: 0.4,
 			costDetails: {
-				amounts: [{ currency: "USD", basis: "estimated", amount: 0.4 }],
+				amounts: [{ currency: "USD", basis: "estimated", amount: "0.4" }],
 				complete: false,
 			},
 		});
@@ -151,7 +157,7 @@ describe("recover", () => {
 			tokensOut: 2,
 			cost: 0.6,
 			costDetails: {
-				amounts: [{ currency: "USD", basis: "estimated", amount: 0.6 }],
+				amounts: [{ currency: "USD", basis: "estimated", amount: "0.6" }],
 				complete: false,
 			},
 		});

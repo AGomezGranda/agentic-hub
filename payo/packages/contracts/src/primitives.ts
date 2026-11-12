@@ -34,10 +34,48 @@ export type CostBasis = z.infer<typeof CostBasis>;
 
 const Currency = z.string().regex(/^[A-Z]{3}$/);
 
+// Money uses decimal text with 12 fractional digits, rounded half up at provider/legacy ingress.
+export function moneyFromNumber(value: number): string {
+	if (!Number.isFinite(value) || value < 0)
+		throw new RangeError("cost must be finite and nonnegative");
+	const [coefficient, exponent = "0"] = value
+		.toString()
+		.toLowerCase()
+		.split("e");
+	const [whole = "0", fraction = ""] = (coefficient ?? "0").split(".");
+	const digits = BigInt(whole + fraction);
+	const shift = 12 + Number(exponent) - fraction.length;
+	const units =
+		shift >= 0
+			? digits * 10n ** BigInt(shift)
+			: (digits + 10n ** BigInt(-shift) / 2n) / 10n ** BigInt(-shift);
+	return moneyFromUnits(units);
+}
+
+function moneyFromUnits(units: bigint): string {
+	const digits = units.toString().padStart(13, "0");
+	const fraction = digits.slice(-12).replace(/0+$/, "");
+	return digits.slice(0, -12) + (fraction ? `.${fraction}` : "");
+}
+
+export function addMoney(left: string, right: string): string {
+	const units = (value: string) => {
+		const [whole, fraction = ""] = Money.parse(value).split(".");
+		return BigInt(`${whole}${fraction.padEnd(12, "0")}`);
+	};
+	return moneyFromUnits(units(left) + units(right));
+}
+
+// Numeric input supports historical event payloads; every parsed amount leaves as decimal text.
+export const Money = z.union([
+	z.string().regex(/^(?:0|[1-9]\d*)(?:\.\d{1,12})?$/),
+	z.number().finite().nonnegative().transform(moneyFromNumber),
+]);
+
 export const CostAmount = z.object({
 	currency: Currency,
 	basis: CostBasis,
-	amount: z.number().finite().nonnegative(),
+	amount: Money,
 });
 export type CostAmount = z.infer<typeof CostAmount>;
 

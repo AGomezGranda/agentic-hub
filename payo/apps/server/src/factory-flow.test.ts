@@ -18,7 +18,12 @@ import {
 	updatePlan,
 	writePlan,
 } from "@payo/factory";
-import { createLimiter, createMemoryRunStore, sha256Hex } from "@payo/kernel";
+import {
+	createLimiter,
+	createMemoryRunStore,
+	sha256Hex,
+	systemScheduler,
+} from "@payo/kernel";
 import type { FakeStep } from "@payo/runner-fake";
 import { expect, it } from "vitest";
 import {
@@ -639,6 +644,7 @@ async function setup(scripts: FakeStep[][]) {
 	};
 	const dataDir = await mkdtemp(join(tmpdir(), "factory-"));
 	const deps = {
+		scheduler: systemScheduler,
 		newId: (): string => crypto.randomUUID(),
 		store: createMemoryRunStore(),
 		runner,

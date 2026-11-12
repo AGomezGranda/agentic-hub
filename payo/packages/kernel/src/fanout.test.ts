@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createLimiter, fanOut } from "./fanout.ts";
+import { createLimiter, fanOut } from "./application/fanout.ts";
 
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 5));
 

@@ -100,6 +100,7 @@ The controller's public surface is:
 BehaviorMode = Literal["coach", "rubber-duck", "skeptic", "interviewer"]
 PROFILES: dict[BehaviorMode, Path]
 
+
 @dataclass
 class BehaviorStatus:
     state: Literal["off", "on", "stale", "error"]

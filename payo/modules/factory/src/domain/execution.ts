@@ -1,4 +1,5 @@
 import {
+	type ArtifactRef,
 	ExecutionCheckpoint,
 	ExecutionManifest,
 	type ExecutionStage,
@@ -293,4 +294,67 @@ export function sourceEligibility(state: {
 	return FactoryRunConfig.safeParse(state.config.factory).success
 		? null
 		: "not_planning";
+}
+
+export function repairContinuation(
+	planIssues: readonly string[],
+	unresolved: readonly string[],
+):
+	| { stage: "Check" }
+	| {
+			stage: "Escalated";
+			reason: string;
+			detail: "repair-plan-issue" | "repair-unresolved";
+	  } {
+	if (planIssues.length > 0)
+		return {
+			stage: "Escalated",
+			reason: `repair reports approved-plan issues: ${planIssues.join("; ")}`,
+			detail: "repair-plan-issue",
+		};
+	if (unresolved.length > 0)
+		return {
+			stage: "Escalated",
+			reason: `repair left blockers unresolved: ${unresolved.join(", ")}`,
+			detail: "repair-unresolved",
+		};
+	return { stage: "Check" };
+}
+
+type FinalAcceptanceEvidence = {
+	checks: ArtifactRef | null | undefined;
+	review: ArtifactRef | null | undefined;
+	manifest: ArtifactRef | null | undefined;
+	diff: ArtifactRef | null | undefined;
+};
+type PhaseAcceptanceEvidence = FinalAcceptanceEvidence & {
+	workspace: ExecutionCheckpoint["workspace"];
+	report: ArtifactRef | null | undefined;
+};
+type Present<T> = { [K in keyof T]: NonNullable<T[K]> };
+
+export function assertAcceptanceEvidence(
+	scope: "phase",
+	evidence: PhaseAcceptanceEvidence,
+): asserts evidence is Present<PhaseAcceptanceEvidence>;
+export function assertAcceptanceEvidence(
+	scope: "final",
+	evidence: FinalAcceptanceEvidence,
+): asserts evidence is Present<FinalAcceptanceEvidence>;
+export function assertAcceptanceEvidence(
+	scope: "phase" | "final",
+	evidence: FinalAcceptanceEvidence | PhaseAcceptanceEvidence,
+): void {
+	const common =
+		evidence.checks && evidence.review && evidence.manifest && evidence.diff;
+	if (scope === "phase") {
+		if (
+			!common ||
+			!("workspace" in evidence) ||
+			!evidence.workspace ||
+			!evidence.report
+		)
+			throw new Error("phase acceptance is missing report or review evidence");
+	} else if (!common)
+		throw new Error("final PR acceptance is missing check or review evidence");
 }

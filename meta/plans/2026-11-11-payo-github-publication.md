@@ -1,7 +1,7 @@
 ---
 date: 2026-11-11
 title: Explicit GitHub draft publication and ticket naming in Payo
-status: in-progress
+status: implemented
 ---
 
 ## Scope
@@ -258,7 +258,7 @@ Provide server-backed naming confirmation before implementation and an explicit 
 
 ### Changes
 
-1. Extend `apps/cli/src/args.ts` `Command`/parsers, `client.ts` `CliClient` and `index.ts` `runCli`/`formatSummary` with these commands:
+1. [x] Extend `apps/cli/src/args.ts` `Command`/parsers, `client.ts` `CliClient` and `index.ts` `runCli`/`formatSummary` with these commands:
 
    ```text
    payo implement <source-id> --pr <pr-id> --preview [--base <ref>] [--ticket-id ABC-123 | --no-ticket] [--slug create-todo-entity]
@@ -269,12 +269,12 @@ Provide server-backed naming confirmation before implementation and an explicit 
    ```
 
    Implementation without confirmation prints the server preview and confirmation instructions and starts no new execution. `--confirm` is explicit authorization; no interactive input framework is added. Reject conflicting flags, missing values and publication without either preview or confirmation. Ticketless confirmation uses `--no-ticket`; its server branch can remain `payo/<id>` and slug may be omitted where irrelevant. `execution-naming` first obtains the preparation-only preview through the same endpoint when `--confirm` is absent; it preserves the stored ticket/policy. Read body files in the CLI's existing local-I/O layer and send text via structured JSON. Print publication child ID; `status`, `logs -f` and `resume` work on that child.
-2. Extend `features/plan-review/api.ts` with preview/correction client helpers. Update `ImplementPrForm.tsx`: preview before launch, show candidate/manual/no-ticket selection and editable slug, render exact server branch/subject examples, and confirm the latest valid preview. Changing selection/base/slug invalidates the displayed confirmation until refreshed. Do not duplicate detection/rendering rules in React. Existing execution navigation remains available without requesting a new naming snapshot.
-3. Add `features/run-workspace/PublishPrForm.tsx` and endpoint helpers in that feature's `api.ts`. On eligible reviewed executions, load a preview on explicit action, show destination/base/head/commits/title/body, allow title/body editing, then send `PublishRequest` only on “Create draft PR”. Show ineligible legacy/stale-base/mutated-worktree reasons from the server. Duplicate clicks are disabled locally and deduplicated durably by the server.
-4. Add `features/run-workspace/PublicationView.tsx`. Update `RunWorkspace.tsx` with an explicit publication view/default and links to execution/planning, publication stages, resume action, final GitHub URL and activity. Navigate to the publication child after acceptance; do not wait for the ended execution's SSE. Extend `useRunActivity.ts` checkpoint refresh to recognize `factory-publication-checkpoint-v1`.
-5. Add preparation-only slug correction controls to the existing execution retry UI, using server-provided eligibility and preview. Do not expose identity/history changes after workspace creation.
-6. Update `features/runs/RunList.tsx` family grouping/labels for `publication.sourceRunId` so children appear under the same work, not as unrelated plans. Update `ActivityTimeline.tsx`, `activityLabel.ts` and `stageLabel.ts` only for labels that generic step/artifact rendering does not already cover. Keep CostPanel pointed at the existing work-cost query; publication adds no agent attempts and does not alter WorkCostTree or fabricate cost measurements.
-7. Update `docs/payo/usage.md`, `docs/payo/README.md`, `docs/payo/engine-design.md`, `docs/payo/implementation-roadmap.md`, `docs/payo/agentic-factory.md`, repository `README.md` and `payo/apps/web/README.md` to distinguish local review from explicit publication, document templates, legacy exclusion, restart and base-drift limits, and mark only the publication portion of step 9 implemented. Do not mark human PR review or next-PR automation complete.
+2. [x] Extend `features/plan-review/api.ts` with preview/correction client helpers. Update `ImplementPrForm.tsx`: preview before launch, show candidate/manual/no-ticket selection and editable slug, render exact server branch/subject examples, and confirm the latest valid preview. Changing selection/base/slug invalidates the displayed confirmation until refreshed. Do not duplicate detection/rendering rules in React. Existing execution navigation remains available without requesting a new naming snapshot.
+3. [x] Add `features/run-workspace/PublishPrForm.tsx` and endpoint helpers in that feature's `api.ts`. On eligible reviewed executions, load a preview on explicit action, show destination/base/head/commits/title/body, allow title/body editing, then send `PublishRequest` only on “Create draft PR”. Show ineligible legacy/stale-base/mutated-worktree reasons from the server. Duplicate clicks are disabled locally and deduplicated durably by the server.
+4. [x] Add `features/run-workspace/PublicationView.tsx`. Update `RunWorkspace.tsx` with an explicit publication view/default and links to execution/planning, publication stages, resume action, final GitHub URL and activity. Navigate to the publication child after acceptance; do not wait for the ended execution's SSE. Extend `useRunActivity.ts` checkpoint refresh to recognize `factory-publication-checkpoint-v1`.
+5. [x] Add preparation-only slug correction controls to the existing execution retry UI, using server-provided eligibility and preview. Do not expose identity/history changes after workspace creation.
+6. [x] Update `features/runs/RunList.tsx` family grouping/labels for `publication.sourceRunId` so children appear under the same work, not as unrelated plans. Update `ActivityTimeline.tsx`, `activityLabel.ts` and `stageLabel.ts` only for labels that generic step/artifact rendering does not already cover. Keep CostPanel pointed at the existing work-cost query; publication adds no agent attempts and does not alter WorkCostTree or fabricate cost measurements.
+7. [x] Update `docs/payo/usage.md`, `docs/payo/README.md`, `docs/payo/engine-design.md`, `docs/payo/implementation-roadmap.md`, `docs/payo/agentic-factory.md`, repository `README.md` and `payo/apps/web/README.md` to distinguish local review from explicit publication, document templates, legacy exclusion, restart and base-drift limits, and mark only the publication portion of step 9 implemented. Do not mark human PR review or next-PR automation complete.
 
 ### Tests — write before implementation
 
@@ -346,3 +346,15 @@ No SQL migration or historical event rewrite. Publication children use existing 
 ## Planning Verification
 
 Read-only source/documentation inspection and independent bounded code research informed this plan. Reviewed the declared package boundaries, factory domain/application layout, terminal reducer rules, execution naming/recovery, settings round-trip, server dispatch and UI streaming. Checked the requirement-to-phase coverage and PR-to-phase mapping. No implementation code changed, no test suite ran and no branch was pushed or PR created during planning.
+
+## Phase 4 implementation verification — 2026-11-12
+
+- [x] CLI end-to-end scenario passes: preview → confirm naming → restart/resume → reviewed → publication preview → explicit publish → published child → duplicate child reuse.
+- [x] CLI preview/confirmation, naming correction and publication commands; server-validated web naming, explicit publication preview/edited content, linked child display/recovery, family grouping and checkpoint refresh implemented.
+- [x] Focused component tests observed failing before implementation; component tests cover explicit-only effects, edited publication content, server ineligibility, naming invalidation and preparation-only correction. Existing Settings coverage remains green.
+- [x] Full suite: 1048 tests passed, one existing skipped test. Both TypeScript projects pass. Biome passes with existing warnings.
+- [x] Production Vite build passes (bundle-size advisory only). Fixed the existing Tailwind resolution blocker by declaring the already installed tailwindcss ^4.3.3 directly in web devDependencies; pnpm updated the lockfile offline without version upgrades.
+- [ ] Manual browser/mobile visual and Settings save/reload checks were not performed; component coverage verifies labelled controls, keyboard interactions, confirmation, server errors and restart guidance. The prior build blocker is resolved.
+- [ ] Optional live disposable GitHub publication was not performed. No live push or PR creation was issued.
+
+Verification tooling: used installed node executables for Vitest, TypeScript, Biome and Vite. Full integration tests require execution outside the sandbox for local server binding; the sandbox run failed for that restriction and the authorized run passed. pnpm dependency update completed offline outside the sandbox.

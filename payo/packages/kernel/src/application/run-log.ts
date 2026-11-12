@@ -1,6 +1,6 @@
 import type { RunEventBody } from "@payo/contracts";
+import type { RunState } from "../domain/state.ts";
 import { commit } from "./run.ts";
-import type { RunState } from "./state.ts";
 import type { RunStore } from "./store.ts";
 
 export interface RunLog {

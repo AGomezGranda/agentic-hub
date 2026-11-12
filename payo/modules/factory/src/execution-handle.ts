@@ -1,5 +1,6 @@
 import type { ExecutionCheckpoint } from "@payo/contracts";
 import type {
+	AgentDeps,
 	AgentRunner,
 	Checks,
 	ExecutionWorkspace,
@@ -22,6 +23,9 @@ export interface ExecutionReviewRoleSnapshots {
 }
 
 export interface ExecutionDeps {
+	platformSupported?: boolean;
+	scheduler: AgentDeps["scheduler"];
+	createRawLog?: AgentDeps["createRawLog"];
 	newId: () => string;
 	store: RunStore;
 	runner?: AgentRunner;

@@ -1,6 +1,6 @@
 import type { RunEventBody, UsageRecord } from "@payo/contracts";
 import { describe, expect, it } from "vitest";
-import { fold, reduce } from "./state.ts";
+import { fold, reduce } from "./domain/state.ts";
 import { body, seqd, sha } from "./testing.ts";
 
 // The gate recover() raises for an interrupted attempt.
@@ -361,7 +361,7 @@ const observed = (amount: number, complete = false): UsageRecord => ({
 	tokensOut: 2,
 	cost: amount,
 	costDetails: {
-		amounts: [{ currency: "USD", basis: "estimated", amount }],
+		amounts: [{ currency: "USD", basis: "estimated", amount: String(amount) }],
 		complete,
 	},
 });

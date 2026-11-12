@@ -1,0 +1,104 @@
+<style>
+#pr-exploration { --p-bg:light-dark(#f3f5f3,#0d1113); --p-panel:light-dark(#ffffff,#141a1d); --p-ink:light-dark(#24312e,#e5e8e5); --p-muted:light-dark(#586963,#9ca7a5); --p-line:light-dark(#cbd3cf,#303a3b); --p-accent:light-dark(#785010,#eabd69); --p-fill:light-dark(#f4deb4,#eabd69); --p-button-ink:#17140e; --p-good:light-dark(#21664d,#83d5b1); font:13px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace; color:var(--p-ink); }
+#pr-exploration .stage { min-height:630px; padding:22px 0; }
+#pr-exploration .console { background:var(--p-bg); border:1px solid var(--p-line); border-top:2px solid var(--p-accent); padding:24px; }
+#pr-exploration .eyebrow { color:var(--p-muted); font-size:11px; letter-spacing:.12em; }
+#pr-exploration h2 { font:500 20px/1.4 ui-monospace,monospace; margin:8px 0; }
+#pr-exploration h3 { font:500 14px/1.5 ui-monospace,monospace; margin:0; }
+#pr-exploration p { margin:0; }
+#pr-exploration .muted { color:var(--p-muted); }
+#pr-exploration .good { color:var(--p-good); }
+#pr-exploration .row { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:14px; }
+#pr-exploration .tabs { display:flex; gap:22px; border-bottom:1px solid var(--p-line); margin:24px 0; flex-wrap:wrap; }
+#pr-exploration .tabs span { padding-bottom:10px; color:var(--p-muted); }
+#pr-exploration .tabs .active { color:var(--p-accent); border-bottom:2px solid var(--p-accent); }
+#pr-exploration .review { padding:0 0 24px; display:grid; gap:16px; }
+#pr-exploration .line { border-top:1px solid var(--p-line); padding-top:18px; margin-top:18px; }
+#pr-exploration .handoff { border-left:2px solid var(--p-accent); padding-left:18px; }
+#pr-exploration .route { margin:12px 0; overflow-wrap:anywhere; }
+#pr-exploration button { font:inherit; padding:9px 13px; border:1px solid var(--p-line); border-radius:2px; background:var(--p-panel); color:var(--p-ink); }
+#pr-exploration button.primary { background:var(--p-fill); color:var(--p-button-ink); border-color:var(--p-fill); font-weight:500; }
+#pr-exploration button:disabled { opacity:.55; cursor:default; }
+#pr-exploration :is(button,input,textarea,summary):focus-visible { outline:2px solid var(--p-accent); outline-offset:3px; }
+#pr-exploration details { margin-top:16px; }
+#pr-exploration summary { color:var(--p-muted); padding:6px 0; }
+#pr-exploration label { display:block; margin-top:16px; color:var(--p-muted); }
+#pr-exploration input, #pr-exploration textarea { display:block; width:100%; box-sizing:border-box; font:inherit; color:var(--p-ink); background:var(--p-bg); border:1px solid var(--p-line); border-radius:2px; padding:10px; margin-top:6px; }
+#pr-exploration textarea { min-height:112px; resize:vertical; }
+#pr-exploration .editor { margin-top:20px; border-top:1px solid var(--p-line); padding-top:16px; }
+#pr-exploration .footer { display:flex; justify-content:flex-end; gap:12px; margin-top:18px; flex-wrap:wrap; }
+#pr-exploration .steps { color:var(--p-muted); display:flex; gap:20px; margin:20px 0; flex-wrap:wrap; }
+@media(max-width:500px) { #pr-exploration .console { padding:16px; } #pr-exploration .stage { min-height:740px; } #pr-exploration .tabs { gap:12px; } }
+</style>
+<div id="pr-exploration">
+ <div class="viz-carousel viz-dotted-background" aria-label="Draft PR handoff designs">
+  <section class="stage" data-variant="Review handoff" aria-label="Review handoff">
+   <div class="console">
+    <p class="eyebrow">PR WORKSPACE · FINAL REVIEW</p>
+    <h2>Handle interrupted agent runs</h2>
+    <p class="muted">agentic-hub · Base main</p>
+    <div class="tabs"><span>Implementation</span><span class="active">Code review</span><span>Activity</span></div>
+    <div class="review">
+     <div class="row"><h3>Review complete</h3><span class="good">✓ Reviewed</span></div>
+     <p>Interrupted runs preserve their checkpoint and can resume safely.</p>
+     <p class="muted">Reviewed commit <span class="commit">c7e42a1</span></p>
+    </div>
+    <div class="handoff" aria-label="GitHub handoff">
+     <p class="eyebrow">NEXT ACTION · GITHUB</p>
+     <div class="row"><h3>Create a draft pull request</h3><button class="primary cursor-interaction" data-open="handoff-editor" aria-expanded="false">Review draft PR →</button></div>
+     <p class="route">agentic-hub · main ← fix/interrupted-runs</p>
+     <p class="muted">Pushes the reviewed commit and opens a draft PR.</p>
+    </div>
+    <div id="handoff-editor" class="editor" hidden>
+     <h3>Draft PR preview</h3>
+     <label>Title<input value="Preserve checkpoints for interrupted runs"></label>
+     <details><summary class="cursor-interaction">Edit description</summary><label>Description<textarea>Preserves the last checkpoint when an agent run is interrupted.
+
+Verified resumable execution and checkpoint recovery.</textarea></label></details>
+     <details><summary class="cursor-interaction">Inspect included commits · 1</summary><p class="muted">c7e42a1 · Preserve interrupted run checkpoints</p></details>
+     <div class="footer"><button class="cursor-interaction" data-close="handoff-editor">Cancel</button><button class="primary" disabled>Create draft PR</button></div>
+    </div>
+   </div>
+  </section>
+  <section class="stage" data-variant="Pull request tab" aria-label="Pull request tab">
+   <div class="console">
+    <p class="eyebrow">PR WORKSPACE · GITHUB HANDOFF</p>
+    <h2>Handle interrupted agent runs</h2>
+    <p class="muted">agentic-hub · Base main</p>
+    <div class="tabs"><span>Implementation</span><span>Code review</span><span class="active">Pull request</span></div>
+    <div class="steps"><span class="good">✓ Reviewed</span><span>→ Draft PR</span></div>
+    <div class="row"><h3>Draft pull request</h3><span class="eyebrow">NOT CREATED</span></div>
+    <p class="route">agentic-hub · main ← fix/interrupted-runs</p>
+    <label>Title<input value="Preserve checkpoints for interrupted runs"></label>
+    <label>Description<textarea>Preserves the last checkpoint when an agent run is interrupted.
+
+Verified resumable execution and checkpoint recovery.</textarea></label>
+    <details><summary class="cursor-interaction">Inspect included commits · 1</summary><p class="muted">c7e42a1 · Preserve interrupted run checkpoints</p></details>
+    <div class="line row"><p class="muted">Push reviewed commit <span class="commit">c7e42a1</span></p><button class="primary" disabled>Create draft PR</button></div>
+   </div>
+  </section>
+ </div>
+</div>
+<script>
+(() => {
+ const root = document.getElementById('pr-exploration');
+ root.querySelectorAll('[data-open]').forEach(button => button.addEventListener('click', () => {
+  const editor = document.getElementById(button.dataset.open);
+  editor.hidden = !editor.hidden;
+  button.setAttribute('aria-expanded', String(!editor.hidden));
+  if (!editor.hidden) editor.querySelector('input').focus();
+ }));
+ root.querySelectorAll('[data-close]').forEach(button => button.addEventListener('click', () => {
+  document.getElementById(button.dataset.close).hidden = true;
+  const opener = root.querySelector('[data-open="' + button.dataset.close + '"]');
+  opener.setAttribute('aria-expanded', 'false');
+  opener.focus();
+ }));
+ const state = { showCommit: true };
+ function render() { root.querySelectorAll('.commit').forEach(el => el.hidden = !state.showCommit); }
+ if (globalThis.Tweak) {
+  const tweak = new Tweak({ container: root, onChange: render });
+  tweak.addToggle(state, 'showCommit', { label: 'Show commit reference' });
+ }
+})();
+</script>

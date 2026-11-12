@@ -5,7 +5,7 @@ work item or direct prompt into a reviewed implementation plan and waits for
 human approval. An explicit implementation action starts a linked execution run
 for one PR unit, with sequential phases, configured checks, mandatory code review,
 bounded repairs, and restart recovery. The result is a retained local branch and
-worktree; pushing and creating pull requests remain future work. The web console
+worktree. Explicit publication creates a linked run that pushes the reviewed SHA and opens a GitHub draft PR. The web console
 shows planning, execution, review, and combined work costs for Payo runs; it does
 not display independent Pi swarms.
 
@@ -23,8 +23,8 @@ not display independent Pi swarms.
 
 | Document | Status and purpose |
 |---|---|
-| [Implementation roadmap](implementation-roadmap.md) | Planning snapshot. The foundation, web UI, and local approved-plan execution are implemented; PR automation remains future work. Not a live task list. |
-| [Agentic factory](agentic-factory.md) | Target end-to-end workflow; publication and human PR review extend beyond the current local execution flow. |
+| [Implementation roadmap](implementation-roadmap.md) | Planning snapshot. The foundation, web UI, and approved-plan execution and explicit draft publication are implemented; human PR review and next-PR automation remain future work. Not a live task list. |
+| [Agentic factory](agentic-factory.md) | Target end-to-end workflow; explicit publication is implemented; human PR review remains future work. |
 | [High-level architecture](high-level-architecture.md) | Long-term workbench proposal, not a description of current capabilities. |
 | [Local workbench research](local-agent-workbench-research.md) | Dated research report and architectural recommendations; upstream details may have changed. |
 | [Web UI direction](payo-web-ui-v1.md) | Historical UI proposal. The running app and usage guide supersede its phase plan. |

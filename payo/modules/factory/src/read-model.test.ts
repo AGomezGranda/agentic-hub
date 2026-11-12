@@ -8,6 +8,7 @@ import {
 	createMemoryRunStore,
 	type MemoryBacking,
 	sha256Hex,
+	systemScheduler,
 } from "@payo/kernel";
 import { expect, it } from "vitest";
 import {
@@ -101,6 +102,7 @@ async function setup(scripts: readonly FakeStep[][], execute = true) {
 		resources: {},
 	};
 	const deps = {
+		scheduler: systemScheduler,
 		newId: () => crypto.randomUUID(),
 		store,
 		runner: createFakeRunner(scripts),

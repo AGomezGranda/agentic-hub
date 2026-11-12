@@ -192,7 +192,7 @@ describe("createSqliteRunStore", () => {
 				tokensOut: 2,
 				cost: 0.4,
 				costDetails: {
-					amounts: [{ currency: "USD", basis: "estimated", amount: 0.4 }],
+					amounts: [{ currency: "USD", basis: "estimated", amount: "0.4" }],
 					complete: true,
 				},
 			};
@@ -212,13 +212,36 @@ describe("createSqliteRunStore", () => {
 			]);
 			await first.close();
 
+			// Seed a historical numeric payload directly, before decimal normalization existed.
+			const legacyBody = JSON.stringify({
+				...usageEvent,
+				event: {
+					type: "usage",
+					usage: {
+						...enriched,
+						costDetails: {
+							complete: true,
+							amounts: [{ currency: "USD", basis: "estimated", amount: 0.4 }],
+						},
+					},
+				},
+			});
+			const legacyDb = new DatabaseSync(join(dataDir, "payo.db"));
+			try {
+				legacyDb
+					.prepare("UPDATE events SET body = ? WHERE run_id = ? AND seq = 6")
+					.run(legacyBody, "r1");
+			} finally {
+				legacyDb.close();
+			}
+
 			const second = await createSqliteRunStore({ dataDir });
 			await openRun(second, "r1");
 			const events = await second.read("r1");
 			const before = projectRunCosts(events);
 
 			expect(before.cost).toEqual({
-				amounts: [{ currency: "USD", basis: "estimated", amount: 0.4 }],
+				amounts: [{ currency: "USD", basis: "estimated", amount: "0.4" }],
 				coverage: "partial",
 				incompleteAttempts: 2,
 				attempts: 2,
@@ -228,7 +251,7 @@ describe("createSqliteRunStore", () => {
 			).toMatchObject({
 				cost: 0.4,
 				costDetails: {
-					amounts: [{ currency: "USD", basis: "estimated", amount: 0.4 }],
+					amounts: [{ currency: "USD", basis: "estimated", amount: "0.4" }],
 					complete: false,
 				},
 			});
@@ -239,6 +262,16 @@ describe("createSqliteRunStore", () => {
 			expect(again).toEqual(before);
 			expect(await second.read("r1")).toHaveLength(events.length);
 			await second.close();
+			const persisted = new DatabaseSync(join(dataDir, "payo.db"));
+			try {
+				expect(
+					persisted
+						.prepare("SELECT body FROM events WHERE run_id = ? AND seq = 6")
+						.get("r1"),
+				).toEqual({ body: legacyBody });
+			} finally {
+				persisted.close();
+			}
 		} finally {
 			rmSync(dataDir, { recursive: true, force: true });
 		}

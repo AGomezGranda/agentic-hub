@@ -1,4 +1,4 @@
-import { createMemoryRunStore, type MemoryBacking } from "./store.ts";
+import { createMemoryRunStore, type MemoryBacking } from "./index.ts";
 import { runStoreContract } from "./testing.ts";
 
 // A fresh backing per case; a reopen within one case reuses it, as a file would.

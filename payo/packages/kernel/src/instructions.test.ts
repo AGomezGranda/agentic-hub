@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { renderInstructions } from "./instructions.ts";
+import { renderInstructions } from "./domain/instructions.ts";
 
 describe("renderInstructions", () => {
 	it("returns only the path sentence when there are no overrides", () => {

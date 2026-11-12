@@ -3,7 +3,7 @@
 Status: planning snapshot, not a live task list. The workspace, kernel, planning
 flow, real adapters, server/CLI, web UI, and approved-plan execution through
 sequential phases, bounded review/repair, and restart recovery are implemented.
-GitHub publication and PR automation remain future work. See [usage](usage.md)
+Explicit GitHub draft publication is implemented; human PR review and subsequent PR automation remain future work. See [usage](usage.md)
 for current behavior and source code for implementation details.
 
 ## Shape
@@ -12,8 +12,7 @@ The original sequence was to build inside-out on fakes, then swap in real
 adapters. Slice 1 (work item → approved plan) accepts Jira and direct-prompt
 inputs. Steps 1–6 describe the implemented foundation; step 7 records real-run
 tuning goals rather than a verified completion claim. The web UI in step 10 and
-approved-plan execution in step 8 have since been implemented. Step 9 (GitHub/PR
-automation) remains future work; Linear is also future work.
+approved-plan execution in step 8 have since been implemented. Step 9 draft publication is implemented; its human PR review and subsequent-PR automation remain future work. Linear is also future work.
 
 ```mermaid
 flowchart LR
@@ -25,7 +24,7 @@ flowchart LR
   S5 --> S7["7 First real run"]
   S6 --> S7
   S7 --> S8["8 Implement per PR (implemented)"]
-  S8 --> S9["9 Draft PRs + PR review (future)"]
+  S8 --> S9["9 Draft PRs (implemented), PR review (future)"]
   S5 --> S10["10 Web UI (implemented)"]
 ```
 
@@ -141,9 +140,9 @@ accepted receipts; explicit resume reconciles partial work and commit intent.
 See [usage](usage.md) for the CLI, `[execution].checks` TOML, local-code trust
 boundary, status, and cleanup ownership.
 
-### 9. Draft PRs and human PR review
+### 9. Draft PRs (implemented) and human PR review (future)
 
-`gh` `CodeHost` adapter. Intent and outcome events around push and PR creation, reconciled against GitHub before any retry. Human PR review gate: code changes go back to implementation review, plan changes back to approval. Record how much you change at PR review, the factory's second quality metric. Mark ready and mark phases done in the plan. A `next PR` gate: the next PR may start once the previous one is open, branching from it, but opens only after the previous one merges and it is rebased onto the base branch.
+Implemented: `gh` CodeHost adapter and linked publication runs with durable intent/outcome reconciliation before any retry. Publication requires explicit preview/confirmation and uses an exact-SHA create-only push. Remaining: Human PR review gate: code changes go back to implementation review, plan changes back to approval. Record how much you change at PR review, the factory's second quality metric. Mark ready and mark phases done in the plan. A `next PR` gate: the next PR may start once the previous one is open, branching from it, but opens only after the previous one merges and it is rebased onto the base branch.
 
 ### 10. Web UI (implemented)
 

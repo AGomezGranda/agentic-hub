@@ -1,6 +1,7 @@
 import { isDeepStrictEqual } from "node:util";
 import {
 	type AttemptRecord,
+	addMoney,
 	type CostAmount,
 	CostSummary,
 	compareCostAmounts,
@@ -51,11 +52,7 @@ export function sumCosts(summaries: readonly CostSummary[]): CostSummary {
 		for (const amount of summary.amounts) {
 			const key = `${amount.currency}\u0000${amount.basis}`;
 			const previous = buckets.get(key);
-			const total = (previous?.amount ?? 0) + amount.amount;
-			if (!Number.isFinite(total))
-				throw new Error(
-					`${amount.currency} ${amount.basis} cost is not finite`,
-				);
+			const total = addMoney(previous?.amount ?? "0", amount.amount);
 			buckets.set(key, {
 				currency: amount.currency,
 				basis: amount.basis,

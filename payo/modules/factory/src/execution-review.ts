@@ -219,7 +219,13 @@ export async function reviewMutableImplementation(
 		statusDetail: "reviewing-implementation",
 	});
 	const scout = await runAgentStep(
-		{ store: deps.store, log, limiter },
+		{
+			store: deps.store,
+			log,
+			limiter,
+			scheduler: deps.scheduler,
+			createRawLog: deps.createRawLog,
+		},
 		{
 			stepId: scoutId,
 			stepName: `scope implementation review (${scope})`,
@@ -265,7 +271,13 @@ export async function reviewMutableImplementation(
 				const stepId = lensStepIds.get(lens);
 				if (!stepId) throw new Error(`missing step id for lens ${lens}`);
 				return runAgentStep(
-					{ store: deps.store, log, limiter },
+					{
+						store: deps.store,
+						log,
+						limiter,
+						scheduler: deps.scheduler,
+						createRawLog: deps.createRawLog,
+					},
 					{
 						stepId,
 						stepName: `implementation-review:${lens}`,
@@ -340,7 +352,13 @@ export async function reviewMutableImplementation(
 			"factory-execution-lens-reports-v1",
 		);
 		const verification = await runAgentStep(
-			{ store: deps.store, log, limiter },
+			{
+				store: deps.store,
+				log,
+				limiter,
+				scheduler: deps.scheduler,
+				createRawLog: deps.createRawLog,
+			},
 			{
 				stepId: verifierId,
 				stepName: "verify implementation review evidence",

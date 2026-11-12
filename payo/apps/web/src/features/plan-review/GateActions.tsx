@@ -39,10 +39,7 @@ export function GateActions({
 	const canResume = escalation?.allowedCommands.includes("resume") ?? false;
 
 	return (
-		<section
-			aria-label="Gate actions"
-			className="border-b border-[var(--line)] pb-6"
-		>
+		<section aria-label="Gate actions" className="workspace-panel">
 			<div>
 				<p className="text-[10px] font-bold tracking-[0.14em] text-[var(--muted)]">
 					{escalation ? "NEEDS ATTENTION" : "YOUR DECISION"}

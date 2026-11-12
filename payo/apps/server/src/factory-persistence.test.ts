@@ -12,7 +12,7 @@ import {
 	start,
 	writePlan,
 } from "@payo/factory";
-import { commit, createLimiter, startRun } from "@payo/kernel";
+import { commit, createLimiter, startRun, systemScheduler } from "@payo/kernel";
 import { createSqliteRunStore } from "@payo/store-sqlite";
 import { expect, it } from "vitest";
 import {
@@ -62,6 +62,7 @@ async function setup(scripts = [envelope(plan), ...clean()]) {
 		signal: new AbortController().signal,
 	};
 	const deps = {
+		scheduler: systemScheduler,
 		newId: () => crypto.randomUUID(),
 		store,
 		runner: createFakeRunner(scripts),
@@ -585,7 +586,11 @@ it("reopens an accepted phase receipt and gates before the next writer", async (
 	const reopenedStore = await createSqliteRunStore({ dataDir: deps.dataDir });
 	try {
 		const reopened = await openExecution(
-			{ store: reopenedStore, newId: () => crypto.randomUUID() },
+			{
+				store: reopenedStore,
+				scheduler: systemScheduler,
+				newId: () => crypto.randomUUID(),
+			},
 			runId,
 		);
 		expect(reopened.checkpoint).toMatchObject({

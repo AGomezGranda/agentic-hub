@@ -101,3 +101,11 @@ pnpm -C payo exec vitest run test/web-boundaries.test.ts test/boundaries.test.ts
 The root Vitest config runs separate `core` (Node) and `web` (jsdom) projects.
 The web project loads its own Vite config, so tests and production builds use the
 same source aliases and React transform.
+
+Approved PR units use a server naming preview before explicit confirmation.
+Reviewed executions expose Preview publication, editable title/body, and Create
+draft PR. Publication opens a linked child with Publication/Activity views,
+explicit recovery, and a GitHub result link. Work lists group the child with its
+source plan. Legacy and base-drift eligibility errors come from the server.
+See [usage](../../../docs/payo/usage.md#naming-confirmation-and-github-draft-publication)
+for templates, restart requirements and publication limits.

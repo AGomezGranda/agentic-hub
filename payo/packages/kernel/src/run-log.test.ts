@@ -1,9 +1,9 @@
 import type { RunEventBody } from "@payo/contracts";
 import { describe, expect, it } from "vitest";
-import { startRun } from "./run.ts";
-import { openRunLog } from "./run-log.ts";
-import { fold } from "./state.ts";
-import { createMemoryRunStore } from "./store.ts";
+import { startRun } from "./application/run.ts";
+import { openRunLog } from "./application/run-log.ts";
+import { fold } from "./domain/state.ts";
+import { createMemoryRunStore } from "./index.ts";
 import { body, testRunInput } from "./testing.ts";
 
 describe("openRunLog", () => {

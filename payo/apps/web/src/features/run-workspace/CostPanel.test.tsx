@@ -13,7 +13,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { CostPanel } from "./CostPanel.tsx";
 
 const known = (amount: number): CostSummary => ({
-	amounts: [{ currency: "USD", basis: "estimated", amount }],
+	amounts: [{ currency: "USD", basis: "estimated", amount: String(amount) }],
 	coverage: "complete",
 	attempts: 1,
 	incompleteAttempts: 0,
@@ -126,9 +126,9 @@ it("shows the work total and expands runs, steps and failed attempts", async () 
 it("keeps currencies and reporting bases separate and warns about partial coverage", async () => {
 	const partial: CostSummary = {
 		amounts: [
-			{ currency: "EUR", basis: "provider-reported", amount: 2 },
-			{ currency: "USD", basis: "estimated", amount: 0.0000001 },
-			{ currency: "USD", basis: "provider-reported", amount: 1 },
+			{ currency: "EUR", basis: "provider-reported", amount: "2" },
+			{ currency: "USD", basis: "estimated", amount: "0.0000001" },
+			{ currency: "USD", basis: "provider-reported", amount: "1" },
 		],
 		coverage: "partial",
 		attempts: 1,

@@ -1,5 +1,4 @@
-// Known limit: Biome and tsc do not check non-literal specifiers (`import(x)`, `import.meta.resolve(x)`),
-// and tsc accepts `import.meta.resolve("@payo/…")` even when undeclared. Not mitigated here.
+// Package imports are enforced here; kernel-boundaries.test.ts also checks computed loading and the full graph.
 import { spawnSync } from "node:child_process";
 import {
 	copyFileSync,

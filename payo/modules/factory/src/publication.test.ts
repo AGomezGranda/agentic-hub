@@ -13,6 +13,13 @@ import {
 
 const base = "b".repeat(40),
 	head = "a".repeat(40);
+const previewHashOf = (
+	preview: Awaited<ReturnType<typeof previewPublication>>,
+) => {
+	if (!preview.previewHash)
+		throw new Error("expected a publication preview hash");
+	return preview.previewHash;
+};
 async function fixture() {
 	const store = createMemoryRunStore();
 	const json = async (value: unknown, kind: string) =>
@@ -137,7 +144,9 @@ async function fixture() {
 	const assertIntent = async (operation: string) => {
 		const ids = (await store.listRunIds()).filter((id) => id !== "execution");
 		expect(ids).toHaveLength(1);
-		const event = (await store.read(ids[0]!)).findLast(
+		const runId = ids[0];
+		if (!runId) throw Error("missing publication run");
+		const event = (await store.read(runId)).findLast(
 			(e) =>
 				e.type === "artifact.recorded" &&
 				e.artifact.kind === "factory-publication-checkpoint-v1",
@@ -234,7 +243,7 @@ it("only explicit acceptance creates one child; intent precedes effects and pare
 	expect(preview.eligible).toBe(true);
 	expect(await f.store.listRunIds()).toEqual(["execution"]);
 	expect(f.repository.pushCommit).not.toHaveBeenCalled();
-	const input = { previewHash: preview.previewHash! };
+	const input = { previewHash: previewHashOf(preview) };
 	const [a, b] = await Promise.all([
 		beginPublication(f.deps, "execution", input, signal()),
 		beginPublication(f.deps, "execution", input, signal()),
@@ -270,7 +279,8 @@ it.each(["push", "pr"])(
 						.createDraftPullRequest as unknown as import("vitest").Mock<
 						(...args: unknown[]) => Promise<void>
 					>);
-		const original = effect.getMockImplementation()!;
+		const original = effect.getMockImplementation();
+		if (!original) throw new Error("expected a mocked publication effect");
 		effect.mockImplementationOnce(async (...args: unknown[]) => {
 			await (original as (...a: unknown[]) => Promise<void>)(...args);
 			throw Error("lost response");
@@ -279,7 +289,7 @@ it.each(["push", "pr"])(
 		const accepted = await beginPublication(
 			f.deps,
 			"execution",
-			{ previewHash: preview.previewHash! },
+			{ previewHash: previewHashOf(preview) },
 			signal(),
 		);
 		await executePublication(accepted.handle, { signal: signal() });
@@ -307,7 +317,7 @@ it("gates an unowned equal branch and unknown query results without effects", as
 	const accepted = await beginPublication(
 		f.deps,
 		"execution",
-		{ previewHash: preview.previewHash! },
+		{ previewHash: previewHashOf(preview) },
 		signal(),
 	);
 	f.setRemote(head);
@@ -321,7 +331,7 @@ it("opening a child interrupted before its first step never schedules publicatio
 	const accepted = await beginPublication(
 		f.deps,
 		"execution",
-		{ previewHash: preview.previewHash! },
+		{ previewHash: previewHashOf(preview) },
 		signal(),
 	);
 	const reopened = await openPublication(

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
 import { realpathSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import type { RunEvent, RunSummary } from "@payo/contracts";
 import { lineDiff } from "@payo/contracts";
@@ -50,10 +51,33 @@ export async function runCli(
 		const client = new CliClient(serverUrl(env), await readToken(dataDir));
 
 		switch (command.command) {
-			case "implement":
+			case "implement": {
+				const input = { prId: command.prId, base: command.base };
+				if (!command.confirm) {
+					stdout(
+						`${JSON.stringify(await client.implementPreview(command.runId, { ...input, ticketId: command.ticketId, slug: command.slug }), null, 2)}\nConfirm with --confirm <previewHash> and the displayed --ticket-id/--no-ticket and --slug.\n`,
+					);
+				} else {
+					stdout(
+						`${await client.implement(command.runId, { ...input, naming: { previewHash: command.confirm, ticketId: command.ticketId ?? null, slug: command.slug ?? "" } })}\n`,
+					);
+				}
+				return 0;
+			}
+			case "execution-naming":
 				stdout(
-					`${await client.implement(command.runId, { prId: command.prId, base: command.base })}\n`,
+					`${JSON.stringify(await client.executionNaming(command.runId, { slug: command.slug, previewHash: command.confirm }), null, 2)}\n`,
 				);
+				return 0;
+			case "publish":
+				if (command.confirm)
+					stdout(
+						`${await client.publish(command.runId, { previewHash: command.confirm, title: command.title, body: command.bodyFile === undefined ? undefined : await readFile(command.bodyFile, "utf8") })}\n`,
+					);
+				else
+					stdout(
+						`${JSON.stringify(await client.publicationPreview(command.runId), null, 2)}\nConfirm with publish ${command.runId} --confirm <previewHash>.\n`,
+					);
 				return 0;
 			case "plan-versions":
 				for (const item of await client.planVersions(command.runId))
@@ -173,6 +197,17 @@ export function formatSummary(summary: RunSummary): string {
 		`status: ${summary.status}${summary.outcome ? ` (${summary.outcome})` : ""}`,
 		`stage: ${summary.stage ?? "unknown"}`,
 	];
+	if (summary.publication) {
+		lines.push(
+			`publication: ${summary.publication.stage} (execution: ${summary.publication.executionRunId}, source: ${summary.publication.sourceRunId})`,
+			`branch: ${summary.publication.branch}`,
+		);
+		if (summary.publication.reason)
+			lines.push(`publication gate: ${summary.publication.reason}`);
+		if (summary.publication.pr)
+			lines.push(`draft PR: ${summary.publication.pr.url}`);
+	}
+
 	if (summary.execution) {
 		lines.push(
 			`execution: ${summary.execution.runId} (source: ${summary.execution.sourceRunId}, PR: ${summary.execution.prId})`,

@@ -141,6 +141,8 @@ export async function prepareManifest(
 	});
 	const result = await runAgentStep(
 		{
+			scheduler: state.deps.scheduler,
+			createRawLog: state.deps.createRawLog,
 			store: state.deps.store,
 			log: state.log,
 			limiter: deps.limiter,

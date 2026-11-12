@@ -90,7 +90,7 @@
 										"group": [
 											"**/packages/**",
 											"**/modules/**",
-											"**/adapters/**",
+											"../**/adapters/**",
 											"**/apps/**",
 											"../../*/**"
 										],

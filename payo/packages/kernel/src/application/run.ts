@@ -1,7 +1,7 @@
 import { type Json, RunConfig, RunEventBody } from "@payo/contracts";
-import { fold, type RunState, reduce } from "./state.ts";
+import { fold, type RunState, reduce } from "../domain/state.ts";
+import { incompleteUsage, UNKNOWN_USAGE } from "../domain/usage.ts";
 import type { RunStore } from "./store.ts";
-import { incompleteUsage, UNKNOWN_USAGE } from "./usage.ts";
 
 /** Recursive merge of plain objects; arrays and scalars in `overrides` replace the defaults. */
 export function resolveRunConfig(

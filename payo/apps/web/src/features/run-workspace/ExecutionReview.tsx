@@ -20,8 +20,8 @@ export function ExecutionReview({ review }: { review: Review | null }) {
 				) || a.severity.localeCompare(b.severity),
 	);
 	return (
-		<section className="execution-panel" aria-label="Latest review">
-			<p className="execution-label">Code review</p>
+		<section className="workspace-panel" aria-label="Latest review">
+			<p className="workspace-label">Code review</p>
 			<h3>Findings and verification</h3>
 			{!review ? (
 				<p>No review evidence available</p>
@@ -71,7 +71,7 @@ export function ExecutionReview({ review }: { review: Review | null }) {
 										) : (
 											<>
 												<div className="flex flex-wrap items-baseline gap-2">
-													<span className="execution-label text-[var(--danger)]">
+													<span className="workspace-label text-[var(--danger)]">
 														{finding.severity}
 													</span>
 													<h4 className="font-semibold">{finding.title}</h4>
@@ -94,7 +94,7 @@ export function ExecutionReview({ review }: { review: Review | null }) {
 												<ul className="mt-3 space-y-3">
 													{matching.map((verdict) => (
 														<li key={verdict.sourceIds.join(",")}>
-															<p className="execution-label">
+															<p className="workspace-label">
 																{verdict.classification}
 															</p>
 															<p className="mt-1 whitespace-pre-wrap">
@@ -158,7 +158,7 @@ export function ExecutionReviewContext({ review }: { review: Review }) {
 	const details = review.details;
 	return (
 		<>
-			<section className="execution-panel" aria-label="Review coverage">
+			<section className="workspace-panel" aria-label="Review coverage">
 				<h3>Review coverage</h3>
 				{review.uncheckedLenses.length > 0 && (
 					<div className="mt-3 border border-[var(--warning-border)] bg-[var(--warning-surface)] p-3 text-[var(--status-warn)]">
@@ -202,7 +202,7 @@ export function ExecutionReviewContext({ review }: { review: Review }) {
 				{!review.lenses.length && <p>No lens reports available.</p>}
 			</section>
 			<section
-				className="execution-panel execution-worktree"
+				className="workspace-panel execution-worktree"
 				aria-label="Review context"
 			>
 				<h3>Review context</h3>

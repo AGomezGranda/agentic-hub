@@ -132,7 +132,10 @@ export function useRunActivity(token: string, runId: string) {
 								void refreshSummary();
 							} else if (
 								(event.type === "artifact.recorded" &&
-									event.artifact.kind === "factory-execution-checkpoint-v1") ||
+									[
+										"factory-execution-checkpoint-v1",
+										"factory-publication-checkpoint-v1",
+									].includes(event.artifact.kind)) ||
 								event.type === "step.started" ||
 								event.type === "step.finished" ||
 								event.type === "gate.raised" ||

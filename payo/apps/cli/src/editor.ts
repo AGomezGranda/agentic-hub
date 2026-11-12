@@ -36,8 +36,10 @@ export async function editPlan(options: {
 	const path = planPath(options.dataDir, options.runId);
 	const [command, ...args] = editorCommand(options.env);
 	if (!command) throw new UsageError("no editor configured");
-	await access(path).catch(() => {
-		throw new Error(`plan not found at ${path}`);
+	await access(path).catch((error: unknown) => {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT")
+			throw new Error(`plan not found at ${path}`, { cause: error });
+		throw error;
 	});
 	const spawn = options.spawn ?? nodeSpawn;
 	const child = spawn(command, [...args, path], {

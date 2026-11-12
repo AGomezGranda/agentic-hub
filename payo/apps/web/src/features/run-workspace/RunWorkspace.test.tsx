@@ -1142,6 +1142,24 @@ it.each([false, true])(
 			name: "Open in Terminal",
 		});
 		const code = screen.getByRole("button", { name: "Open in VS Code" });
+		const costPanel = screen.getByRole("region", { name: "Work costs" });
+		if (execution) {
+			for (const name of ["Activity view", "Implementation", "Code review"]) {
+				await user.click(screen.getByRole("button", { name }));
+				if (name === "Code review") {
+					expect(
+						screen.getByRole("region", { name: "GitHub handoff" }),
+					).toBeVisible();
+				} else {
+					expect(
+						screen.queryByRole("region", { name: "GitHub handoff" }),
+					).toBeNull();
+				}
+				expect(screen.getAllByRole("region", { name: "Work costs" })).toEqual([
+					costPanel,
+				]);
+			}
+		}
 		expect(terminal).toHaveAttribute(
 			"title",
 			`Open ${execution ? "/work/tree" : "/work/repo"} in Terminal`,
@@ -1173,3 +1191,69 @@ it.each([false, true])(
 		expect(code).toBeEnabled();
 	},
 );
+
+it("opens publication children in their own view and refreshes on checkpoint events", async () => {
+	let reads = 0;
+	let streamController: ReadableStreamDefaultController<Uint8Array> | undefined;
+	vi.stubGlobal(
+		"fetch",
+		vi.fn(async (input: RequestInfo | URL) => {
+			const url = String(input);
+			if (url.endsWith("/costs")) return json(200, costs(RUN_ID));
+			if (url.endsWith("/events")) return json(200, { events: [] });
+			if (url.includes("/events/stream"))
+				return new Response(
+					new ReadableStream({
+						start(c) {
+							streamController = c;
+						},
+					}),
+				);
+			if (url === `${BASE_URL}/runs/${RUN_ID}`) {
+				reads++;
+				return json(200, {
+					...summary("Push"),
+					publication: {
+						sourceRunId: STEP_ID,
+						executionRunId: GATE_ID,
+						stage: reads > 1 ? "CreatePr" : "Push",
+						branch: "branch",
+						reviewedCommit: "a".repeat(40),
+						target: {
+							host: "github.com",
+							owner: "owner",
+							name: "repo",
+							repositoryId: "1",
+							baseBranch: "main",
+							baseCommit: "b".repeat(40),
+						},
+						pr: null,
+						reason: null,
+					},
+				});
+			}
+			throw new Error(`Unexpected ${url}`);
+		}),
+	);
+	render(
+		wrap(
+			<RunWorkspace
+				token={TOKEN}
+				runId={RUN_ID}
+				onDisconnect={() => {}}
+				onSelectRun={() => {}}
+			/>,
+		),
+	);
+	expect(
+		await screen.findByRole("heading", { name: "GitHub publication · Push" }),
+	).toBeVisible();
+	expect(screen.queryByRole("button", { name: "Plan" })).toBeNull();
+	await waitFor(() => expect(streamController).toBeDefined());
+	streamController?.enqueue(
+		new TextEncoder().encode(
+			`data: ${JSON.stringify({ runId: RUN_ID, seq: 1, at: timestamp, type: "artifact.recorded", attemptId: null, artifact: { kind: "factory-publication-checkpoint-v1", sha256: "a".repeat(64), size: 1, mediaType: "application/json" } })}\n\n`,
+		),
+	);
+	await waitFor(() => expect(reads).toBeGreaterThan(1));
+});

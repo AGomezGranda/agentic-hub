@@ -210,7 +210,7 @@ unit's ordered phases in a linked run, with configured checks, mandatory
 implementation review, bounded repairs, and recovery gates. Each phase and
 repair starts in a fresh agent context; immutable receipts carry accepted work
 forward. Successful execution leaves a reviewed local branch/worktree; Payo
-does not push or create a PR. Writable Pi is trusted local-code execution, not a
+publishes only after an explicit preview and confirmation, using a linked run to push the reviewed SHA and create a GitHub draft PR. Writable Pi is trusted local-code execution, not a
 sandbox: it inherits the server user's permissions and environment. Execution
 worktrees are retained on all outcomes, and cleanup belongs to the operator
 once active processes stop. The full walkthrough, including check configuration,
@@ -343,7 +343,10 @@ pnpm payo logs <run-id> [-f]
 pnpm payo edit <run-id>
 pnpm payo answer <run-id> <question-id> <answer...>
 pnpm payo approve <run-id>
-pnpm payo implement <approved-run-id> --pr <pr-id> [--base <ref>]
+pnpm payo implement <approved-run-id> --pr <pr-id> --preview [--base <ref>]
+# Confirm the preview using --confirm <hash> and --ticket-id <key> --slug <slug> (or --no-ticket).
+pnpm payo publish <execution-id> --preview
+pnpm payo publish <execution-id> --confirm <hash>
 pnpm payo request-changes <run-id>
 pnpm payo resume <run-id>
 pnpm payo doctor

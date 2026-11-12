@@ -1,6 +1,3 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import {
 	AgentEvent,
 	AgentSpec,
@@ -11,11 +8,11 @@ import {
 	type StepOutcome,
 	type UsageRecord,
 } from "@payo/contracts";
+import { incompleteUsage, UNKNOWN_USAGE } from "../domain/usage.ts";
 import type { AgentRunner } from "./agent.ts";
 import { describeReason, type Limiter } from "./fanout.ts";
 import type { RunLog } from "./run-log.ts";
 import type { RunStore } from "./store.ts";
-import { incompleteUsage, UNKNOWN_USAGE } from "./usage.ts";
 
 export const RETRY_NOTE =
 	"Fix the output in the previous-output input, following the validation-error input.";
@@ -23,10 +20,23 @@ export const RETRY_NOTE =
 // One commit per 32 streamed rows instead of one per row.
 const ATTEMPT_EVENT_BATCH = 32;
 
+export interface RawLogCapture {
+	path: string;
+	read(): Promise<Uint8Array>;
+	dispose(): Promise<void>;
+}
+
+export interface Scheduler {
+	after(ms: number, task: () => void): () => void;
+	yield(): Promise<void>;
+}
+
 export interface AgentDeps {
+	scheduler: Scheduler;
 	store: RunStore;
 	log: RunLog;
 	limiter: Limiter;
+	createRawLog?: () => Promise<RawLogCapture>;
 }
 
 export interface StepInput {
@@ -151,8 +161,8 @@ async function executeAttempt(
 	spec: AgentSpec,
 ): Promise<AttemptRun> {
 	if (input.signal.aborted) return { outcome: "cancelled" };
-	const watch = watchAttempt(input.signal, spec.timeoutMs);
-	let dir: string | undefined;
+	const watch = watchAttempt(deps.scheduler, input.signal, spec.timeoutMs);
+	let rawLog: RawLogCapture | undefined;
 	try {
 		await deps.log.write([
 			{
@@ -166,14 +176,12 @@ async function executeAttempt(
 				inputArtifacts: spec.inputs.map((i) => i.ref.sha256),
 			},
 		]);
-		let rawLogPath: string | undefined;
 		try {
-			dir = await mkdtemp(join(tmpdir(), "payo-attempt-"));
-			rawLogPath = join(dir, "events.jsonl");
+			rawLog = await deps.createRawLog?.();
 		} catch {
 			// Best effort: raw capture never blocks the attempt.
 		}
-		// The outer finally removes the directory, so a parse failure cannot leak it.
+		// The outer finally disposes capture even if parsing fails.
 		const runnerSpec = AgentSpec.parse({
 			...spec,
 			correlation: {
@@ -181,7 +189,7 @@ async function executeAttempt(
 				stepId: input.stepId,
 				attemptId,
 			},
-			rawLogPath,
+			rawLogPath: rawLog?.path,
 		});
 		try {
 			const run = await streamAttempt(
@@ -191,7 +199,7 @@ async function executeAttempt(
 				runnerSpec,
 				watch,
 			);
-			await captureRawLog(deps, rawLogPath, attemptId);
+			await captureRawLog(deps, rawLog, attemptId);
 			await deps.log.write([
 				{
 					type: "attempt.finished",
@@ -203,7 +211,7 @@ async function executeAttempt(
 			]);
 			return run;
 		} catch (error) {
-			await captureRawLog(deps, rawLogPath, attemptId);
+			await captureRawLog(deps, rawLog, attemptId);
 			// Best effort: preserve the original error over a failed write.
 			await deps.log
 				.write([
@@ -220,7 +228,11 @@ async function executeAttempt(
 		}
 	} finally {
 		watch.dispose();
-		if (dir !== undefined) await rm(dir, { recursive: true, force: true });
+		try {
+			await rawLog?.dispose();
+		} catch {
+			// Diagnostic cleanup must preserve the result or original failure.
+		}
 	}
 }
 
@@ -235,12 +247,12 @@ function attemptUsage(watch: Watch): UsageRecord {
 // shortcut: the raw log is unbounded; cap it when a real attempt produces a log large enough to matter.
 async function captureRawLog(
 	deps: AgentDeps,
-	rawLogPath: string | undefined,
+	rawLog: RawLogCapture | undefined,
 	attemptId: string,
 ): Promise<void> {
-	if (rawLogPath === undefined) return;
+	if (rawLog === undefined) return;
 	try {
-		const bytes = await readFile(rawLogPath);
+		const bytes = await rawLog.read();
 		if (bytes.byteLength === 0) return;
 		const artifact = await deps.store.putArtifact(bytes, {
 			kind: "agent-raw-log",
@@ -294,7 +306,7 @@ async function streamAttempt(
 					)
 						await flush();
 					// Yield so the deadline timer can fire when a runner emits without awaiting I/O.
-					await new Promise((resolve) => setImmediate(resolve));
+					await deps.scheduler.yield();
 				}
 			} finally {
 				const cleanup = Promise.resolve()
@@ -304,12 +316,17 @@ async function streamAttempt(
 					// Writable adapters must kill descendants before resolving iterator cleanup.
 					await cleanup;
 				} else {
-					await Promise.race([
-						cleanup.catch(() => {}),
-						new Promise<void>((resolve) => {
-							setTimeout(resolve, 1000).unref();
-						}),
-					]);
+					let cancel = () => {};
+					try {
+						await Promise.race([
+							cleanup.catch(() => {}),
+							new Promise<void>((resolve) => {
+								cancel = deps.scheduler.after(1000, resolve);
+							}),
+						]);
+					} finally {
+						cancel();
+					}
 				}
 			}
 		}
@@ -351,8 +368,14 @@ function classify(
 }
 
 // The first of result, error, parent abort or deadline sets `terminal`; a later one never overwrites it.
-function watchAttempt(parent: AbortSignal, timeoutMs: number): Watch {
-	const signal = AbortSignal.any([parent, AbortSignal.timeout(timeoutMs)]);
+function watchAttempt(
+	scheduler: Scheduler,
+	parent: AbortSignal,
+	timeoutMs: number,
+): Watch {
+	const deadline = new AbortController();
+	const cancel = scheduler.after(timeoutMs, () => deadline.abort());
+	const signal = AbortSignal.any([parent, deadline.signal]);
 	let wake = () => {};
 	const stopped = new Promise<undefined>((resolve) => {
 		wake = () => resolve(undefined);
@@ -366,7 +389,10 @@ function watchAttempt(parent: AbortSignal, timeoutMs: number): Watch {
 	const watch: Watch = {
 		signal,
 		stopped,
-		dispose: () => signal.removeEventListener("abort", onAbort),
+		dispose: () => {
+			cancel();
+			signal.removeEventListener("abort", onAbort);
+		},
 	};
 	signal.addEventListener("abort", onAbort, { once: true });
 	return watch;

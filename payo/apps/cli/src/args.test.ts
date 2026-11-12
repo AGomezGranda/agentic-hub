@@ -33,6 +33,7 @@ it("parses implement with required PR and optional base", () => {
 		runId: "approved-run",
 		prId: "pr-1",
 		base: undefined,
+		preview: false,
 	});
 	expect(
 		parseArgs([
@@ -48,6 +49,7 @@ it("parses implement with required PR and optional base", () => {
 		runId: "approved-run",
 		prId: "pr-2",
 		base: "payo/pr-1",
+		preview: false,
 	});
 	for (const args of [
 		["implement", "approved-run"],
@@ -195,4 +197,31 @@ it("parses token with no arguments", () => {
 it("parses doctor with no arguments", () => {
 	expect(parseArgs(["doctor"])).toEqual({ command: "doctor" });
 	expect(() => parseArgs(["doctor", "extra"])).toThrow(UsageError);
+});
+
+it("requires explicit publication and parses naming confirmation", () => {
+	expect(
+		parseArgs([
+			"implement",
+			"r",
+			"--pr",
+			"p",
+			"--confirm",
+			"hash",
+			"--no-ticket",
+		]),
+	).toMatchObject({ confirm: "hash", ticketId: null });
+	expect(parseArgs(["publish", "r", "--preview"])).toMatchObject({
+		preview: true,
+	});
+	expect(
+		parseArgs(["execution-naming", "r", "--slug", "create-new-entity"]),
+	).toMatchObject({ slug: "create-new-entity" });
+	for (const args of [
+		["publish", "r"],
+		["publish", "r", "--preview", "--confirm", "h"],
+		["implement", "r", "--pr", "p", "--no-ticket", "--ticket-id", "ABC-1"],
+		["publish", "r", "--confirm"],
+	])
+		expect(() => parseArgs(args)).toThrow(UsageError);
 });

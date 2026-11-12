@@ -15,12 +15,14 @@ import {
 	type Limiter,
 	type RunState,
 	type RunStore,
+	systemScheduler,
 } from "@payo/kernel";
 import { createSqliteRunStore } from "@payo/store-sqlite";
 import type { AdapterSet } from "./adapters.ts";
 import { createAdapterSet } from "./adapters.ts";
 import type { ServerConfig } from "./config.ts";
 import { runDoctor } from "./doctor.ts";
+import { createRawLog } from "./raw-log.ts";
 import {
 	createRunApplication,
 	type RunApplication,
@@ -114,6 +116,8 @@ export async function createComposition(
 
 	const depsForRun = (): FactoryDeps => ({
 		newId: randomUUID,
+		scheduler: systemScheduler,
+		createRawLog,
 		store,
 		runner: adapters.runner(),
 		limiter,
@@ -125,7 +129,10 @@ export async function createComposition(
 		roleSources: adapters.roleSources,
 	});
 	const executionDeps = () => ({
+		platformSupported: process.platform !== "win32",
 		newId: randomUUID,
+		scheduler: systemScheduler,
+		createRawLog,
 		store,
 		runner: (adapters.executionRunner ?? adapters.runner)(),
 		limiter,

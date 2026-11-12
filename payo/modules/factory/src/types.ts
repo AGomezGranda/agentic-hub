@@ -4,6 +4,7 @@ import type {
 	WorkItemRequest,
 } from "@payo/contracts";
 import type {
+	AgentDeps,
 	AgentRunner,
 	Limiter,
 	RunLog,
@@ -29,6 +30,8 @@ export interface RoleSource {
 	composedSha?: string;
 }
 export interface FactoryDeps {
+	scheduler: AgentDeps["scheduler"];
+	createRawLog?: AgentDeps["createRawLog"];
 	newId: () => string;
 	store: RunStore;
 	runner: AgentRunner;

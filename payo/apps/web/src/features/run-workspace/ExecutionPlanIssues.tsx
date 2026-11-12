@@ -153,7 +153,7 @@ export function ExecutionPlanIssues({
 				))}
 			</ol>
 			<div className="plan-issue-resolution">
-				<p className="execution-label">RESOLUTION / CHOOSE HOW TO PROCEED</p>
+				<p className="workspace-label">RESOLUTION / CHOOSE HOW TO PROCEED</p>
 				<fieldset
 					className="plan-issue-options"
 					aria-label="Plan issue resolution"

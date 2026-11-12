@@ -9,10 +9,12 @@ import { dirname, join } from "node:path";
 import {
 	type AgentEvent,
 	type AgentSpec,
+	addMoney,
 	type CostBasis,
 	type CostDetails,
 	compareCostAmounts,
 	type DoctorCheck,
+	moneyFromNumber,
 	type Usage,
 	type UsageRecord,
 } from "@payo/contracts";
@@ -649,7 +651,7 @@ function addCostAmount(
 		.concat({
 			currency: COST_CURRENCY,
 			basis,
-			amount: (previous?.amount ?? 0) + total,
+			amount: addMoney(previous?.amount ?? "0", moneyFromNumber(total)),
 		})
 		.sort(compareCostAmounts);
 	state.costDetails = { amounts, complete: false };

@@ -29,7 +29,7 @@ export function CostPanel({ token, runId }: { token: string; runId: string }) {
 		>
 			<div className="flex flex-wrap items-start justify-between gap-3">
 				<div>
-					<h2 className="execution-label uppercase">Work cost</h2>
+					<h2 className="workspace-label uppercase">Work cost</h2>
 					<p className="mt-1 text-xs text-[var(--muted)]">
 						Planning + all PR executions
 					</p>
@@ -184,9 +184,9 @@ function CostValue({ cost }: { cost: CostSummary }) {
 					title={`${currency} ${amount} · ${basis}`}
 				>
 					{currency}{" "}
-					{amount > 0 && amount < 0.000001
+					{Number(amount) > 0 && Number(amount) < 0.000001
 						? "<0.000001"
-						: amountFormat.format(amount)}{" "}
+						: amountFormat.format(Number(amount))}{" "}
 					<span className="text-[10px] font-normal text-[var(--muted)]">
 						{basis === "estimated" ? "Estimated" : "Provider reported"}
 					</span>

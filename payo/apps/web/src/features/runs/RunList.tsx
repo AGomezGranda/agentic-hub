@@ -36,13 +36,14 @@ export function RunList({
 	const [grouping, setGrouping] = useState<Grouping>("status");
 	const families = new Map<string, WorkItem>();
 	for (const run of runs) {
-		const id = run.execution?.sourceRunId ?? run.runId;
+		const id =
+			run.publication?.sourceRunId ?? run.execution?.sourceRunId ?? run.runId;
 		const family = families.get(id);
 		if (!family) {
 			families.set(id, { id, runs: [run] });
 			continue;
 		}
-		if (run.execution) family.runs.push(run);
+		if (run.execution || run.publication) family.runs.push(run);
 		else family.runs.unshift(run);
 		families.set(id, family);
 	}
@@ -147,9 +148,11 @@ export function RunList({
 							>
 								{item.runs.map((run) => (
 									<option key={run.runId} value={run.runId}>
-										{run.execution
-											? `PR workspace ${run.execution.prId}`
-											: "Plan"}{" "}
+										{run.publication
+											? "Publication"
+											: run.execution
+												? `PR workspace ${run.execution.prId}`
+												: "Plan"}{" "}
 										· {run.repo}
 									</option>
 								))}
@@ -218,7 +221,7 @@ export function RunList({
 												{workStatus(item)}
 												{grouping === "status" ? ` · ${first.repo}` : ""}
 											</p>
-											{first.execution && (
+											{(first.execution || first.publication) && (
 												<p className="mt-2 text-xs text-[var(--muted)]">
 													Source plan is not in the loaded results.
 												</p>
@@ -262,9 +265,11 @@ function RunRow({
 }) {
 	const item = run.workItem;
 	const title = nested
-		? run.execution
-			? `PR workspace ${run.execution.prId}`
-			: "Plan"
+		? run.publication
+			? "Publication"
+			: run.execution
+				? `PR workspace ${run.execution.prId}`
+				: "Plan"
 		: (item?.title ?? "Work item unresolved");
 	const subtitle =
 		item?.key ?? (item?.source === "prompt" ? "Prompt" : run.runId);

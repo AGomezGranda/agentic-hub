@@ -78,3 +78,19 @@ it("fails clearly when no editor is configured or the plan is missing", async ()
 		}),
 	).rejects.toThrow(/plan not found/);
 });
+
+it("preserves filesystem failures other than a missing plan", async () => {
+	const dir = await mkdtemp(join(tmpdir(), "payo-edit-data-"));
+	const file = join(dir, "not-a-directory");
+	await writeFile(file, "");
+	const spawn = vi.fn();
+	await expect(
+		editPlan({
+			dataDir: file,
+			runId: "run-1",
+			env: { EDITOR: "true" },
+			spawn: spawn as never,
+		}),
+	).rejects.toMatchObject({ code: "ENOTDIR" });
+	expect(spawn).not.toHaveBeenCalled();
+});

@@ -1,12 +1,90 @@
 import type { WorkItem } from "@payo/contracts";
-import { commit, createMemoryRunStore, startRun } from "@payo/kernel";
+import {
+	commit,
+	createMemoryRunStore,
+	startRun,
+	systemScheduler,
+} from "@payo/kernel";
 import { expect, it, vi } from "vitest";
 import { savePlanVersion, storeCheckpoint } from "./artifacts.ts";
 import {
 	beginExecution,
+	findExistingExecution,
 	previewExecutionNaming,
 	validatePublicationPolicy,
 } from "./index.ts";
+
+it.each(["preview", "checkpoint"])(
+	"cancels acceptance during %s without creating a run",
+	async (stage) => {
+		const f = await fixture();
+		const preview = await f.preview();
+		if (!preview.previewHash || preview.ticketId === undefined)
+			throw new Error("expected a valid preview");
+		const controller = new AbortController();
+		const reason = new Error("server stopping");
+		const deps = {
+			scheduler: systemScheduler,
+			newId: () => crypto.randomUUID(),
+			store: {
+				...f.store,
+				async putArtifact(...args: Parameters<typeof f.store.putArtifact>) {
+					const ref = await f.store.putArtifact(...args);
+					if (stage === "checkpoint") controller.abort(reason);
+					return ref;
+				},
+			},
+			workspace: {
+				async resolveBase(_repo: string, _base: string, signal: AbortSignal) {
+					expect(signal).toBe(controller.signal);
+					if (stage === "preview") controller.abort(reason);
+					return f.resolveBase();
+				},
+			},
+		} as unknown as Parameters<typeof beginExecution>[0];
+		await expect(
+			beginExecution(
+				deps,
+				{
+					sourceRunId: "source",
+					prId: "pr-1",
+					checks: [
+						{ name: "test", command: "test", args: [], timeout_ms: 1000 },
+					],
+					roles: {},
+					roleArtifacts: {},
+					roleProvenance: {},
+					maxConcurrentAgents: 1,
+					naming: {
+						previewHash: preview.previewHash,
+						ticketId: preview.ticketId,
+						slug: preview.slug,
+					},
+				},
+				controller.signal,
+			),
+		).rejects.toBe(reason);
+		expect(await f.store.listRunIds()).toEqual(["source"]);
+	},
+);
+
+it("rejects cancelled existing-execution lookup before reading the store", async () => {
+	const f = await fixture();
+	const controller = new AbortController();
+	controller.abort(new Error("server stopping"));
+	const read = vi.spyOn(f.store, "read");
+	await expect(
+		findExistingExecution(
+			{ store: f.store, scheduler: systemScheduler, newId: () => "unused" },
+			{
+				sourceRunId: "source",
+				prId: "pr-1",
+			},
+			controller.signal,
+		),
+	).rejects.toBe(controller.signal.reason);
+	expect(read).not.toHaveBeenCalled();
+});
 
 async function fixture(
 	options: { approved?: boolean; title?: string; description?: string } = {},
@@ -188,6 +266,7 @@ it("requires a current confirmed naming snapshot before accepting a new executio
 	const f = await fixture();
 	const deps = {
 		store: f.store,
+		scheduler: systemScheduler,
 		newId: () => crypto.randomUUID(),
 		workspace: { resolveBase: f.resolveBase },
 	};
@@ -207,9 +286,11 @@ it("requires a current confirmed naming snapshot before accepting a new executio
 		),
 	).rejects.toThrow(/confirmation/);
 	const preview = await f.preview();
+	if (!preview.previewHash || !preview.ticketId)
+		throw new Error("expected a complete naming preview");
 	const naming = {
-		previewHash: preview.previewHash!,
-		ticketId: preview.ticketId!,
+		previewHash: preview.previewHash,
+		ticketId: preview.ticketId,
 		slug: preview.slug,
 	};
 	const handle = await beginExecution(
@@ -219,6 +300,22 @@ it("requires a current confirmed naming snapshot before accepting a new executio
 	expect(handle.log.current().config.factory).toMatchObject({
 		naming: { version: 1, branch: "A2_B-003/create-todo-entity" },
 	});
+	const controller = new AbortController();
+	await findExistingExecution(
+		deps as unknown as Parameters<typeof beginExecution>[0],
+		{
+			sourceRunId: "source",
+			prId: "pr-1",
+			explicitBase: true,
+		},
+		controller.signal,
+	);
+	expect(f.resolveBase).toHaveBeenLastCalledWith(
+		"/repo",
+		"main",
+		controller.signal,
+	);
+
 	await expect(
 		beginExecution(deps as unknown as Parameters<typeof beginExecution>[0], {
 			...input,
@@ -227,6 +324,7 @@ it("requires a current confirmed naming snapshot before accepting a new executio
 	).rejects.toThrow(/already exists/);
 	const stale = await fixture();
 	const old = await stale.preview();
+	if (!old.previewHash) throw new Error("expected a naming preview hash");
 	stale.moveBase();
 	await expect(
 		beginExecution(
@@ -235,7 +333,7 @@ it("requires a current confirmed naming snapshot before accepting a new executio
 				store: stale.store,
 				workspace: { resolveBase: stale.resolveBase },
 			} as unknown as Parameters<typeof beginExecution>[0],
-			{ ...input, naming: { ...naming, previewHash: old.previewHash! } },
+			{ ...input, naming: { ...naming, previewHash: old.previewHash } },
 		),
 	).rejects.toThrow(/stale/);
 });

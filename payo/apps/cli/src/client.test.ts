@@ -204,15 +204,18 @@ it("runs implement and prints the linked execution ID", async () => {
 	const server = await serveReport({ runId });
 	try {
 		const output: string[] = [];
-		const code = await runCli(["implement", runId, "--pr", "pr-1"], {
-			env: {
-				PAYO_DATA_DIR: dir,
-				NODE_ENV: "test",
-				PAYO_TEST_SERVER_URL: server.url,
+		const code = await runCli(
+			["implement", runId, "--pr", "pr-1", "--confirm", "hash", "--no-ticket"],
+			{
+				env: {
+					PAYO_DATA_DIR: dir,
+					NODE_ENV: "test",
+					PAYO_TEST_SERVER_URL: server.url,
+				},
+				stdout: (text) => output.push(text),
+				stderr: () => {},
 			},
-			stdout: (text) => output.push(text),
-			stderr: () => {},
-		});
+		);
 		expect(code).toBe(0);
 		expect(output).toEqual([`${runId}\n`]);
 	} finally {
@@ -410,4 +413,122 @@ it("prints the token only for the explicit token command", async () => {
 		}),
 	).toBe(0);
 	expect(output.join("")).toBe("secret\n");
+});
+
+it("previews without implementation and sends explicit edited publication", async () => {
+	const requests: Array<{ url: string; body: unknown }> = [];
+	const preview = {
+		candidates: ["ABC-1"],
+		ticketId: "ABC-1",
+		slug: "create-new-entity",
+		branch: "ABC-1/create-new-entity",
+		errors: {},
+		previewHash: "hash",
+	};
+	const client = new CliClient("http://localhost", "secret", (async (
+		url: string,
+		init: RequestInit,
+	) => {
+		requests.push({ url, body: JSON.parse(String(init.body)) });
+		return new Response(
+			JSON.stringify(url.endsWith("implement-preview") ? preview : { runId }),
+		);
+	}) as typeof fetch);
+	expect(await client.implementPreview(runId, { prId: "p" })).toEqual(preview);
+	expect(requests).toEqual([
+		{
+			url: `http://localhost/api/v1/runs/${runId}/implement-preview`,
+			body: { prId: "p" },
+		},
+	]);
+	expect(
+		await client.publish(runId, {
+			previewHash: "hash",
+			title: "[ABC-1] New entity",
+			body: "line one\nline two",
+		}),
+	).toBe(runId);
+	expect(requests[1]?.body).toEqual({
+		previewHash: "hash",
+		title: "[ABC-1] New entity",
+		body: "line one\nline two",
+	});
+});
+
+it("prints an implementation preview without accepting it", async () => {
+	const dir = await dataDir();
+	const preview = {
+		candidates: [],
+		ticketId: null,
+		slug: "",
+		errors: {},
+		previewHash: "hash",
+	};
+	const requests: string[] = [];
+	const server = createServer((req, res) => {
+		requests.push(req.url ?? "");
+		res.writeHead(200, { "Content-Type": "application/json" });
+		res.end(JSON.stringify(preview));
+	});
+	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+	try {
+		const output: string[] = [];
+		expect(
+			await runCli(["implement", runId, "--pr", "p"], {
+				env: {
+					PAYO_DATA_DIR: dir,
+					NODE_ENV: "test",
+					PAYO_TEST_SERVER_URL: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+				},
+				stdout: (t) => output.push(t),
+				stderr: () => {},
+			}),
+		).toBe(0);
+		expect(requests).toEqual([`/api/v1/runs/${runId}/implement-preview`]);
+		expect(output.join("")).toContain("--confirm");
+	} finally {
+		await new Promise<void>((resolve) => server.close(() => resolve()));
+	}
+});
+
+it("reports missing publication body files without posting", async () => {
+	const dir = await dataDir();
+	const error: string[] = [];
+	expect(
+		await runCli(
+			[
+				"publish",
+				runId,
+				"--confirm",
+				"hash",
+				"--body-file",
+				join(dir, "absent"),
+			],
+			{
+				env: { PAYO_DATA_DIR: dir },
+				stdout: () => {},
+				stderr: (t) => error.push(t),
+			},
+		),
+	).toBe(1);
+	expect(error.join("")).toContain("ENOENT");
+});
+
+it("surfaces stale preview errors without retrying publication", async () => {
+	const request = vi.fn(
+		async () =>
+			new Response(
+				JSON.stringify({ code: "conflict", message: "stale preview" }),
+				{ status: 409 },
+			),
+	);
+	const client = new CliClient(
+		"http://localhost",
+		"secret",
+		request as typeof fetch,
+	);
+	await expect(
+		client.publish(runId, { previewHash: "old" }),
+	).rejects.toMatchObject({ status: 409, message: "stale preview" });
+	expect(request).toHaveBeenCalledOnce();
 });

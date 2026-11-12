@@ -8,7 +8,7 @@ eventually produces one or more pull requests. The implemented Payo flow accepts
 a Jira ticket or direct prompt, creates and reviews a plan, and waits for human
 approval. Explicit implementation then executes one selected PR unit's phases
 with checks, review, bounded repair, and recovery in a retained local worktree;
-it does not push or open PRs. Jira and prompt are explicit
+explicit publication can then push the reviewed SHA and open a draft PR in a linked run. Human PR review and next-PR automation remain future work. Jira and prompt are explicit
 source variants, not auto-detected. Linear is future work. See the [usage guide](usage.md)
 for current behavior.
 

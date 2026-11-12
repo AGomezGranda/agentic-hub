@@ -1,4 +1,7 @@
 import {
+	ExecutionNamingRequest,
+	ImplementPreview,
+	ImplementPreviewRequest,
 	ImplementRequest,
 	PlanRestoreRequest,
 	PlanUpdateRequest,
@@ -139,5 +142,32 @@ export async function implementRun(
 		"POST",
 		(data) => RunIdResponse.parse(data),
 		ImplementRequest.parse(input),
+	);
+}
+
+export async function previewImplementation(
+	token: string,
+	runId: string,
+	input: ImplementPreviewRequest,
+): Promise<ImplementPreview> {
+	return getJson(
+		`/runs/${encodeURIComponent(runId)}/implement-preview`,
+		token,
+		"POST",
+		(data) => ImplementPreview.parse(data),
+		ImplementPreviewRequest.parse(input),
+	);
+}
+export async function correctExecutionNaming(
+	token: string,
+	runId: string,
+	input: ExecutionNamingRequest,
+): Promise<ImplementPreview> {
+	return getJson(
+		`/runs/${encodeURIComponent(runId)}/execution-naming`,
+		token,
+		"POST",
+		(data) => ImplementPreview.parse(data),
+		ExecutionNamingRequest.parse(input),
 	);
 }

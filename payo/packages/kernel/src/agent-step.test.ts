@@ -1,4 +1,3 @@
-import { appendFile, writeFile } from "node:fs/promises";
 import {
 	type AgentEvent,
 	type AgentSpec,
@@ -7,13 +6,19 @@ import {
 } from "@payo/contracts";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import type { AgentRunner } from "./agent.ts";
-import { RETRY_NOTE, runAgentStep, type StepInput } from "./agent-step.ts";
-import { createLimiter, fanOut } from "./fanout.ts";
-import { startRun } from "./run.ts";
-import { openRunLog, type RunLog } from "./run-log.ts";
-import { fold, type RunState } from "./state.ts";
-import { createMemoryRunStore, type RunStore } from "./store.ts";
+import { systemScheduler } from "./adapters/scheduler.ts";
+import type { AgentRunner } from "./application/agent.ts";
+import {
+	RETRY_NOTE,
+	runAgentStep,
+	type Scheduler,
+	type StepInput,
+} from "./application/agent-step.ts";
+import { createLimiter, fanOut } from "./application/fanout.ts";
+import { startRun } from "./application/run.ts";
+import { openRunLog, type RunLog } from "./application/run-log.ts";
+import { fold, type RunState } from "./domain/state.ts";
+import { createMemoryRunStore, type RunStore } from "./index.ts";
 import { sha, testRunInput } from "./testing.ts";
 
 type Session = (signal: AbortSignal) => AsyncIterable<AgentEvent>;
@@ -70,7 +75,7 @@ const money = (amount: number, complete = true): UsageRecord => ({
 	tokensOut: 3,
 	cost: amount,
 	costDetails: {
-		amounts: [{ currency: "USD", basis: "estimated", amount }],
+		amounts: [{ currency: "USD", basis: "estimated", amount: String(amount) }],
 		complete,
 	},
 });
@@ -123,12 +128,65 @@ async function setup(options: { store?: RunStore; limit?: number } = {}) {
 	const log: RunLog = openRunLog(store, started);
 	return {
 		store,
-		deps: { store, log, limiter: createLimiter(options.limit ?? 4) },
+		deps: {
+			scheduler: systemScheduler,
+			store,
+			log,
+			limiter: createLimiter(options.limit ?? 4),
+		},
+	};
+}
+
+function memoryRawLog() {
+	return {
+		path: "/memory/events.jsonl",
+		bytes: "",
+		async read() {
+			return new TextEncoder().encode(this.bytes);
+		},
+		async dispose() {},
 	};
 }
 
 async function stateOf(store: RunStore): Promise<RunState> {
 	return fold(await store.read("r1"));
+}
+
+function controlledScheduler() {
+	const tasks = new Map<number, () => void>();
+	const scheduled = new Map<
+		number,
+		ReturnType<typeof Promise.withResolvers<void>>
+	>();
+	const notification = (ms: number) => {
+		let pending = scheduled.get(ms);
+		if (!pending) {
+			pending = Promise.withResolvers<void>();
+			scheduled.set(ms, pending);
+		}
+		return pending;
+	};
+	const scheduler: Scheduler = {
+		after(ms, task) {
+			tasks.set(ms, task);
+			notification(ms).resolve();
+			return () => {
+				tasks.delete(ms);
+			};
+		},
+		yield: () => Promise.resolve(),
+	};
+	return {
+		scheduler,
+		tasks,
+		async fire(ms: number) {
+			await notification(ms).promise;
+			const task = tasks.get(ms);
+			if (!task) throw new Error(`no pending timer for ${ms}`);
+			tasks.delete(ms);
+			task();
+		},
+	};
 }
 
 describe("runAgentStep", () => {
@@ -147,6 +205,7 @@ describe("runAgentStep", () => {
 		const result = await runAgentStep(deps, stepOf(runner));
 
 		expect(result).toEqual({ outcome: "succeeded", value: { verdict: "ok" } });
+		expect(runner.calls[0]?.rawLogPath).toBeUndefined();
 		const events = await store.read("r1");
 		expect(events.slice(1).map((e) => e.type)).toEqual([
 			"step.started",
@@ -307,34 +366,52 @@ describe("runAgentStep", () => {
 		expect(state.gates.get("escalation:s1")?.status).toBe("open");
 	});
 
-	it("times out an attempt whose runner honours the signal, without a retry", async () => {
+	it("times out an attempt through the injected deadline without a retry", async () => {
 		const { store, deps } = await setup();
-		const runner = scripted(hangs());
-
-		const result = await runAgentStep(
-			deps,
+		const timers = controlledScheduler();
+		const started = Promise.withResolvers<void>();
+		const runner = scripted(async function* (signal) {
+			started.resolve();
+			await untilAborted(signal);
+			yield { type: "message", text: "stopped" };
+		});
+		const running = runAgentStep(
+			{ ...deps, scheduler: timers.scheduler },
 			stepOf(runner, { spec: specFor({ timeoutMs: 20 }) }),
 		);
-
-		expect(result).toEqual({ outcome: "failed" });
+		await started.promise;
+		await timers.fire(20);
+		expect(await running).toEqual({ outcome: "failed" });
 		expect(runner.calls).toHaveLength(1);
 		const state = await stateOf(store);
 		expect(state.attempts.get("a1")?.status).toBe("timed_out");
 		expect(state.gates.get("escalation:s1")?.status).toBe("open");
+		expect(timers.tasks.size).toBe(0);
 	});
 
-	it("times out a deaf runner in time, because the kernel races the stream", async () => {
+	it("bounds a deaf read-only runner's cleanup through the injected scheduler", async () => {
 		const { store, deps } = await setup();
-		const runner = scripted(hangs({ deaf: true }));
-		const started = Date.now();
-
-		await runAgentStep(
-			deps,
+		const timers = controlledScheduler();
+		const started = Promise.withResolvers<void>();
+		const runner = scripted(async function* () {
+			started.resolve();
+			await new Promise<never>(() => {});
+		});
+		let settled = false;
+		const running = runAgentStep(
+			{ ...deps, scheduler: timers.scheduler },
 			stepOf(runner, { spec: specFor({ timeoutMs: 20 }) }),
-		);
-
-		expect(Date.now() - started).toBeLessThan(2000);
+		).then((result) => {
+			settled = true;
+			return result;
+		});
+		await started.promise;
+		await timers.fire(20);
+		expect(settled).toBe(false);
+		await timers.fire(1000);
+		await running;
 		expect((await stateOf(store)).attempts.get("a1")?.status).toBe("timed_out");
+		expect(timers.tasks.size).toBe(0);
 	});
 
 	it("cancels on abort: no retry and no gate", async () => {
@@ -607,7 +684,7 @@ describe("runAgentStep", () => {
 		expect(attempt?.usage).toMatchObject({
 			cost: 0.3,
 			costDetails: {
-				amounts: [{ currency: "USD", basis: "estimated", amount: 0.3 }],
+				amounts: [{ currency: "USD", basis: "estimated", amount: "0.3" }],
 				complete: false,
 			},
 		});
@@ -627,7 +704,7 @@ describe("runAgentStep", () => {
 		expect(attempt?.usage).toMatchObject({
 			cost: 0.35,
 			costDetails: {
-				amounts: [{ currency: "USD", basis: "estimated", amount: 0.35 }],
+				amounts: [{ currency: "USD", basis: "estimated", amount: "0.35" }],
 				complete: false,
 			},
 		});
@@ -797,17 +874,50 @@ describe("runAgentStep", () => {
 		expect((await stateOf(store)).attempts.get("a1")?.status).toBe("timed_out");
 	});
 
+	it.each([false, true])(
+		"preserves the primary outcome when capture cleanup fails (runner fails: %s)",
+		async (fails) => {
+			const { store, deps } = await setup();
+			const primary = new Error("runner failed");
+			const runner = scripted(async function* () {
+				if (fails) throw primary;
+				yield valid;
+			});
+			const result = runAgentStep(
+				{
+					...deps,
+					createRawLog: async () => ({
+						path: "/memory/events.jsonl",
+						read: async () => new Uint8Array(),
+						dispose: async () => {
+							throw new Error("cleanup failed");
+						},
+					}),
+				},
+				stepOf(runner),
+			);
+			if (fails) await expect(result).rejects.toBe(primary);
+			else
+				await expect(result).resolves.toMatchObject({ outcome: "succeeded" });
+			expect((await stateOf(store)).steps.get("s1")?.status).toBe(
+				fails ? "failed" : "succeeded",
+			);
+		},
+	);
+
 	it("captures the runner's raw log before attempt.finished", async () => {
 		const { store, deps } = await setup();
+		const capture = memoryRawLog();
+		const captureDeps = { ...deps, createRawLog: async () => capture };
 		const raw = '{"type":"message_end"}\n{"type":"agent_settled"}\n';
 		const runner = scripted(async function* () {
 			const spec = runner.calls[0];
 			if (spec?.rawLogPath === undefined) throw new Error("no raw log path");
-			await writeFile(spec.rawLogPath, raw);
+			capture.bytes = raw;
 			yield valid;
 		});
 
-		const result = await runAgentStep(deps, stepOf(runner));
+		const result = await runAgentStep(captureDeps, stepOf(runner));
 
 		expect(result.outcome).toBe("succeeded");
 		expect(runner.calls[0]?.correlation).toEqual({
@@ -836,16 +946,20 @@ describe("runAgentStep", () => {
 
 	it("records the raw log when the runner throws, before the failed attempt row", async () => {
 		const { store, deps } = await setup();
+		const capture = memoryRawLog();
+		const captureDeps = { ...deps, createRawLog: async () => capture };
 		const raw = '{"partial":true}\n';
 		const runner = scripted(async function* () {
 			const spec = runner.calls[0];
 			if (spec?.rawLogPath === undefined) throw new Error("no raw log path");
-			await writeFile(spec.rawLogPath, raw);
+			capture.bytes = raw;
 			yield { type: "message", text: "partial" };
 			throw new Error("boom");
 		});
 
-		await expect(runAgentStep(deps, stepOf(runner))).rejects.toThrow("boom");
+		await expect(runAgentStep(captureDeps, stepOf(runner))).rejects.toThrow(
+			"boom",
+		);
 
 		const events = await store.read("r1");
 		const artifactIndex = events.findIndex(
@@ -864,20 +978,22 @@ describe("runAgentStep", () => {
 
 	it("waits for a runner that writes during cleanup", async () => {
 		const { store, deps } = await setup();
+		const capture = memoryRawLog();
+		const captureDeps = { ...deps, createRawLog: async () => capture };
 		const runner = scripted(async function* () {
 			const spec = runner.calls[0];
 			if (spec?.rawLogPath === undefined) throw new Error("no raw log path");
-			await writeFile(spec.rawLogPath, "early\n");
+			capture.bytes = "early\n";
 			try {
 				yield valid;
 				await new Promise<never>(() => {});
 			} finally {
 				await tick(25);
-				await appendFile(spec.rawLogPath, "late\n");
+				capture.bytes += "late\n";
 			}
 		});
 
-		await runAgentStep(deps, stepOf(runner));
+		await runAgentStep(captureDeps, stepOf(runner));
 
 		const recorded = (await store.read("r1")).find(
 			(event) => event.type === "artifact.recorded",
@@ -892,8 +1008,10 @@ describe("runAgentStep", () => {
 
 	it("records no raw artifact when the runner ignores rawLogPath", async () => {
 		const { store, deps } = await setup();
+		const capture = memoryRawLog();
+		const captureDeps = { ...deps, createRawLog: async () => capture };
 
-		await runAgentStep(deps, stepOf(scripted(emits(valid))));
+		await runAgentStep(captureDeps, stepOf(scripted(emits(valid))));
 
 		const rawArtifacts = (await store.read("r1")).filter(
 			(event) =>

@@ -16,6 +16,7 @@ const api = vi.hoisted(() => ({
 	getPlanVersions: vi.fn(),
 	submitPlanUpdate: vi.fn(),
 	implementRun: vi.fn(),
+	previewImplementation: vi.fn(),
 }));
 vi.mock("./api.ts", () => api);
 vi.mock("@web/features/runs/api.ts", () => ({ getRun: api.getRun }));
@@ -534,14 +535,21 @@ it("launches an approved PR, preserves inputs on rejection, and navigates on acc
 		review: { available: false, reason: "missing" },
 	});
 	let resolveLaunch: (value: { runId: string }) => void = () => {};
-	api.implementRun
+	api.previewImplementation
 		.mockRejectedValueOnce(new Error("Configure execution checks"))
-		.mockImplementationOnce(
-			() =>
-				new Promise((resolve) => {
-					resolveLaunch = resolve;
-				}),
-		);
+		.mockResolvedValue({
+			candidates: [],
+			ticketId: null,
+			slug: "",
+			errors: {},
+			previewHash: "hash",
+		});
+	api.implementRun.mockImplementationOnce(
+		() =>
+			new Promise((resolve) => {
+				resolveLaunch = resolve;
+			}),
+	);
 	mount(navigate);
 	await screen.findByRole("heading", { name: "Planned PRs" });
 	expect(
@@ -559,11 +567,19 @@ it("launches an approved PR, preserves inputs on rejection, and navigates on acc
 	expect(screen.getByLabelText("Override base branch")).toHaveValue(
 		" feature ",
 	);
-	await user.click(screen.getByRole("button", { name: "Implement pr2" }));
-	expect(screen.getByRole("button", { name: /starting/i })).toBeDisabled();
+	await user.click(
+		screen.getByRole("button", { name: "Refresh naming preview" }),
+	);
+	await user.click(
+		await screen.findByRole("button", { name: "Confirm implementation" }),
+	);
+	expect(
+		screen.getByRole("button", { name: "Confirm implementation" }),
+	).toBeDisabled();
 	expect(api.implementRun).toHaveBeenLastCalledWith("token", RUN_ID, {
 		prId: "pr2",
 		base: "feature",
+		naming: { previewHash: "hash", ticketId: null, slug: "" },
 	});
 	resolveLaunch({ runId: "accepted-id" });
 	await waitFor(() => expect(navigate).toHaveBeenCalledWith("accepted-id"));
@@ -605,4 +621,23 @@ it("links preview phases to the plan and allows revision while ambiguous phases 
 	expect(
 		screen.queryByRole("button", { name: /start .* locally/i }),
 	).toBeNull();
+});
+
+it("keeps the plan and decisions in the main column and supporting details in context", async () => {
+	const { container } = mount();
+	const context = await screen.findByRole("complementary", {
+		name: "Plan context",
+	});
+	expect(context).toContainElement(
+		screen.getByText("/tmp/payo/runs/run/plan.md"),
+	);
+	expect(context).toContainElement(screen.getByText("Untrusted finding title"));
+	const main = container.querySelector(".workspace-main");
+	expect(main).toContainElement(screen.getByLabelText("Why this approach?"));
+	expect(main).toContainElement(
+		screen.getByRole("region", { name: "Gate actions" }),
+	);
+	expect(container.querySelector(".workspace-summary")).toContainElement(
+		screen.getByRole("navigation", { name: "Plan workspace" }),
+	);
 });

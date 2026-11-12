@@ -36,7 +36,7 @@ export function requireExecutionPorts(deps: ExecutionDeps): {
 		throw new Error(
 			"execution adapters are not configured; writable execution is unavailable",
 		);
-	if (process.platform === "win32")
+	if (!deps.platformSupported)
 		throw new Error("writable execution requires POSIX process-group cleanup");
 	return {
 		runner: deps.runner,

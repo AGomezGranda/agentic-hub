@@ -1,4 +1,11 @@
-import { EventsResponse, type RunEvent, WorkCostTree } from "@payo/contracts";
+import {
+	EventsResponse,
+	PublicationPreview,
+	PublishRequest,
+	type RunEvent,
+	RunIdResponse,
+	WorkCostTree,
+} from "@payo/contracts";
 import { getJson } from "@web/shared/api/client.ts";
 
 export async function getWorkCosts(
@@ -28,5 +35,28 @@ export async function getRunEvents(
 		(data) => EventsResponse.parse(data).events,
 		undefined,
 		signal,
+	);
+}
+
+export async function previewPublication(token: string, runId: string) {
+	return getJson(
+		`/runs/${encodeURIComponent(runId)}/publication-preview`,
+		token,
+		"POST",
+		(data) => PublicationPreview.parse(data),
+		{},
+	);
+}
+export async function publishRun(
+	token: string,
+	runId: string,
+	input: PublishRequest,
+) {
+	return getJson(
+		`/runs/${encodeURIComponent(runId)}/publish`,
+		token,
+		"POST",
+		(data) => RunIdResponse.parse(data),
+		PublishRequest.parse(input),
 	);
 }

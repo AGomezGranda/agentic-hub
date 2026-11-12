@@ -119,7 +119,13 @@ export async function implementPhase(
 		statusDetail: recovery ? "reconciliation-required" : "implementing-phase",
 	});
 	const result = await runAgentStep(
-		{ store: state.deps.store, log: state.log, limiter: deps.limiter },
+		{
+			scheduler: state.deps.scheduler,
+			createRawLog: state.deps.createRawLog,
+			store: state.deps.store,
+			log: state.log,
+			limiter: deps.limiter,
+		},
 		{
 			stepId,
 			stepName: feedback

@@ -9,7 +9,7 @@ export function ExecutionProgress({
 	const final = execution.scope === "final";
 	const running = execution.status === "active";
 	return (
-		<section className="execution-panel" aria-label="Implementation progress">
+		<section className="workspace-panel" aria-label="Implementation progress">
 			<div className="execution-section-title">
 				<h3>Implementation progress</h3>
 				<span>
@@ -36,7 +36,7 @@ export function ExecutionProgress({
 							aria-current={active ? "step" : undefined}
 						>
 							<div className="execution-node-top">
-								<span className="execution-label">Phase {index + 1}</span>
+								<span className="workspace-label">Phase {index + 1}</span>
 								<span aria-hidden="true" className="execution-node-dot" />
 							</div>
 							<h4>{phase.title}</h4>
@@ -53,7 +53,7 @@ export function ExecutionProgress({
 							</p>
 							{receipt ? (
 								<div className="execution-node-receipt">
-									<span className="execution-label">Commit</span>
+									<span className="workspace-label">Commit</span>
 									<code>{receipt.resultCommit}</code>
 								</div>
 							) : null}
@@ -72,7 +72,7 @@ export function ExecutionProgress({
 					aria-current={final && running ? "step" : undefined}
 				>
 					<div className="execution-node-top">
-						<span className="execution-label">Final checkpoint</span>
+						<span className="workspace-label">Final checkpoint</span>
 						<span aria-hidden="true" className="execution-node-dot" />
 					</div>
 					<h4>Final PR review</h4>

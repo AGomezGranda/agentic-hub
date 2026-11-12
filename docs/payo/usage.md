@@ -5,7 +5,7 @@ plan. Approval ends the planning run; an explicit `implement` command creates a
 linked execution run for one selected PR unit. Payo executes its phases
 sequentially in fresh agent contexts, runs the configured checks and mandatory
 implementation reviews, applies bounded repairs, and leaves a reviewed local
-branch/worktree. It does not push, publish a PR, or automatically start another
+branch/worktree. Explicit publication can push that reviewed result and open a draft PR; it does not automatically start another
 PR unit.
 
 Design and roadmap: [engine-design.md](engine-design.md) and
@@ -101,7 +101,7 @@ In the browser, review the Implementation outline before approving. Expand each
 PR to inspect its ordered phases and follow phase links into the plan.
 Missing or ambiguous assignments must be resolved before approval. Approved
 runs open on Plan, where each PR has a local start action and the
-effective base can be changed. The Implementation view keeps completed, current,
+effective base can be changed. Preview naming, choose ticket/slug, then confirm implementation. The Implementation view keeps completed, current,
 and upcoming phase names visible, with final PR review as a separate step.
 It also links back to the source and shows the retained branch, worktree, and
 result commit when reviewed. The separate Code review view shows findings,
@@ -445,7 +445,7 @@ All commands except `serve` and `token` need a running server.
 | `pnpm payo edit <run-id>` | Open the working plan in your editor. |
 | `pnpm payo answer <run-id> <question-id> <text...>` | Record an answer. |
 | `pnpm payo approve <run-id>` | Approve the plan and end the planning run. |
-| `pnpm payo implement <approved-run-id> --pr <pr-id> [--base <ref>]` | Explicitly accept one PR unit and its ordered phases; prints a linked durable execution ID. An optional base ref pins another starting point. |
+| `pnpm payo implement <approved-run-id> --pr <pr-id> [--base <ref>]` | Preview naming for one PR unit without starting execution. Repeat with --confirm, explicit ticket selection and slug to accept; prints a linked durable execution ID. |
 | `pnpm payo request-changes <run-id>` | Send the edited plan back to review. |
 | `pnpm payo plan-update <run-id> <prompt...>` | Revise the current working plan and review it. |
 | `pnpm payo plan-versions <run-id>` | List saved versions. |
@@ -597,7 +597,7 @@ requests.
 
 ## Current limits
 
-- Execution is local only: no GitHub publication, push, PR creation, merge/rebase,
+- Explicit draft publication supports same-repository GitHub.com SSH/HTTPS remotes only. No merge/rebase,
   automatic stacking, or automatic next-PR execution. There is one configured
   repository-wide check suite, not language detection or per-phase command
   selection.
@@ -612,3 +612,45 @@ requests.
 - One local server per configured loopback port (default `7331`).
 - Execution branches/worktrees are retained and are not automatically deleted;
   cleanup is the operator's responsibility after stopping active work.
+
+## Naming confirmation and GitHub draft publication
+
+New executions require a server naming preview and explicit confirmation:
+
+```sh
+pnpm payo implement <source-id> --pr <pr-id> --preview
+pnpm payo implement <source-id> --pr <pr-id> --confirm <preview-hash> --ticket-id ABC-123 --slug create-todo-entity
+# Use --no-ticket for an explicitly ticketless execution; its slug may be omitted.
+pnpm payo publish <execution-id> --preview
+pnpm payo publish <execution-id> --confirm <preview-hash> --title "[ABC-123] Create todo entity" --body-file body.md
+```
+
+Without `--confirm`, implement only previews. Choose among detected ticket candidates,
+enter a manual ticket, or explicitly choose No ticket in the web form. Jira identity
+is fixed. Changes to ticket, slug or base require a refreshed preview. Ticketed
+branches use exactly `ABC-123/three-to-six-words`; subjects and PR titles retain
+the exact `[ABC-123] ` prefix. Ticketless branches use `payo/<execution-id>`.
+Before a workspace exists, `payo execution-naming <execution-id> --slug <slug>`
+previews a correction; repeat with `--confirm <preview-hash>` to save it, then resume.
+Naming becomes immutable after workspace creation.
+
+Settings exposes `[publication]` remote, branch_template, commit_template,
+pr_title_template and pr_body_template, plus `[tools].gh`. Naming templates support
+ticketId and their slug/description token. Body tokens are ticketId, prTitle,
+summary, changes, checks and executionId. Substitution is literal. The engine
+appends its marker separately. Settings changes require server restart; accepted
+executions retain their pinned policy.
+
+In a reviewed execution, choose Preview publication, inspect destination, base/head,
+reviewed SHA, commit subjects and complete title/body, then Create draft PR.
+Preview has no push/PR effects. Acceptance opens the linked publication child;
+its Publication and Activity views show progress, recovery gates and final GitHub URL.
+`status`, `logs -f`, and `resume` also accept that child ID. Restart always gates
+active publication; explicit resume queries remote state before retrying.
+
+Legacy executions without a naming snapshot cannot publish. Dirty/mutated worktrees,
+empty results, conflicting remote branches/PRs and observed target-base movement
+block publication. For base movement, approve a new plan and execution against the
+updated base. The base may still advance concurrently after the last check; normal
+PR review and CI remain necessary. No automatic ready/merge, human-review loop,
+remote cleanup, forks, enterprise setup or next-PR execution is included.

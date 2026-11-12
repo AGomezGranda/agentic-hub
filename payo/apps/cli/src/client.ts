@@ -9,11 +9,16 @@ import {
 	ApiError,
 	DoctorReport,
 	EventsResponse,
+	ExecutionNamingRequest,
+	ImplementPreview,
+	ImplementPreviewRequest,
 	ImplementRequest,
 	PlanRestoreRequest,
 	PlanUpdateRequest,
 	PlanVersionDetail,
 	PlanVersionList,
+	PublicationPreview,
+	PublishRequest,
 	type RunEvent,
 	RunEventSchema,
 	RunIdResponse,
@@ -97,6 +102,47 @@ export class CliClient {
 				`/api/v1/runs/${sourceRunId}/implement`,
 				"POST",
 				body,
+				RunIdResponse,
+			)
+		).runId;
+	}
+
+	async implementPreview(
+		runId: string,
+		input: ImplementPreviewRequest,
+	): Promise<ImplementPreview> {
+		return this.request(
+			`/api/v1/runs/${runId}/implement-preview`,
+			"POST",
+			ImplementPreviewRequest.parse(input),
+			ImplementPreview,
+		);
+	}
+	async executionNaming(
+		runId: string,
+		input: ExecutionNamingRequest,
+	): Promise<ImplementPreview> {
+		return this.request(
+			`/api/v1/runs/${runId}/execution-naming`,
+			"POST",
+			ExecutionNamingRequest.parse(input),
+			ImplementPreview,
+		);
+	}
+	async publicationPreview(runId: string): Promise<PublicationPreview> {
+		return this.request(
+			`/api/v1/runs/${runId}/publication-preview`,
+			"POST",
+			{},
+			PublicationPreview,
+		);
+	}
+	async publish(runId: string, input: PublishRequest): Promise<string> {
+		return (
+			await this.request(
+				`/api/v1/runs/${runId}/publish`,
+				"POST",
+				PublishRequest.parse(input),
 				RunIdResponse,
 			)
 		).runId;

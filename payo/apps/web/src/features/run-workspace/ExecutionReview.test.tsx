@@ -142,6 +142,24 @@ it("keeps checks in the review rail and labels their association with the review
 		onSelectRun: () => {},
 	};
 	const view = render(<ExecutionView {...props} />);
+	const context = screen.getByRole("complementary", {
+		name: "Execution context",
+	});
+	expect(context.children[0]).toContainElement(
+		screen.getByText("Latest checks"),
+	);
+	expect(context.children[1]).toContainElement(
+		screen.getByText("Local workspace"),
+	);
+	view.rerender(<ExecutionView {...props} view="implementation" />);
+	expect(context.children[0]).toContainElement(
+		screen.getByText("Latest checks"),
+	);
+	expect(context.children[1]).toContainElement(
+		screen.getByText("Local workspace"),
+	);
+	view.rerender(<ExecutionView {...props} />);
+
 	expect(
 		within(screen.getByRole("complementary")).getByText("Latest checks"),
 	).toBeVisible();

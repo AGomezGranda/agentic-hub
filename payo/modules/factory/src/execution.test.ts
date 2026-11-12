@@ -18,6 +18,7 @@ import {
 	fold,
 	type RunStore,
 	startRun,
+	systemScheduler,
 } from "@payo/kernel";
 import { describe, expect, it } from "vitest";
 import { readArtifact, savePlanVersion, storeCheckpoint } from "./artifacts.ts";
@@ -725,6 +726,8 @@ async function executionSetup(
 	const scripted = scriptedRunner(outputs, store);
 	const refs = await roleRefs(store);
 	const deps = {
+		platformSupported: true,
+		scheduler: systemScheduler,
 		newId: () => crypto.randomUUID(),
 		store,
 		runner: scripted.runner,
@@ -753,7 +756,7 @@ describe("execution acceptance", () => {
 		const source = await sourceRun(store);
 		const before = await store.read(source.runId);
 		const handle = await beginExecution(
-			{ store, newId: () => crypto.randomUUID() },
+			{ store, scheduler: systemScheduler, newId: () => crypto.randomUUID() },
 			input(),
 		);
 		const runId = handle.log.current().runId;
@@ -805,7 +808,7 @@ describe("execution acceptance", () => {
 		if (laterEvent?.type !== "artifact.recorded")
 			throw new Error("plan version artifact expected");
 		const handle = await beginExecution(
-			{ store, newId: () => crypto.randomUUID() },
+			{ store, scheduler: systemScheduler, newId: () => crypto.randomUUID() },
 			input(),
 		);
 
@@ -824,11 +827,11 @@ describe("execution acceptance", () => {
 		const store = createMemoryRunStore();
 		await sourceRun(store);
 		const first = await beginExecution(
-			{ store, newId: () => crypto.randomUUID() },
+			{ store, scheduler: systemScheduler, newId: () => crypto.randomUUID() },
 			input(),
 		);
 		const second = await beginExecution(
-			{ store, newId: () => crypto.randomUUID() },
+			{ store, scheduler: systemScheduler, newId: () => crypto.randomUUID() },
 			input(),
 		);
 
@@ -838,14 +841,14 @@ describe("execution acceptance", () => {
 		);
 		const runId = first.log.current().runId;
 		const implicit = await beginExecution(
-			{ store, newId: () => crypto.randomUUID() },
+			{ store, scheduler: systemScheduler, newId: () => crypto.randomUUID() },
 			{ ...input(), baseCommit: "advanced" },
 		);
 		expect(implicit.log.current().runId).toBe(runId);
 		expect((await executionConfig(store, runId)).baseCommit).toBe("abc123");
 		await expect(
 			beginExecution(
-				{ store, newId: () => crypto.randomUUID() },
+				{ store, scheduler: systemScheduler, newId: () => crypto.randomUUID() },
 				{ ...input(), baseCommit: "other", explicitBase: true },
 			),
 		).rejects.toMatchObject({
@@ -858,8 +861,14 @@ describe("execution acceptance", () => {
 		const store = createMemoryRunStore();
 		await sourceRun(store);
 		const [first, second] = await Promise.all([
-			beginExecution({ store, newId: () => crypto.randomUUID() }, input()),
-			beginExecution({ store, newId: () => crypto.randomUUID() }, input()),
+			beginExecution(
+				{ store, scheduler: systemScheduler, newId: () => crypto.randomUUID() },
+				input(),
+			),
+			beginExecution(
+				{ store, scheduler: systemScheduler, newId: () => crypto.randomUUID() },
+				input(),
+			),
 		]);
 		expect(second.log.current().runId).toBe(first.log.current().runId);
 		expect(
@@ -871,7 +880,7 @@ describe("execution acceptance", () => {
 		const store = createMemoryRunStore();
 		await expect(
 			beginExecution(
-				{ store, newId: () => crypto.randomUUID() },
+				{ store, scheduler: systemScheduler, newId: () => crypto.randomUUID() },
 				input("missing"),
 			),
 		).rejects.toMatchObject({ code: "invalid_request" });
@@ -879,7 +888,7 @@ describe("execution acceptance", () => {
 		await sourceRun(store, { runId: "active", ended: false });
 		await expect(
 			beginExecution(
-				{ store, newId: () => crypto.randomUUID() },
+				{ store, scheduler: systemScheduler, newId: () => crypto.randomUUID() },
 				input("active"),
 			),
 		).rejects.toThrow(/not been approved/);
@@ -887,7 +896,7 @@ describe("execution acceptance", () => {
 		await sourceRun(store, { runId: "escalated", outcome: "escalated" });
 		await expect(
 			beginExecution(
-				{ store, newId: () => crypto.randomUUID() },
+				{ store, scheduler: systemScheduler, newId: () => crypto.randomUUID() },
 				input("escalated"),
 			),
 		).rejects.toThrow(/not been approved/);
@@ -895,19 +904,19 @@ describe("execution acceptance", () => {
 		await sourceRun(store, { runId: "approved" });
 		await expect(
 			beginExecution(
-				{ store, newId: () => crypto.randomUUID() },
+				{ store, scheduler: systemScheduler, newId: () => crypto.randomUUID() },
 				{ ...input("approved"), prId: "missing" },
 			),
 		).rejects.toMatchObject({ code: "not_found" });
 		await expect(
 			beginExecution(
-				{ store, newId: () => crypto.randomUUID() },
+				{ store, scheduler: systemScheduler, newId: () => crypto.randomUUID() },
 				{ ...input("approved"), prId: "pr-empty" },
 			),
 		).rejects.toThrow(/no phases/);
 		await expect(
 			beginExecution(
-				{ store, newId: () => crypto.randomUUID() },
+				{ store, scheduler: systemScheduler, newId: () => crypto.randomUUID() },
 				{ ...input("approved"), checks: [] },
 			),
 		).rejects.toMatchObject({ code: "invalid_request" });
@@ -921,7 +930,7 @@ describe("execution acceptance", () => {
 		});
 
 		const handle = await beginExecution(
-			{ store, newId: () => crypto.randomUUID() },
+			{ store, scheduler: systemScheduler, newId: () => crypto.randomUUID() },
 			input(),
 		);
 
@@ -933,7 +942,10 @@ describe("execution acceptance", () => {
 		const store = createMemoryRunStore();
 		await sourceRun(store);
 		await expect(
-			openExecution({ store, newId: () => crypto.randomUUID() }, "source-run"),
+			openExecution(
+				{ store, scheduler: systemScheduler, newId: () => crypto.randomUUID() },
+				"source-run",
+			),
 		).rejects.toThrow(/not an execution run/);
 	});
 });
@@ -2490,7 +2502,7 @@ describe("execution lifecycle", () => {
 		const store = createMemoryRunStore();
 		await sourceRun(store);
 		const handle = await beginExecution(
-			{ store, newId: () => crypto.randomUUID() },
+			{ store, scheduler: systemScheduler, newId: () => crypto.randomUUID() },
 			input(),
 		);
 		await expect(

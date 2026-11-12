@@ -353,3 +353,35 @@ it("keeps a plan and its PR together across statuses, grouping modes, and missin
 		screen.getByRole("link", { name: /PR workspace PR-1/ }),
 	).toHaveAttribute("href", `/runs/${RUN_B}`);
 });
+
+it("groups publication children with their source planning run", () => {
+	const parent = runSummary(RUN_A);
+	const child = {
+		...runSummary(RUN_B),
+		publication: {
+			sourceRunId: RUN_A,
+			executionRunId: RUN_C,
+			stage: "Push" as const,
+			branch: "branch",
+			reviewedCommit: "sha",
+			target: {
+				host: "github.com" as const,
+				owner: "owner",
+				name: "repo",
+				repositoryId: "1",
+				baseBranch: "main",
+				baseCommit: "a".repeat(40),
+			},
+			pr: null,
+			reason: null,
+		},
+	};
+	render(
+		<RunList runs={[child, parent]} isPending={false} onSelect={() => {}} />,
+	);
+	expect(screen.getByText("1 loaded work items")).toBeVisible();
+	expect(screen.getByRole("link", { name: /Publication/ })).toHaveAttribute(
+		"href",
+		`/runs/${RUN_B}`,
+	);
+});

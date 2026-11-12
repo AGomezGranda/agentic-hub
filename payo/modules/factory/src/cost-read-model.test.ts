@@ -70,7 +70,7 @@ function usageOf(spend: Spend): UsageRecord {
 				{
 					currency: spend.currency ?? "USD",
 					basis: spend.basis ?? "estimated",
-					amount: spend.amount,
+					amount: String(spend.amount),
 				},
 			],
 			complete: spend.complete ?? true,
@@ -126,7 +126,7 @@ async function writeRun(
 }
 
 const usd = (amount: number, basis: CostAmount["basis"] = "estimated") =>
-	({ currency: "USD", basis, amount }) satisfies CostAmount;
+	({ currency: "USD", basis, amount: String(amount) }) satisfies CostAmount;
 
 const stepStarted = (stepId: string): RunEventBody => ({
 	type: "step.started",
@@ -289,7 +289,7 @@ describe("readWorkCosts", () => {
 
 		expect(tree.total).toEqual({
 			amounts: [
-				{ currency: "EUR", basis: "provider-reported", amount: 2 },
+				{ currency: "EUR", basis: "provider-reported", amount: "2" },
 				usd(1),
 			],
 			coverage: "partial",

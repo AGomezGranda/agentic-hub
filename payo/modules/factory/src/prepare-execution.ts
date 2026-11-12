@@ -134,26 +134,30 @@ export async function prepareExecution(
 		reviewer: roleSettings(options.roles.reviewer),
 		verifier: roleSettings(options.roles.verifier),
 	};
-	return beginExecution(deps, {
-		sourceRunId,
-		naming: input.naming,
-		policy: options.publication,
-		prId: input.prId,
-		baseBranch: input.base,
-		baseCommit: pinnedBase,
-		explicitBase: input.base !== undefined,
-		checks: options.checks,
-		roles: roleMap,
-		roleArtifacts,
-		roleProvenance: Object.fromEntries(
-			Object.entries(sources).map(([name, source]) => [
-				name,
-				{
-					path: source.path,
-					sha: source.sha,
-				},
-			]),
-		),
-		maxConcurrentAgents: options.maxConcurrentAgents,
-	});
+	return beginExecution(
+		deps,
+		{
+			sourceRunId,
+			naming: input.naming,
+			policy: options.publication,
+			prId: input.prId,
+			baseBranch: input.base,
+			baseCommit: pinnedBase,
+			explicitBase: input.base !== undefined,
+			checks: options.checks,
+			roles: roleMap,
+			roleArtifacts,
+			roleProvenance: Object.fromEntries(
+				Object.entries(sources).map(([name, source]) => [
+					name,
+					{
+						path: source.path,
+						sha: source.sha,
+					},
+				]),
+			),
+			maxConcurrentAgents: options.maxConcurrentAgents,
+		},
+		signal,
+	);
 }

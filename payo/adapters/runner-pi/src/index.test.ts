@@ -193,7 +193,7 @@ describe("mapPiRecord", () => {
 				tokensOut: 5,
 				cost: 0.003,
 				costDetails: {
-					amounts: [{ currency: "USD", basis: "estimated", amount: 0.003 }],
+					amounts: [{ currency: "USD", basis: "estimated", amount: "0.003" }],
 					complete: false,
 				},
 			},
@@ -205,7 +205,7 @@ describe("mapPiRecord", () => {
 				tokensOut: 5,
 				cost: 0.003,
 				costDetails: {
-					amounts: [{ currency: "USD", basis: "estimated", amount: 0.003 }],
+					amounts: [{ currency: "USD", basis: "estimated", amount: "0.003" }],
 					complete: true,
 				},
 			},
@@ -225,7 +225,7 @@ describe("mapPiRecord", () => {
 				tokensOut: 5,
 				cost: 0.003,
 				costDetails: {
-					amounts: [{ currency: "USD", basis: "estimated", amount: 0.003 }],
+					amounts: [{ currency: "USD", basis: "estimated", amount: "0.003" }],
 					complete: true,
 				},
 			},
@@ -416,7 +416,7 @@ describe("mapPiRecord cost accounting", () => {
 
 		expect(snapshots).toHaveLength(1);
 		expect(snapshots[0]?.costDetails?.amounts).toEqual([
-			{ currency: "USD", basis: "estimated", amount: 0.005 },
+			{ currency: "USD", basis: "estimated", amount: "0.005" },
 		]);
 		expect(snapshots[0]?.costDetails?.complete).toBe(false);
 	});
@@ -427,7 +427,7 @@ describe("mapPiRecord cost accounting", () => {
 		const [snapshot] = usageEvents(mapPiRecord(assistant("gap"), state));
 
 		expect(snapshot?.costDetails).toEqual({
-			amounts: [{ currency: "USD", basis: "estimated", amount: 0.002 }],
+			amounts: [{ currency: "USD", basis: "estimated", amount: "0.002" }],
 			complete: false,
 		});
 		expect(snapshot?.cost).toBe("unknown");
@@ -441,7 +441,7 @@ describe("mapPiRecord cost accounting", () => {
 		);
 
 		expect(snapshot?.costDetails?.amounts).toEqual([
-			{ currency: "USD", basis: "estimated", amount: 0.004 },
+			{ currency: "USD", basis: "estimated", amount: "0.004" },
 		]);
 		expect(snapshot?.costDetails?.complete).toBe(false);
 	});
@@ -466,8 +466,8 @@ describe("mapPiRecord cost accounting", () => {
 		expect(usageEvents(events)[0]).toMatchObject({
 			costDetails: {
 				amounts: [
-					{ currency: "USD", basis: "estimated", amount: 0.002 },
-					{ currency: "USD", basis: "provider-reported", amount: 0.003 },
+					{ currency: "USD", basis: "estimated", amount: "0.002" },
+					{ currency: "USD", basis: "provider-reported", amount: "0.003" },
 				],
 				complete: false,
 			},
@@ -485,14 +485,14 @@ describe("mapPiRecord cost accounting", () => {
 		);
 
 		expect(owned?.costDetails).toEqual({
-			amounts: [{ currency: "USD", basis: "estimated", amount: 0 }],
+			amounts: [{ currency: "USD", basis: "estimated", amount: "0" }],
 			complete: false,
 		});
 		expect(events[0]).toEqual({
 			type: "usage",
 			usage: expect.objectContaining({
 				costDetails: {
-					amounts: [{ currency: "USD", basis: "estimated", amount: 0 }],
+					amounts: [{ currency: "USD", basis: "estimated", amount: "0" }],
 					complete: true,
 				},
 			}),
@@ -608,7 +608,7 @@ describe("mapPiRecord cost accounting", () => {
 		);
 
 		const final = usageEvents(events).at(-1);
-		expect(final?.costDetails?.amounts[0]?.amount).toBeCloseTo(0.0035);
+		expect(final?.costDetails?.amounts[0]?.amount).toBe(String(0.0035));
 		expect(final?.costDetails?.amounts).toEqual([
 			expect.objectContaining({ currency: "USD", basis: "estimated" }),
 		]);
@@ -634,7 +634,7 @@ describe("mapPiRecord cost accounting", () => {
 				type: "usage",
 				usage: expect.objectContaining({
 					costDetails: {
-						amounts: [{ currency: "USD", basis: "estimated", amount: 0.002 }],
+						amounts: [{ currency: "USD", basis: "estimated", amount: "0.002" }],
 						complete: false,
 					},
 				}),
@@ -652,7 +652,7 @@ describe("mapPiRecord cost accounting", () => {
 			type: "usage",
 			usage: expect.objectContaining({
 				costDetails: {
-					amounts: [{ currency: "USD", basis: "estimated", amount: 0.002 }],
+					amounts: [{ currency: "USD", basis: "estimated", amount: "0.002" }],
 					complete: false,
 				},
 			}),
@@ -668,7 +668,7 @@ describe("mapPiRecord cost accounting", () => {
 		mapPiRecord(assistant("second", nativeUsage(1, 1, 0.003)), state);
 
 		expect(first?.costDetails?.amounts).toEqual([
-			{ currency: "USD", basis: "estimated", amount: 0.002 },
+			{ currency: "USD", basis: "estimated", amount: "0.002" },
 		]);
 	});
 
@@ -685,7 +685,7 @@ describe("mapPiRecord cost accounting", () => {
 			type: "usage",
 			usage: expect.objectContaining({
 				costDetails: {
-					amounts: [{ currency: "USD", basis: "estimated", amount: 0.002 }],
+					amounts: [{ currency: "USD", basis: "estimated", amount: "0.002" }],
 					complete: true,
 				},
 			}),
@@ -918,8 +918,8 @@ describe("createPiRunner", () => {
 			["USD", "estimated"],
 			["USD", "provider-reported"],
 		]);
-		expect(final?.costDetails?.amounts[0]?.amount).toBeCloseTo(0.0035);
-		expect(final?.costDetails?.amounts[1]?.amount).toBeCloseTo(0.004);
+		expect(final?.costDetails?.amounts[0]?.amount).toBe(String(0.0035));
+		expect(final?.costDetails?.amounts[1]?.amount).toBe(String(0.004));
 		expect(final?.costDetails?.complete).toBe(true);
 		expect(final?.tokensIn).toBe(38);
 		expect(final?.tokensOut).toBe(16);

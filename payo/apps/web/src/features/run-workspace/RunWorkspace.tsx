@@ -4,6 +4,7 @@ import { type ReactNode, useState } from "react";
 import { ActivityTimeline } from "./ActivityTimeline.tsx";
 import { CostPanel } from "./CostPanel.tsx";
 import { ExecutionView } from "./ExecutionView.tsx";
+import { PublicationView } from "./PublicationView.tsx";
 import { StageStrip } from "./StageStrip.tsx";
 import { SwarmView } from "./SwarmView.tsx";
 import { useRunActivity } from "./useRunActivity.ts";
@@ -21,7 +22,13 @@ export function RunWorkspace({
 	onSelectRun: (runId: string) => void;
 }) {
 	const [view, setView] = useState<
-		"swarm" | "decision" | "activity" | "execution" | "code-review" | null
+		| "swarm"
+		| "decision"
+		| "activity"
+		| "execution"
+		| "code-review"
+		| "publication"
+		| null
 	>(null);
 	const { run, history, connection, connectionError, events } = useRunActivity(
 		token,
@@ -38,17 +45,20 @@ export function RunWorkspace({
 	if (!run.data) return <WorkspaceMessage>Run not found.</WorkspaceMessage>;
 
 	const execution = run.data.execution;
+	const publication = run.data.publication;
 	const approved =
 		run.data.status === "ended" && run.data.outcome === "approved";
 	const selectedView =
 		view ??
-		(execution
-			? execution.scope === "final"
-				? "code-review"
-				: "execution"
-			: approved
-				? "decision"
-				: "swarm");
+		(publication
+			? "publication"
+			: execution
+				? execution.scope === "final"
+					? "code-review"
+					: "execution"
+				: approved
+					? "decision"
+					: "swarm");
 	const item = run.data.workItem;
 	const statusLabel =
 		connection === "loading"
@@ -76,9 +86,11 @@ export function RunWorkspace({
 				<div className="flex flex-wrap items-start justify-between gap-4">
 					<div className="min-w-0">
 						<p className="mb-2 text-[10px] font-bold tracking-[0.14em] text-[var(--muted)]">
-							{execution
-								? `PR WORKSPACE · ${execution.prId}`
-								: "PLAN WORKSPACE"}
+							{publication
+								? "PUBLICATION WORKSPACE"
+								: execution
+									? `PR WORKSPACE · ${execution.prId}`
+									: "PLAN WORKSPACE"}
 						</p>
 						<h1 className="break-words text-2xl font-semibold tracking-tight sm:text-3xl">
 							{item?.title ?? "Work item unresolved"}
@@ -91,7 +103,7 @@ export function RunWorkspace({
 							Base {run.data.baseBranch}
 						</p>
 					</div>
-					<div className="flex items-center gap-2">
+					<div className="flex flex-wrap items-center gap-2">
 						<span
 							aria-live="polite"
 							className={`rounded-sm px-3 py-1.5 text-xs font-semibold ${connection === "connected" ? "bg-[var(--success-surface)] text-[var(--status-good)]" : isConnectionAlert ? "bg-[var(--danger-surface)] text-[var(--danger)]" : "bg-[var(--surface-raised)] text-[var(--muted)]"}`}
@@ -132,7 +144,7 @@ export function RunWorkspace({
 						{connectionError}
 					</p>
 				) : null}
-				{!execution && (
+				{!execution && !publication && (
 					<div className="mt-5">
 						<StageStrip stage={run.data.stage} />
 					</div>
@@ -153,15 +165,21 @@ export function RunWorkspace({
 								className="font-semibold underline"
 								onClick={() =>
 									setView(
-										execution
-											? execution.scope === "final"
-												? "code-review"
-												: "execution"
-											: "decision",
+										publication
+											? "publication"
+											: execution
+												? execution.scope === "final"
+													? "code-review"
+													: "execution"
+												: "decision",
 									)
 								}
 							>
-								{execution ? "Open PR workspace" : "Review plan"}
+								{publication
+									? "Open publication"
+									: execution
+										? "Open PR workspace"
+										: "Review plan"}
 							</button>
 						</div>
 					)}
@@ -172,18 +190,30 @@ export function RunWorkspace({
 				className="flex flex-wrap gap-1 border-b border-[var(--line)]"
 			>
 				{(
-					(execution
+					(publication
 						? [
-								["execution", "Implementation"],
-								["code-review", "Code review"],
+								["publication", "Publication"],
 								["activity", "Activity view"],
 							]
-						: [
-								["swarm", "Swarm view"],
-								["decision", "Plan"],
-								["activity", "Activity view"],
-							]) as readonly (readonly [
-						"swarm" | "decision" | "activity" | "execution" | "code-review",
+						: execution
+							? [
+									["execution", "Implementation"],
+									["code-review", "Code review"],
+									["activity", "Activity view"],
+								]
+							: [
+									["swarm", "Swarm view"],
+									["decision", "Plan"],
+									["activity", "Activity view"],
+								]) as readonly (readonly [
+						(
+							| "swarm"
+							| "decision"
+							| "activity"
+							| "execution"
+							| "code-review"
+							| "publication"
+						),
 						string,
 					])[]
 				).map(([value, label]) => (
@@ -198,8 +228,18 @@ export function RunWorkspace({
 					</button>
 				))}
 			</nav>
-			{(selectedView === "execution" || selectedView === "code-review") &&
-			execution ? (
+			{selectedView === "publication" && publication ? (
+				<PublicationView
+					token={token}
+					runId={runId}
+					publication={publication}
+					canResume={run.data.openGates.some((g) =>
+						g.allowedCommands.includes("resume"),
+					)}
+					onRefresh={() => run.refetch()}
+				/>
+			) : (selectedView === "execution" || selectedView === "code-review") &&
+				execution ? (
 				<ExecutionView
 					activity={
 						history.isPending ? (
@@ -245,7 +285,7 @@ export function RunWorkspace({
 				)
 			) : (
 				<>
-					{!execution && (
+					{!execution && !publication && (
 						<div hidden={selectedView === "activity"}>
 							<PlanReview
 								token={token}

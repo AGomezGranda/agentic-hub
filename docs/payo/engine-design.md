@@ -5,7 +5,7 @@ and SQLite adapters are wired into the server, and the React web UI is
 implemented. The factory plans and reviews work, then waits for explicit human
 approval. A separate linked execution run can sequentially implement every
 phase of one selected PR unit, run checks and mandatory review, perform bounded
-repairs, and leave a reviewed local branch. It does not push or create PRs. Use
+repairs, and leave a reviewed local branch. Explicit publication creates a separate linked run for create-only push and GitHub draft PR creation. Use
 the [usage guide](usage.md) for supported behavior and the
 [roadmap](implementation-roadmap.md) for planning status. It turns the [agentic factory](agentic-factory.md) vision into the first
 workflow module of the [local agent workbench](high-level-architecture.md). Where
@@ -62,6 +62,12 @@ The current code implements `AgentRunner`, `WorkItemSource`, planning
 `Workspace`, execution-only `ExecutionWorkspace`, `Checks`, and `RunStore` in
 `packages/kernel`, with real adapters under `adapters/`. GitHub `CodeHost`
 operations remain outside this slice.
+
+Inside `packages/kernel/src`, `domain/` holds deterministic lifecycle, usage,
+cost and artifact rules; `application/` holds orchestration and its owned ports;
+`adapters/` holds the memory store and real scheduler. Public `@payo/kernel`
+exports remain stable. Server composition injects scheduling for attempt deadlines,
+cooperative yields and read-only cleanup grace periods.
 
 Inside `modules/factory/src`, `domain/` holds pure planning/execution rules,
 `planning/` and `execution/` own their lifecycle flows, and `infrastructure/plans.ts`
@@ -167,6 +173,13 @@ By default, data lives in `~/.payo/`: `payo.db` and `artifacts/`; `[paths].data_
 
 Usage is a replacement snapshot for the whole attempt, emitted before the terminal event; adapters accumulate native per-call deltas first. Optional `costDetails` holds cumulative subtotals grouped by `(currency, basis)` plus a `complete` flag. A settled result or native error can keep the adapter's completeness; cancellation, timeouts, interruption, thrown validation, or a stream that ends without a result make the money incomplete. A missing report keeps earlier known subtotals; it never becomes zero.
 
+Qualified monetary `amount` values are decimal strings with up to 12 fractional
+digits. Provider numbers and historical numeric event amounts are converted with
+half-up rounding at ingress; bucket addition uses exact integer arithmetic at that
+scale. Historical logs are read without rewriting them. API clients receive decimal
+strings; the web UI converts only for display. The legacy scalar `usage.cost` remains
+readable and does not contribute to qualified totals.
+
 The cost tree is work → runs → steps → attempts, derived from attempts rather than persisted as parent totals. `attempts` counts every started attempt, including failed and retried work. Coverage is `complete` when every included attempt has complete qualified amounts, `partial` when known subtotals accompany incomplete attempts, and `unknown` when nothing usable was reported. Legacy records without `costDetails` remain readable, but their scalar cost has no currency or basis and contributes no qualified total. `AttemptRecord.model` records the requested model, not billing provenance, and reported cost is not an invoice guarantee.
 
 `projectRunCosts` (kernel) projects one run log; `readWorkCosts` (factory) combines a planning run with every stored execution child. Both are read-time views: newly created children appear on the next query, and each run reports the `asOfSeq` it included. Discovery reads logs without recovering, scheduling, or reading artifacts.
@@ -235,8 +248,7 @@ can run code with the server user's permissions and inherited environment.
 Worktree isolation is not filesystem, process, network, or credential
 confinement. Payo retains branches/worktrees on all outcomes and owns local
 phase/final commits; the operator owns cleanup after active work and child
-processes have stopped. There are no push, GitHub, PR-creation, merge, or
-automatic next-PR operations in this slice.
+processes have stopped. Explicit publication uses kernel RepositoryPublication and CodeHost ports, constructed by the server and implemented by Git and gh adapters. Durable checkpoints record intent before effects; restart gates require explicit resume and query remote facts before retry. Merge and automatic next-PR operations remain deferred.
 
 Jira requests are resolved by the Jira adapter; prompt requests resolve in the
 server without invoking `acli`. A Jira login is required for Jira runs, not for
