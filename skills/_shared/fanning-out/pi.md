@@ -19,13 +19,9 @@ just because it runs in parallel. Spawn as many as genuinely apply; there
 is no arbitrary cap. Fanning out wider buys wall-clock, not lower total
 tokens — more children cost more tokens in total, in exchange for running
 at once instead of in sequence. A child's `path:line` claim is
-a lead, not evidence: verify it per this skill's own verification tiers
-before writing anything down.
+a lead, not evidence: verify material findings against source and the
+applicable review contract before reporting them.
 
-Dispatch children with `outputMode: "file-only"` and read results from
-their `output:` files: the chat response is a pointer, not the findings.
-For a spot-check-tier claim the short answer at the top of the file is
-enough; for a load-bearing claim — anything a top-line recommendation or
-the document's answer rests on — read the whole file. A child's output
-file is its single final message verbatim. If a short answer is too thin
-to judge on its own, treat that as the finding and probe it yourself.
+Dispatch children with outputMode: "file-only" and read their output files;
+the chat response is a pointer. Read the evidence supporting findings you
+publish; summaries alone do not establish correctness.

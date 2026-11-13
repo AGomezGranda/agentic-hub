@@ -1,7 +1,7 @@
 import type { AgentInput, AgentSpec, ArtifactRef } from "@payo/contracts";
 import type { RunStore } from "@payo/kernel";
 import { readArtifact } from "./artifacts.ts";
-import { architectureRubricPaths } from "./roles.ts";
+import { architectureRubricPaths, reviewContractPath } from "./roles.ts";
 import type { RoleSource } from "./types.ts";
 
 const OUTPUT_FORMAT =
@@ -385,7 +385,7 @@ function resourcesForLens(
 	lens: ImplementationLens,
 	resources: Record<string, string>,
 ): Array<[string, string]> {
-	const allowed = new Set<string>();
+	const allowed = new Set<string>([reviewContractPath]);
 	if (lens === "architecture") {
 		allowed.add("skills/architecture-audit/SKILL.md");
 		for (const path of architectureRubricPaths) allowed.add(path);

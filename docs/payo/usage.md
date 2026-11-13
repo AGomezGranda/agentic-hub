@@ -17,10 +17,9 @@ Design and roadmap: [engine-design.md](engine-design.md) and
 - Real mode: POSIX (macOS/Linux), a logged-in `pi` for each configured role
   provider, and a target repository whose base branch contains `skills/create-plan/SKILL.md`,
   `skills/review-plan/SKILL.md`, `skills/review-plan/references/lenses.md`,
-  the four `skills/architecture-audit/references/*.md` files (`standard.md`,
-  `boundaries.md`, `responsibilities.md`, `structure.md`), and the six
-  `skills/code-quality-audit/references/*.md` files (`solid.md`, `dry.md`,
-  `kiss.md`, `typing.md`, `dependency-injection.md`, `errors.md`). `payo doctor`
+  architecture references (standard.md, checks.md), code-quality references
+  (checks.md), and skills/_shared/review.md. The review.md files link to
+  skills/_shared/review.md; preserve that target when copying sources. `payo doctor`
   reports missing planning sources. Each of the four planning roles must resolve
   a model from TOML or the legacy model environment variables. The optional
   implementer model is required only when

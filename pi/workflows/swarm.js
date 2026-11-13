@@ -9,10 +9,10 @@ const S = "skills/";
 const LENSES = [
   { key: "plan-conformance", brief: "Compare the diff to the plan phase: missing or half-done items, changes the plan does not call for, success criteria unmet, undocumented deviations. Requires the plan arg." },
   { key: "correctness", brief: "Logic bugs, unhandled edge cases, regressions, error paths that lose data. Judge from the code; no skill file." },
-  { key: "architecture", brief: "Apply the boundaries, responsibilities and structure lenses strictly against " + S + "architecture-audit/references/standard.md (layers, DDD, DI/composition root, folder layout). Read " + S + "architecture-audit/SKILL.md and its references/ first. The existing structure is under audit, not the baseline: a widespread violation is one grouped finding citing the rule ID. Use the scout's checker output and tree; derive other edges with grep. List unenforced standard rules as enforcement gaps." },
+  { key: "architecture", brief: "Read " + S + "architecture-audit/SKILL.md and references/checks.md. Resolve the governing architecture contract as the skill directs. Audit boundaries, ownership and placement; inspect missing edges yourself." },
   { key: "quality", brief: "Apply SOLID, DI, DRY, KISS, typing and error-handling dimensions. Read " + S + "code-quality-audit/SKILL.md and its references/ first. Judge against the rubrics, not the repo's conventions." },
   { key: "tests", brief: "Is risky changed code untested, or are tests weak, flaky or mis-leveled? Read " + S + "testing-strategy/SKILL.md first." },
-  { key: "simplicity", brief: "Over-engineering, dead code, needless abstraction, and what can be deleted. Never flag seams " + S + "architecture-audit/references/standard.md requires for the scope's Applicability class (layers for domain and CRUD services; ports for side effects and a composition root everywhere). No other skill file is required." },
+  { key: "simplicity", brief: "Read " + S + "code-quality-audit/references/checks.md, particularly KISS. Find unnecessary abstraction and work; preserve seams required by the adopted architecture contract." },
   { key: "security", brief: "Trust-boundary validation, injection, secrets, authz, unsafe deserialization; and what breaks under load (unbounded loops, N+1, blocking I/O). Judge from the code." },
 ];
 const wanted = args.lenses || LENSES.filter((l) => plan || l.key !== "plan-conformance").map((l) => l.key);
@@ -25,20 +25,19 @@ const scout = await runs.run("scout-r" + round, {
     "Return under 250 lines: (1) files in scope with a one-line role each; (2) entry points and public interfaces; " +
     "(3) module boundaries and declared rules (ADRs, import contracts, AGENTS.md/CLAUDE.md); (4) the exact test and lint commands; " +
     "(5) the source tree to depth 4 (directories only, with file counts) and the output of any configured architecture checker (lint-imports, depcruise, eslint boundaries), or `none configured`; " +
-    "(6) if the scope is a diff, run `git status --short`, `git diff` and `git diff main...HEAD` (or the repo's default branch) and include the changed hunks verbatim, trimmed to the riskiest 400 lines.",
+    "(6) resolve the exact requested diff: for uncommitted work use git status --short, git diff HEAD and read untracked files; for a branch diff use its explicit base. Do not add committed history to a local review. Include relevant hunks and list omitted areas for reviewers to inspect.",
 });
 if (!scout.ok) return { failed: "scout", output: scout.output };
 
 const rules = "\n\nRules: READ-ONLY, never edit or run mutating commands, never spawn agents. Stay inside the scope. " +
-  "Report at most 8 findings, except that every violation of a target-standard rule is reported (systemic ones grouped once). Evidence only (no speculation). " +
-  "One block per finding: ID (unique), severity P0/P1/P2 by consequence, confidence, location file:line, violated rule ID when one applies, verbatim excerpt, consequence, counter-evidence you checked, smallest fix. " +
-  "If clean, write exactly `No issues found. Checked: <what>. Solid because: <one line>.` An unchecked area is never reported as clean.";
+  "Read skills/_shared/review.md for finding, severity and coverage requirements. Report all confirmed findings, grouping systemic issues. " +
+  "Use the shared contract and include coverage with remaining probes; a shortlist is not complete coverage.";
 
 const lenses = LENSES.filter((l) => wanted.indexOf(l.key) >= 0);
 const reviews = await runs.all(lenses.map((l) => ({
   key: l.key + "-r" + round,
   label: "Review " + l.key,
-  agent: "reviewer",
+  agent: "audit-reviewer",
   output: "swarm/r" + round + "-" + l.key + ".md",
   task: "Lens: " + l.key + ". " + l.brief + "\nScope: " + scope + plan + "\n\nScout map:\n" + scout.output + rules,
 })));
@@ -47,9 +46,9 @@ const reports = reviews.map((r, i) => "## Lens " + lenses[i].key + (r.ok ? "" : 
 
 const verdict = await runs.run("verify-r" + round, {
   label: "Verify and rank findings",
-  agent: "reviewer",
+  agent: "audit-reviewer",
   output: "swarm/r" + round + "-verified.md",
-  task: "Independent verifier. Below are findings from parallel lens reviewers. Scope: " + scope + ".\n" +
+  task: "Read skills/_shared/review.md. Independent verifier. Below are findings from parallel lens reviewers. Scope: " + scope + ".\n" +
     "For EVERY finding: open the cited file:line yourself and check the excerpt and claim against current source. Merge duplicates across lenses (same file:line and rule ID). " +
     "Classify each as BLOCKER (concrete failure/repro/contract break), NON-BLOCKER (real, outside this slice), STALE, INVALID (cite the contradicting source), or SPECULATIVE. " +
     "Output: (1) a ranked table `ID | class | severity | file:line | one-line fix`; (2) accepted findings (BLOCKER + worthwhile NON-BLOCKER) grouped into fix batches, each batch one seam with the files it owns so one writer can take it; " +

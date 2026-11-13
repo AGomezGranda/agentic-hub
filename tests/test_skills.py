@@ -116,10 +116,11 @@ def test_claude_branch_forbids_nesting() -> None:
 
 
 FANOUT_ROSTER = {
-    "code-quality-audit": "cq-dimension",
-    "architecture-audit": "arch-lens",
-    "testing-strategy": "test-level",
-    "review-plan": "plan-lens",
+    "code-quality-audit": "audit-reviewer",
+    "architecture-audit": "audit-reviewer",
+    "testing-strategy": "audit-reviewer",
+    "review-plan": "audit-reviewer",
+    "review-implementation": "audit-reviewer",
     "research-codebase": "repo-scout",
     "create-plan": "repo-scout",
     "remove-comment-slop": "comment-compressor",
@@ -138,25 +139,6 @@ def test_fanout_roster_line_present_per_skill() -> None:
         roster_line = text[heading_at:marker_at]
         assert f"`{agent}`" in roster_line, (
             f"{name}: fan-out roster line missing bundled agent `{agent}`"
-        )
-
-
-MAP_DELEGATION_SKILLS = ("testing-strategy", "code-quality-audit", "architecture-audit")
-
-
-def test_map_phase_delegates_to_scout() -> None:
-    """Phase 5: both skills dispatch their mapping/recon step to
-    `repo-scout` on Pi, and say explicitly that a scout must not judge.
-    This is a different slice of the file than `FANOUT_ROSTER` -- the
-    bundled *judgement* agent (`test-level`/`cq-dimension`) -- and a
-    different concept: recon delegation for the mapping step, inserted
-    before the mapping bullets, well above the '### Fanning out' heading.
-    """
-    for name in MAP_DELEGATION_SKILLS:
-        text = _skill_text(name)
-        assert "`repo-scout`" in text, f"{name}: mapping step doesn't name repo-scout"
-        assert "Judge nothing at this stage" in text, (
-            f"{name}: missing the judge-nothing constraint on recon children"
         )
 
 
@@ -211,23 +193,8 @@ EVIDENCE_SCHEMA_HEADING = "### Child evidence schema"
 # meaningful when a child is grading something). Recon skills -- where a
 # child answers "where is X" rather than judging it -- get an evidence
 # schema instead: no severity/confidence to fabricate for a location fact.
-FINDING_SCHEMA_SKILLS = (
-    "code-quality-audit",
-    "architecture-audit",
-    "testing-strategy",
-)
 EVIDENCE_SCHEMA_SKILLS = ("research-codebase",)
-REQUIRED_FINDING_FIELDS = ("severity", "confidence", "location", "excerpt", "finding")
 REQUIRED_EVIDENCE_FIELDS = ("location", "excerpt", "answer")
-
-
-def test_finding_schema_present_and_parseable() -> None:
-    for name in FINDING_SCHEMA_SKILLS:
-        text = _skill_text(name)
-        assert SCHEMA_HEADING in text, f"{name}: missing child finding schema"
-        section = text[text.index(SCHEMA_HEADING) :]
-        for field in REQUIRED_FINDING_FIELDS:
-            assert f"{field}:" in section, f"{name}: schema missing {field!r} field"
 
 
 def test_evidence_schema_present_and_parseable() -> None:
@@ -240,22 +207,6 @@ def test_evidence_schema_present_and_parseable() -> None:
         block_end = section.index("```", section.index("```") + 3)
         assert "severity" not in section[:block_end], (
             f"{name}: evidence schema still carries a severity field"
-        )
-
-
-def test_empty_result_sentence_is_structured() -> None:
-    """The empty-result rule is the structured sentence, not just the bare
-    string -- a bare string can't feed an honesty/strengths section. Skills
-    may still *mention* the bare string in prose to name the anti-pattern
-    they're rejecting; this only requires the structured form to exist too.
-    """
-    for name in FINDING_SCHEMA_SKILLS:
-        text = _skill_text(name)
-        assert "No issues found. Checked:" in text, (
-            f"{name}: empty-result rule is missing or not structured"
-        )
-        assert "Solid because:" in text, (
-            f"{name}: empty-result rule missing 'Solid because:'"
         )
 
 
@@ -286,80 +237,6 @@ def test_create_plan_delegates_to_research_codebase() -> None:
     assert "severity: P0" not in text
 
 
-TIERED_VERIFICATION_SKILLS = (
-    "code-quality-audit",
-    "architecture-audit",
-    "testing-strategy",
-    "research-codebase",
-)
-
-
-def test_malformed_child_output_is_not_a_defect() -> None:
-    """Phase 1: malformed child output never becomes a code defect. Parent
-    normalises, requests one correction, else reports investigation failure
-    with uncovered scope."""
-    for name in (
-        "code-quality-audit",
-        "architecture-audit",
-        "testing-strategy",
-        "review-plan",
-    ):
-        text = _skill_text(name)
-        assert "as a single P1 finding" not in text, (
-            f"{name}: malformed output still manufactured as P1"
-        )
-        assert (
-            "Never manufacture a defect" in text or "never manufacture" in text.lower()
-        ), f"{name}: missing never-manufacture rule"
-        assert "investigation failure" in text.lower(), (
-            f"{name}: missing investigation-failure fallback"
-        )
-        assert "uncovered" in text.lower(), f"{name}: missing uncovered-scope reporting"
-
-
-def test_findings_require_inspected_context() -> None:
-    """Phase 1: candidate summaries/indexes are navigation aids only.
-    Publishing requires inspecting full rationale plus original code."""
-    for name in TIERED_VERIFICATION_SKILLS:
-        text = _skill_text(name)
-        assert "navigation aid" in text.lower(), (
-            f"{name}: missing navigation-aid rule for indexes"
-        )
-        assert (
-            "quotation alone is insufficient" in text.lower()
-            or "quote alone" in text.lower()
-            or "checked quotation alone" in text.lower()
-        ), f"{name}: missing quotation-insufficient rule"
-        assert (
-            "whole-file rereads are not" in text.lower()
-            or "not automatically required" in text.lower()
-        ), f"{name}: missing bounded-reread rule"
-
-
-def test_confirmed_finding_contract() -> None:
-    """Phase 1: confirmed findings carry ID, severity, confidence,
-    location+evidence, violated contract, consequence, counterevidence,
-    and smallest correction."""
-    for name in (
-        "code-quality-audit",
-        "architecture-audit",
-        "testing-strategy",
-        "review-plan",
-    ):
-        text = _skill_text(name)
-        lower = re.sub(r"\s+", " ", text.lower())
-        assert "finding id" in lower or "stable" in lower and "id" in lower, (
-            f"{name}: missing stable finding ID"
-        )
-        assert "counterevidence" in lower, f"{name}: missing counterevidence"
-        assert "consequence" in lower, f"{name}: missing consequence"
-        assert (
-            "smallest sufficient correction" in lower or "smallest correction" in lower
-        ), f"{name}: missing smallest-correction rule"
-        assert "unresolved" in lower, f"{name}: missing unresolved disposition"
-        assert "rejected" in lower, f"{name}: missing rejected disposition"
-
-
 def test_review_verdict_vocabulary_complete() -> None:
     """Phase 1: review-plan verdict covers REVISE/COMMENT/APPROVE/INCOMPLETE,
     with any P0/P1 -> REVISE."""
@@ -374,26 +251,6 @@ def test_review_verdict_vocabulary_complete() -> None:
     )
 
 
-def test_coverage_ledger_is_explicit() -> None:
-    """Phase 1: coverage ledger marks checked / not applicable / unverified;
-    unverified never described as clean."""
-    for name in (
-        "code-quality-audit",
-        "architecture-audit",
-        "testing-strategy",
-        "review-plan",
-        "research-codebase",
-    ):
-        text = _skill_text(name)
-        lower = text.lower()
-        assert (
-            "coverage ledger" in lower or "coverage" in lower and "unverified" in lower
-        ), f"{name}: missing coverage ledger"
-        assert (
-            "never described as clean" in lower or "never" in lower and "clean" in lower
-        ), f"{name}: missing unverified-is-not-clean rule"
-
-
 def test_research_absence_is_scoped() -> None:
     """Phase 1: research states 'not found within <scope>' unless exhaustive
     inventory proves absence."""
@@ -404,23 +261,6 @@ def test_research_absence_is_scoped() -> None:
     assert "exhaustive" in text.lower(), (
         "research-codebase: missing exhaustive-inventory qualifier"
     )
-
-
-INDEX_FINDINGS_AGENTS = ("cq-dimension", "arch-lens", "test-level", "plan-lens")
-
-
-def test_agents_declare_index_then_findings_structure() -> None:
-    """Phase 6: the three read-only judgement agents structure their single
-    `output:` file as an index (for a cheap spot-check) followed by full
-    findings (for a load-bearing one), since a read-only child's output
-    file *is* its final message verbatim -- there's no separate short/long
-    channel.
-    """
-    for name in INDEX_FINDINGS_AGENTS:
-        path = AGENTS_DIR / f"{name}.md"
-        text = path.read_text(encoding="utf-8")
-        assert "## Index" in text, f"{name}.md: missing the '## Index' section"
-        assert "## Findings" in text, f"{name}.md: missing the '## Findings' section"
 
 
 AGENTS_DIR = catalog.SKILLS_DIR.parent / "agents"
@@ -435,7 +275,7 @@ def test_agent_definitions_have_valid_frontmatter() -> None:
     (Pi-only, as scoped).
     """
     files = sorted((AGENTS_DIR).glob("*.md"))
-    assert len(files) >= 4, (
+    assert len(files) >= 3, (
         f"expected the four Phase 6 agent definitions, found {files}"
     )
     for path in files:
@@ -447,43 +287,6 @@ def test_agent_definitions_have_valid_frontmatter() -> None:
             f"{path}: missing contact_supervisor"
         )
         assert body.strip(), f"{path}: empty system prompt"
-
-
-DIMENSION_RUBRIC_FILES = (
-    "code-quality-audit/references/solid.md",
-    "code-quality-audit/references/dry.md",
-    "code-quality-audit/references/kiss.md",
-    "code-quality-audit/references/typing.md",
-    "code-quality-audit/references/errors.md",
-    "architecture-audit/references/boundaries.md",
-    "architecture-audit/references/responsibilities.md",
-    "architecture-audit/references/structure.md",
-    "code-quality-audit/references/dependency-injection.md",
-)
-
-
-def test_dimension_rubrics_are_calibrated() -> None:
-    """Phase 2: each dimension rubric carries a compact check procedure,
-    evidence needed, a defect/correction example, and a legitimate
-    non-finding — not just length or emoji. Size remains an authoring guard,
-    not proof of quality.
-    """
-    for rel in DIMENSION_RUBRIC_FILES:
-        path = catalog.SKILLS_DIR / rel
-        text = path.read_text(encoding="utf-8")
-        lower = re.sub(r"\s+", " ", text.lower())
-        lines = text.splitlines()
-        assert len(lines) >= 30, f"{rel}: only {len(lines)} lines, expected >= 30"
-        assert "check" in lower and (
-            "procedure" in lower or "how to" in lower or "check:" in lower
-        ), f"{rel}: missing check procedure"
-        assert "evidence" in lower, f"{rel}: missing evidence needed"
-        assert "non-finding" in lower or "not a finding" in lower, (
-            f"{rel}: missing legitimate non-finding"
-        )
-        assert "correction" in lower or "fix" in lower, (
-            f"{rel}: missing correction guidance"
-        )
 
 
 def test_no_reference_file_exceeds_budget() -> None:
@@ -528,33 +331,6 @@ def test_every_reference_is_linked_from_skill_md() -> None:
         )
 
 
-def test_single_severity_vocabulary() -> None:
-    """Phase 7b: review-plan's children use the same P0/P1/P2 vocabulary as
-    the other judgement skills -- no second vocabulary, no mapping
-    paragraph translating between them. The human-facing output template
-    (critical/major/minor, emoji) is a rendering choice for the reader, not
-    a second child-facing vocabulary, and is untouched by this test.
-    """
-    text = _skill_text("review-plan")
-    assert "severity (P0/P1/P2)" in text, (
-        "review-plan: child task no longer asks for P0/P1/P2 severity"
-    )
-    assert "critical/major/minor/suggestion" not in text, (
-        "review-plan: old four-value child vocabulary still present"
-    )
-    assert "the mapping is P0" not in text, (
-        "review-plan: the P0->critical mapping paragraph should be deleted"
-    )
-
-    agent_text = (catalog.SKILLS_DIR.parent / "agents" / "plan-lens.md").read_text(
-        encoding="utf-8"
-    )
-    assert "severity (P0/P1/P2)" in agent_text, (
-        "plan-lens.md: bundled agent still asks for the old severity words"
-    )
-    assert "critical/major/minor/suggestion" not in agent_text
-
-
 def test_descriptions_have_anti_triggers() -> None:
     """Phase 7c: every skill description ends with a closing 'Not ...'
     clause naming what it isn't, so the catalog text itself carries the
@@ -568,18 +344,25 @@ def test_descriptions_have_anti_triggers() -> None:
         )
 
 
-def test_audits_judge_against_standard_not_existing_structure() -> None:
-    """The repo's current layout is the subject of an architecture audit,
-    never its baseline: no fallback to inferring rules from the dominant
-    structure, and the standard defines the rule IDs findings cite."""
-    arch = re.sub(r"\s+", " ", _skill_text("architecture-audit"))
-    assert "infer rules from the dominant structure" not in arch
-    assert "not the baseline" in arch
-    standard = (
-        catalog.SKILLS_DIR / "architecture-audit" / "references" / "standard.md"
-    ).read_text(encoding="utf-8")
-    for rule in ("L1", "T1", "D1", "D2", "S1", "E1"):
-        assert f"**{rule}**" in standard, f"standard.md: missing rule {rule}"
-    cq = re.sub(r"\s+", " ", _skill_text("code-quality-audit"))
-    assert "repo's own standard first" not in cq
-    assert "never that the defect is acceptable" in cq
+@pytest.mark.parametrize(
+    "name",
+    [
+        "architecture-audit",
+        "code-quality-audit",
+        "review-plan",
+        "testing-strategy",
+        "review-implementation",
+    ],
+)
+def test_shared_review_contract_is_bundled(name: str) -> None:
+    reference = catalog.SKILLS_DIR / name / "references" / "review.md"
+    canonical = catalog.SKILLS_DIR / "_shared" / "review.md"
+    assert reference.resolve() == canonical.resolve()
+    assert reference in agents._bundled_references(catalog.SKILLS_DIR / name)
+    assert canonical.read_text() in agents._codex_body(name)
+
+
+def test_bundled_agent_references_resolve() -> None:
+    for name in _skills_with_fanout():
+        for filename in re.findall(r"agents/([a-z-]+[.]md)", _skill_text(name)):
+            assert (AGENTS_DIR / filename).is_file(), (name, filename)

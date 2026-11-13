@@ -6,6 +6,8 @@ argument-hint: '[optional path, service name, or area to focus on]'
 
 # Testing Strategy Audit
 
+Read references/review.md for finding, severity and coverage requirements.
+
 Audit how a service repository tests itself, classify what exists against the
 five strategies, find the gaps, and propose changes worth making. Reference
 material: a summary of "Testing Strategies in a Microservice Architecture"
@@ -102,50 +104,19 @@ and test inventory from steps 1-2, that level's own questions from below,
 the absolute path to that level's own file under `references/` in this
 skill directory (`unit.md`, `integration.md`, `component.md`,
 `contract.md`, `e2e.md`, or `async.md`) for background reading — never the
-whole set — plus the output/evidence rules from "Child finding schema"
-below and a read-only restriction. Tell it to return findings in the "Child
-finding schema" below. Wait for all before step 4. For a small
+whole set — plus references/review.md and a read-only restriction.
+Wait for all before step 4. For a small
 or single-layer service, work through the levels yourself — the fan-out
 overhead isn't worth it for a handful of questions.
 
 ### Fanning out
 
-Bundled agent for this skill: `test-level` (takes an explicit bounded scope
-and one or more applicable levels — see `agents/test-level.md`); if it
-isn't installed, use a host-native child or work through the level
-yourself.
+Bundled agent: `audit-reviewer` (agents/audit-reviewer.md). Pass the assigned
+scope, applicable level references, known inventory and references/review.md
+by absolute path. Reviewers investigate missing evidence with available tools.
+The parent owns cross-area contracts and verifies material findings.
 
 <!-- agentic-hub: fanout -->
-
-### Child finding schema
-
-Every child — and every level you assess yourself — reports findings in this
-shape, one block per finding:
-
-```
-finding ID: <stable ID, unique per finding even at the same location>
-severity: P0 | P1 | P2
-confidence: high | medium | low
-location: path:line or suite name
-excerpt: verbatim quoted line(s) or test name, not a paraphrase
-violated contract: the testing obligation or invariant broken
-consequence: concrete failure mode missed or maintenance cost incurred
-counterevidence considered: what was checked that could disprove it
-correction: smallest sufficient change
-finding: one paragraph — what's wrong and why it matters
-strengths: optional — what's solid here, not just what's wrong
-```
-
-Keep each block compact; these are fields, not verbose paragraphs.
-
-If a child has nothing to report for its level, it says exactly:
-`No issues found. Checked: <what>. Solid because: <one line>.` A bare
-"No issues found." can't feed step 4's "Explicitly not recommended" section
-— the structured version can. If a child's output doesn't parse into this
-shape, normalise recoverable fields; request one targeted correction if
-needed. If still unusable, report an investigation failure with its uncovered
-scope. Never manufacture a defect or severity from missing formatting. Do not
-retry in a loop.
 
 **Unit** — Is domain logic tested in isolation from I/O at all, or only
 reachable through slower tests? Do coordination tests need so many doubles that
@@ -198,88 +169,13 @@ strongest evidence of where the strategy is actually failing.
 
 ## 4. Report
 
-If levels were fanned out to subagents, verify before writing anything down
-— a subagent's claim is a lead, not confirmed evidence — but not at the same
-depth for every finding:
+Apply references/review.md. Include the service shape, observed distribution
+of tests and runtimes (unknown when unavailable), confirmed findings, and
+prioritized changes at the cheapest level that catches the failure. State
+what additional testing is unwarranted when the pyramid would otherwise be
+misleading. Include coverage and unresolved concerns.
 
-- **A finding a top-line recommendation rests on** — read the full file or
-  suite. A `sed -n 'X,Yp'` window confirms the quote is real, not that the
-  finding is correct.
-- **A corroborating finding** (supports a recommendation but isn't the
-  reason for it) — a targeted `sed -n 'X,Yp'` / `grep -n` against the cited
-  lines or CI log is enough.
-- **Everything else** — spot-check.
-
-State which tier each finding is in. Drop or fix anything that doesn't hold
-up.
-
-Candidate summaries and indexes are navigation aids only. Before publishing
-a finding, inspect its full rationale and enough original code, callers,
-configuration, or tests to establish the claim. Expand reads when the
-contract is unclear; whole-file rereads are not automatically required.
-A checked quotation alone is insufficient.
-
-Keep an internal candidate disposition: confirmed, rejected, or unresolved.
-Only confirmed findings enter the prioritised defect list. Unresolved
-concerns name the missing evidence and next probe. Do not publish a dump of
-rejected candidates.
-
-Coverage ledger: list in-scope areas and applicable levels as checked,
-not applicable with reason, or unverified with reason. An unverified area is
-never described as clean. Scope may be bounded, but say what was excluded or
-sampled.
-
-Write the findings as markdown. Structure:
-
-1. **Service shape** — layers, boundaries, consumers, criticality. Two or three
-   sentences.
-2. **Current distribution** — the table from step 2, plus how it departs from a
-   pyramid, with the actual numbers and runtimes.
-3. **Findings** — one entry per confirmed finding with its finding ID,
-   severity, confidence, location and evidence, violated contract,
-   consequence, counterevidence considered, and smallest sufficient
-   correction. Rank by severity, then consequence/confidence; levels are tags
-   or secondary grouping. State effort separately.
-4. **Recommendations** — prioritised. For each: the change, the level it
-   belongs at, why that level, and rough effort. Separate "do now" from "worth
-   doing" from "only if this service grows".
-5. **Explicitly not recommended** — what a naive reading of the pyramid would
-   suggest here and why it's wrong for this service, with a bounded claim and
-   evidence; there is no quota for strengths or defects. Include this section;
-   it keeps the audit honest.
-6. **Coverage and unresolved** — the ledger plus any unresolved concerns with
-   missing evidence and next probe.
-
-## Judgement rules
-
-- **Cite evidence.** Every finding points at a file, a suite, a CI job, or an
-  incident. No generic testing advice that would read the same for any repo.
-  Positive findings require a bounded claim and evidence; there is no quota
-  for strengths or defects.
-- **Severity is consequence-based.** P0 = critical failure requiring immediate
-  action; P1 = substantial correctness/design consequence requiring correction
-  before proceeding with the affected change; P2 = material, nonblocking
-  maintainability or reliability improvement. Preference-only suggestions are
-  not defects. Confidence is independent of severity; low-confidence concerns
-  remain unresolved rather than being inflated or disguised as P2.
-- **Treat repository conventions as context.** Group a systemic problem once
-  with representative instances and affected scope, while keeping independent
-  root causes separate. Consistency does not excuse harmful practices.
-- **Push tests down, but only where they fit.** The value of moving a test down
-  the pyramid is faster feedback and fewer reasons to fail — not purity. Say
-  which of those you are buying.
-- **More tests is not the default answer.** Deleting a redundant, slow or
-  flaky suite is a legitimate recommendation, and often the highest-value one.
-  Too many E2E tests is a worse finding than too few.
-- **Match depth to criticality.** An experimental or short-lived service does
-  not need five levels. Recommending the full pyramid everywhere contradicts
-  the source material.
-- **Respect the repo's stack.** Propose tools and patterns that fit the
-  languages, frameworks and CI already in use; name the specific library the
-  repo would plausibly adopt, not a generic category.
-- **Async gaps outrank most others.** A service consuming an at-least-once
-  broker with no idempotency, redelivery or poison-message test has a hole that
-  no amount of unit coverage compensates for, because the failures are silent
-  and surface as corrupt data rather than red builds.
-- **Say when it's fine, with evidence.** If a level is genuinely well covered,
-  record that in one line with a bounded claim and move on.
+Prefer recommendations grounded in actual failure modes and existing tooling.
+More tests is not the default answer: removing redundant or flaky coverage may
+be the best improvement. Async delivery and persistence gaps deserve attention
+when they can silently corrupt state; do not infer severity from test counts.

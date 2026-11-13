@@ -16,7 +16,7 @@ just because it runs in parallel. Spawn as many as genuinely apply; there
 is no arbitrary cap. Fanning out wider buys wall-clock, not lower total
 tokens — more children cost more tokens in total, in exchange for running
 at once instead of in sequence. A child's `path:line` claim is
-a lead, not evidence: verify it per this skill's own verification tiers
+a lead, not evidence: verify material findings against source and the applicable review contract
 before writing anything down.
 
 If no child dispatch is available in this session, do the checks yourself

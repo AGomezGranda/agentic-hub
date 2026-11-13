@@ -1,224 +1,55 @@
 ---
 name: architecture-audit
-description: 'Audit software architecture strictly against a target standard (layered/hexagonal, tactical DDD, dependency injection and composition root, package-by-context folder layout) through three lenses — boundaries (who may talk to whom), responsibilities (who should own what) and structure (where code lives) — for a repo, a module/bounded context, or a git diff/PR. Use when asked to review architecture, layering, folder structure, module boundaries, coupling, DDD, DI wiring, or whether a change lands in the right place. Not class/function-level design such as SOLID, DRY, typing or error handling inside one module (code-quality-audit), over-engineering (ponytail-review/audit), tests (testing-strategy), security or performance.'
+description: 'Audit dependency boundaries, responsibility ownership, and file placement against an explicit architecture standard for a repository, module, or diff. Not class-level design (code-quality-audit), test strategy, security, or performance.'
 argument-hint: '[repo | path/bounded context | diff/PR ref]'
 ---
 
 # Architecture Audit
 
-Three questions, one lens each:
+Produce a read-only audit. Read references/review.md for evidence, severity
+and completion requirements and references/checks.md for investigation checks.
 
-- **Boundaries** — *who may talk to whom?* `references/boundaries.md`
-- **Responsibilities** — *who should own what?* `references/responsibilities.md`
-- **Structure** — *where does code live?* `references/structure.md`
+## Scope and standard
 
-**The bar is the target standard, `references/standard.md`, not the repo.**
-The existing structure is what you are auditing; never infer the rules from
-it or excuse a violation because it is consistent. Prevalence only measures
-blast radius. A repo ADR overrides a standard rule only when it names the
-rule, the deviation and the reason.
+Resolve the repository, context or diff and its source state. A diff audit
+covers introduced or materially affected boundaries and ownership, including
+unchanged callers. A context audit includes its incoming and outgoing edges.
 
-Testability, drift and ADR compliance are not lenses: testability is a
-*consequence* used for severity; the standard and declared rules (ADRs,
-import contracts) are the *input* every lens judges against.
+Use the explicitly requested or repository-declared architecture contract.
+If none exists, use references/standard.md as this skill's strict default and
+disclose that choice. Existing structure is under audit, not the baseline.
+Accepted ADRs may document deviations. Prevalence does not excuse violations.
+Identify conflicting governing instructions before claiming compliance.
 
-**Audit, don't rewrite.** Produce a report. Only change code if the user asks
-for that after seeing it.
+Apply the standard's scope classification using evidence of actual invariants.
+Preserve strict DDD, DI and placement rules when this profile is selected;
+do not infer that every repository has already adopted it.
 
-## Boundary — read this before starting
+## Investigation
 
-**Routing rule:** if the correction stays inside one module, it belongs to
-`code-quality-audit`, not here. If it moves code between modules, changes
-what may import what, or changes who owns a piece of data or an invariant,
-it's here. A long class is SRP (there); a package every feature edits is a
-god module (here). A swallowed exception is error handling (there); an
-ORM exception surfacing in the domain API is a boundary leak (here).
+Inventory modules, public interfaces, dependency edges, state writers and
+invariant owners. Record applicable rule IDs against these items. Run configured
+architecture checkers and inspect failures in context. Without a graph tool,
+inspect imports and calls; static searches cannot prove absence of dynamic
+or external edges.
 
-- "More layers/abstraction than it needs" → `ponytail-review`/`ponytail-audit`,
-  except the seams the standard requires for the scope's Applicability
-  class (layers for domain and CRUD services; ports for side effects and a
-  composition root everywhere), which are never over-engineering.
-- DI: a constructor or function seam inside one module → `code-quality-audit`.
-  Here: composition-root wiring (D2), and D1 breaches whose correction
-  changes layer direction (e.g. domain importing a client module).
-- Test coverage → `testing-strategy`. Security, performance → out of scope.
+Trace business rules and state transitions through relevant entry points.
+Compare placement with the governing layout and ownership map. Use co-change
+history when investigating locality; a shared commit is a lead whose reason
+needs inspection, not proof of coupling.
 
-## 1. Resolve scope
-
-- **Full repo** — build the evidence in step 2, then judge every lens
-  across the module graph. A small repo (a handful of modules) is judged by
-  you directly; a large one delegates by module/bounded context when that
-  minimises duplicate reads. A repository label alone does not justify
-  delegation.
-- **Path / bounded context** — judge one area in depth, plus every edge in
-  and out of it; don't map the whole repo.
-- **Diff / PR** — judge only edges and ownership the change adds, removes,
-  or moves: new imports, new cross-module calls, logic landing in a module
-  that shouldn't own it. Skip the co-change analysis unless the PR claims to
-  fix coupling.
+Report every confirmed standard violation, grouping systemic instances.
+Distinguish compliance violations from recommendations outside the standard.
+For enforcement gaps, name the adopted rule and feasible checker.
 
 ### Fanning out
 
-Bundled agent for this skill: `arch-lens` (takes an explicit bounded scope,
-the evidence from step 2, and one or more lenses — see `agents/arch-lens.md`);
-if it isn't installed, use a host-native child or do the check yourself.
-Each child's task text must carry everything it needs — don't depend on
-inherited context: the declared rules, scope classification, directory
-tree, import graph and co-change table from step 2, the lens rubric and
-the standard pasted verbatim from their `references/` files (absolute
-paths, not just the lens name), the output/evidence rules from
-"Child finding schema" below, and a read-only restriction. Children cannot
-run commands, so you compute the graph and co-change data and paste them.
-Cross-module edges between two delegated areas belong to you, not either
-child. Wait for all before synthesizing the report.
+Bundled agent: `audit-reviewer` (agents/audit-reviewer.md). Work directly on
+small scopes. Prefer independent module/context scopes over separate reviewers
+rereading the same code for individual principles. A `repo-scout` may locate
+modules but does not judge them. Pass scope, governing standard, applicable
+checks and references/review.md by absolute path, plus known evidence.
+Reviewers investigate missing evidence themselves. The parent owns edges
+between delegated areas and verifies material findings.
 
 <!-- agentic-hub: fanout -->
-
-### Child finding schema
-
-Every child — and every lens you check yourself — reports findings in this
-shape, one block per finding:
-
-```
-finding ID: <stable ID, unique per finding even at the same location>
-severity: P0 | P1 | P2
-confidence: high | medium | low
-lens: boundaries | responsibilities | structure
-location: path:line
-excerpt: verbatim quoted line(s), not a paraphrase
-evidence: the graph edge, tree excerpt, co-change stat, or declared rule it rests on
-violated contract: the standard rule ID (e.g. L1, D1, S2) or declared ADR/contract broken
-consequence: concrete change/correctness effect if left as-is
-counterevidence considered: what was checked that could disprove it
-correction: smallest sufficient change
-finding: one paragraph — what's wrong and why it matters
-strengths: optional — what's solid here, not just what's wrong
-```
-
-Keep each block compact. If a child has nothing to report, it says exactly:
-`No issues found. Checked: <what>. Solid because: <one line>.` If a child's
-output doesn't parse into this shape, normalise recoverable fields; request
-one targeted correction if needed. If still unusable, report an
-investigation failure with its uncovered scope. Never manufacture a defect
-or severity from missing formatting. Do not retry in a loop.
-
-## 2. Gather evidence before judging
-
-Judge nothing at this stage — record, don't rank. Ask a `repo-scout` for the locate-shaped parts
-(where declared rules live, what the top-level modules are), or gather them
-yourself for a small scope. Then collect, running commands yourself:
-
-1. **Declared architecture** — ADRs (`docs/adr/`, `adr/`, `decisions/`),
-   import contracts (`.importlinter`, `[tool.importlinter]`,
-   `.dependency-cruiser.*`, ArchUnit tests, Nx/eslint boundary rules),
-   README/CONTRIBUTING layering sections. Record each rule verbatim with
-   `file:line`. If a checker is configured, run it — its failures are
-   pre-confirmed boundary findings. None found → say so; the standard is
-   then the whole rule set, at full confidence. Note which standard rules
-   a configured checker enforces; the rest feed "Enforcement gaps" (E1).
-2. **Scope classification and tree** — classify the scope per the
-   standard's Applicability section, naming the invariants found or
-   searched for. Record the source tree to depth 4 with file counts
-   (`find <src> -type d -not -path '*/node_modules/*' -not -path '*/.*'`),
-   the composition root(s), and where env/settings are read.
-3. **Import graph** — module-level edges, using an installed tool when
-   present (`import-linter`, `pydeps`, `madge`, `dependency-cruiser`,
-   `go list -deps`) or a grep of import statements otherwise — normalised to
-   the module level, keeping only internal edges (drop stdlib and
-   third-party imports). Summarise as module → module edges with counts;
-   list cycles.
-4. **Co-change table** (full repo or bounded context only) — which module
-   pairs change together:
-
-   ```bash
-   git log --since=12.months --no-merges --name-only --pretty=format:@@ -- <scope> \
-     | awk -v d=1 'function flush(a,b){for(a in m)for(b in m)if(a<b)c[a" <-> "b]++; split("",m)}
-       /^@@/{flush();next} NF{k=$0; if(split($0,p,"/")>d){k=p[1]; for(i=2;i<=d;i++)k=k"/"p[i]} m[k]=1}
-       END{flush(); for(k in c)print c[k], k}' | sort -rn
-   ```
-
-   Prints `<commits> <module> <-> <module>`; set `d` to the path depth of
-   the repo's modules (e.g. `d=2` for `src/<module>/`). A pair co-changing in a large share of either
-   module's commits is a change-locality lead; a pair that never co-changes
-   despite a dependency edge is evidence the boundary holds.
-5. **Domain vocabulary** — what the core concepts are called in code vs.
-   docs/tests, and whether a domain layer exists at all. A CRUD app with no
-   invariants has no tactical-DDD (T) findings; say so, with the evidence
-   from item 2.
-
-For a diff/PR, this step is just: the declared rules, the scope
-classification, the imports and calls the diff adds or removes, and the
-files and folders it adds or moves.
-
-## 3. Judge each lens
-
-Read the lens rubric (or paste it to a child per §1) and apply it to the
-evidence against the standard. ADR, contract and standard violations are
-all high confidence: they don't depend on taste. How many modules follow a
-pattern sets a finding's scope, never its validity — a dominant pattern
-that breaks the standard is one grouped systemic finding, not the baseline.
-Each finding cites a rule ID; a concern no rule covers is reported only if
-its consequence is concrete, and is marked "outside the standard".
-
-## 4. Report
-
-Verify before writing — a child's `path:line` claim is a lead, not evidence:
-
-- **A finding a top-line recommendation rests on** — read the full files on
-  both sides of the edge; a boundary claim needs both modules' contracts.
-- **A corroborating finding** — a targeted `sed -n 'X,Yp'` / `grep -n`.
-- **Everything else** — spot-check.
-
-State the tier per finding. Candidate summaries and indexes are a
-navigation aid only; before publishing, inspect the rationale and enough code, config
-or history to establish the claim. Expand reads when the contract is
-unclear; whole-file rereads are not automatically required. A checked
-quotation alone is insufficient. Keep an internal disposition per candidate:
-confirmed, rejected, or unresolved. Only confirmed findings enter the list;
-unresolved ones name the missing evidence and next probe; don't publish
-rejected candidates.
-
-1. **Scope and classification** — what was audited, its Applicability class
-   with the invariants that justify it, ADR deviations accepted, whether a
-   domain layer and a composition root exist.
-2. **Findings** — confirmed findings ranked by severity, then
-   consequence/confidence, each with finding ID, lens, severity, confidence,
-   location and evidence, violated contract, consequence, counterevidence
-   considered, and smallest sufficient correction. State effort separately.
-3. **Explicitly fine** — boundaries/ownership/layout checked and found solid, one
-   bounded line each with evidence (e.g. "domain has zero imports from
-   infra: graph shows no edge").
-4. **Out of scope, flagged anyway** — code-level, security, performance or
-   over-engineering issues spotted along the way; point at the right skill.
-5. **Enforcement gaps** — standard rules this repo breaks or could break
-   that no checker enforces (E1), each with the concrete contract to add
-   (import-linter/dependency-cruiser stanza, banned-api entry, layout test).
-6. **Coverage ledger and unresolved** — each in-scope module × lens as
-   checked, not applicable (with reason), or unverified (with reason). An
-   unverified area is never described as clean. Say what was sampled or
-   excluded (e.g. co-change skipped for a PR).
-
-## Judgement rules
-
-- **Every finding rests on evidence a second auditor would reproduce**: a
-  graph edge, a co-change count, a declared rule, a `path:line`. Advice that
-  would read the same for any repo is not a finding.
-- **Severity is consequence-based.** P0 = rare: an invariant bypass or
-  ownership break causing incorrect data or behaviour in production now
-  (a cycle or layering break alone is never P0); P1 = boundary or ownership break that makes the affected
-  change non-local or lets an invariant be bypassed; P2 = material,
-  nonblocking structural improvement. A standard or declared-rule
-  violation is always reported, at the severity the standard assigns
-  (P2 minimum); its consequence is the rule's rationale made concrete for
-  this repo. Taste outside the standard with no concrete consequence is not
-  a finding. Confidence is independent of severity.
-- **One finding per defect**, filed under the lens its correction belongs
-  to: reading another module's internals/storage = boundaries; writing
-  another module's state = responsibilities; code in the wrong folder with no
-  import or ownership effect = structure.
-- **Systemic problems are grouped once** with representative instances and
-  scope. Consistency does not excuse a harmful pattern.
-- **Don't invent a violation to fill a lens, and don't soften one to keep
-  the report short.** A service that meets the standard gets an empty
-  findings list and says why; exemptions come only from the Applicability
-  class or an ADR, stated with evidence.

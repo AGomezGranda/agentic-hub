@@ -97,8 +97,11 @@ installations there after syncing; native-directory copies can shadow shared ski
 | `testing-strategy` | Audit a service's tests against the test pyramid and prioritise gaps |
 
 `agents/*.md` are Pi-only, read-only subagents that skills dispatch: `repo-scout`
-for locate and inventory work, and `arch-lens`, `cq-dimension`, `plan-lens`,
-`test-level`, and `comment-compressor` for judgement on one lens or dimension.
+for locate and inventory work, `audit-reviewer` for scoped code/plan reviews,
+and `comment-compressor` for comment cleanup. Reviewers receive criteria from
+the calling skill; they can investigate beyond the supplied inventory. The
+shared evidence contract lives in `skills/_shared/review.md`, exposed inside
+each review skill through `references/review.md` symlinks.
 Other hosts use their own subagents or run serially.
 
 Codex discovers installed folders as skills. Mention one with `$skill-name`, or let

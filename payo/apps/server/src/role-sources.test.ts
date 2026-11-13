@@ -6,6 +6,7 @@ import {
 	codeQualityRubricPaths,
 	EXECUTION_PREPARER_SOURCE,
 	planLensResourcePaths,
+	reviewContractPath,
 } from "@payo/factory";
 import { createGitExec } from "@payo/git";
 import { expect, it } from "vitest";
@@ -18,13 +19,17 @@ import {
 } from "./role-sources.ts";
 
 const exec = createGitExec();
-const rubricPaths = [...architectureRubricPaths, ...codeQualityRubricPaths];
-it("requires the architecture standard and structure resources", () => {
+const rubricPaths = [
+	reviewContractPath,
+	...architectureRubricPaths,
+	...codeQualityRubricPaths,
+];
+it("requires the architecture standard and investigation resources", () => {
 	expect(architectureRubricPaths).toContain(
 		"skills/architecture-audit/references/standard.md",
 	);
 	expect(architectureRubricPaths).toContain(
-		"skills/architecture-audit/references/structure.md",
+		"skills/architecture-audit/references/checks.md",
 	);
 });
 const files: Record<string, string> = {

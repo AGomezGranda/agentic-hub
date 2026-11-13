@@ -18,19 +18,14 @@ export const lenses = {
 
 export const architectureRubricPaths = [
 	"skills/architecture-audit/references/standard.md",
-	"skills/architecture-audit/references/boundaries.md",
-	"skills/architecture-audit/references/responsibilities.md",
-	"skills/architecture-audit/references/structure.md",
+	"skills/architecture-audit/references/checks.md",
 ] as const;
 
 export const codeQualityRubricPaths = [
-	"skills/code-quality-audit/references/solid.md",
-	"skills/code-quality-audit/references/dry.md",
-	"skills/code-quality-audit/references/kiss.md",
-	"skills/code-quality-audit/references/typing.md",
-	"skills/code-quality-audit/references/dependency-injection.md",
-	"skills/code-quality-audit/references/errors.md",
+	"skills/code-quality-audit/references/checks.md",
 ] as const;
+
+export const reviewContractPath = "skills/_shared/review.md";
 
 export const planLensResourcePaths = [
 	"skills/review-plan/references/lenses.md",

@@ -96,34 +96,18 @@ A subagent's summary is a lead, not a citation — never write a `file:line`
 you haven't personally seen — but not every claim needs the same depth of
 looking:
 
-- **A finding the document's answer rests on** — read the full file. A
-  `sed -n 'X,Yp'` window confirms the quote is real, not that the finding is
-  correctly understood in context.
-- **A corroborating finding** (supports the answer but isn't the reason for
-  it) — a targeted `sed -n 'X,Yp'` / `grep -n` against the cited lines is
-  enough.
-- **Everything else** — spot-check.
-
-Drop or downgrade anything that doesn't survive its tier's check.
-
-Candidate summaries and short answers are navigation aids only. Before citing
-a claim, inspect its full rationale and enough original code, callers,
-configuration, or tests to establish it. Expand reads when the contract is
-unclear; whole-file rereads are not automatically required. A checked
-quotation alone is insufficient.
+Inspect the full rationale and enough original code, callers, configuration
+or tests to establish any claim the answer rests on. Expand reads when contracts
+are unclear; whole-file rereads are not automatically required. A checked
+quotation alone is insufficient. Candidate summaries are navigation aids only.
+Drop or downgrade anything that does not survive verification.
 
 Coverage ledger: list searched areas and sub-questions as checked, not
 applicable with reason, or unverified with reason. An unverified area is never
 described as clean. Scope may be bounded, but say what was excluded or sampled.
 
-Children return through the host's supported result channel (see "Fanning
-out"). For a spot-check-tier finding, the child's short answer suffices —
-don't re-read its evidence just to confirm wording. For a top-two-tier
-finding, or one you're citing in the document, read its full evidence; a
-repo-scout child's output is one sub-question's evidence, not a
-multi-finding report, so there's no heading to open in isolation. If the
-short answer is too thin to judge on its own, probe it yourself rather than
-citing it.
+Read child evidence for claims you cite. A short answer can guide further
+investigation but cannot replace checking a consequential claim.
 
 Mark confidence honestly:
 - **verified** — you read the code

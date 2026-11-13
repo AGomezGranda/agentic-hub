@@ -7,6 +7,7 @@ import {
 	architectureRubricPaths,
 	codeQualityRubricPaths,
 	planLensResourcePaths,
+	reviewContractPath,
 } from "@payo/factory";
 import { expect, it } from "vitest";
 
@@ -239,6 +240,7 @@ async function realModeFixture(prefix: string) {
 	await writeFile(join(repo, "skills/create-plan/SKILL.md"), "# Planner\n");
 	await writeFile(join(repo, "skills/review-plan/SKILL.md"), "# Reviewer\n");
 	for (const path of [
+		reviewContractPath,
 		...planLensResourcePaths,
 		...architectureRubricPaths,
 		...codeQualityRubricPaths,

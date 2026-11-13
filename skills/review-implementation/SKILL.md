@@ -1,45 +1,40 @@
 ---
 name: review-implementation
-description: Review the current local git diff (uncommitted work) against the plan or plan phase it implements, then run the audit swarm on it. Use after implementing a phase and before committing. Not reviewing the plan itself (review-plan), writing code (implement-plan) or reviewing a repo with no plan (swarm directly).
+description: Review uncommitted changes against their implementation plan and affected code contracts. Not reviewing a plan before implementation (review-plan) or implementing changes (implement-plan).
 ---
 
 # Review Implementation
 
-## 1. Resolve plan and phase
+Read references/review.md for evidence, findings and completion requirements.
+Resolve the plan and implemented phase from the request and actual diff.
+Do not assume the first unchecked phase is the one just implemented: execution
+may already have checked it off. If no plan is available, review the code and
+state that plan conformance is unverified.
 
-- Plan: path from the user, else the plan file whose phase matches the diff
-  (`find . -type d -iname plans -not -path '*/node_modules/*'`, then the
-  branch name). Read it FULLY.
-- Phase: from the user, else the first phase with unchecked `- [ ]` items.
-- No plan found: say so and run the swarm alone (step 3) with no `plan`.
+Scope local changes with git status --short, git diff HEAD, and direct reads
+of untracked files. Do not include branch history in an uncommitted review.
+Read the relevant plan requirements and source contracts, expanding to callers,
+configuration and tests where behavior depends on them.
 
-## 2. Plan conformance (you, not children)
+Map requirements and success criteria to changes. Report missing behavior,
+unexplained deviations and extra scope. Run applicable checks when authorized;
+otherwise record them as unverified. Judge correctness, ownership, boundaries,
+design, tests and security where the actual change warrants them. Use the
+repository's architecture contract and relevant audit checks. Do not launch
+a full-repository audit merely because a diff touches a boundary.
 
-Diff: `git status --short`, `git diff HEAD`, and read untracked files directly
-(`git diff` does not show them). Never use `main...HEAD`: it mixes committed
-history into a local review.
+### Fanning out
 
-Map each phase item and success criterion to hunks. Report:
-- **Missing**: plan items with no matching change, or only partly done.
-- **Extra**: hunks or files the phase does not call for (scope creep).
-- **Unverified**: success criteria (tests/lint/build) not run; run them now.
-- **Silent deviations**: where the change differs from the plan without a
-  note in the plan file.
+Bundled agent: `audit-reviewer` (agents/audit-reviewer.md). Work directly on
+small changes. For independent substantial areas, pass the exact scope,
+plan requirements, applicable check references and references/review.md by
+absolute path. The parent owns interactions across assignments and verifies
+material findings. Hosts with the Pi workflow may use pi/workflows/swarm.js
+with the same exact scope; other hosts use their native delegation tools.
 
-## 3. Swarm (skip for fewer than 3 files and no new logic)
+<!-- agentic-hub: fanout -->
 
-Pick lenses by what the diff touches (skip `security` for docs/refactors).
-`plan-conformance` is already covered by step 2, so leave it out unless you
-want an independent second view.
-
-`subagent({ workflow: "./pi/workflows/swarm.js", args: { scope: "uncommitted changes (git diff HEAD plus untracked files)", plan: "<plan path>, phase <N>", lenses: [...], round: 1 }, async: true })`
-
-## 4. Triage and report
-
-Follow the standing orders: classify each verified finding (blocker,
-non-blocker, stale, invalid, speculative), fix accepted batches with one
-worker per seam, re-run with `round+1` on changed files only, max 3 rounds.
-
-Report: plan/phase reviewed; conformance gaps (missing/extra/unverified/
-deviations); lenses run; findings accepted and rejected; rounds; what was
-not checked. Tick completed plan items only if the user asks.
+Report plan conformance, confirmed findings, completed checks and remaining
+coverage. Review does not authorize fixes. When fixes are authorized, recheck
+them and affected contracts, classifying new findings against the prior pass.
+A bounded number of rounds limits work, not the meaning of complete coverage.

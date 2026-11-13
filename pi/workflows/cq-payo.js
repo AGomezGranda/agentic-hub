@@ -1,4 +1,4 @@
-const R = "/Users/alvaro.gomez/.pi/agent/skills/code-quality-audit/";
+const R = "skills/code-quality-audit/";
 const scopes = [
   { k: "factory-execution", s: "payo/modules/factory/src/execution.ts (2.3k lines) only; read its sibling execution-*.ts only for contracts" },
   { k: "factory-rest", s: "payo/modules/factory/src/ EXCEPT execution.ts (commands.ts, execution-review.ts, execution-roles.ts, execution-state.ts, read-models, roles, plans, etc.)" },
@@ -8,16 +8,14 @@ const scopes = [
   { k: "apps-web", s: "payo/apps/web/src (React UI)" },
 ];
 const rules = "\n\nRules: READ-ONLY, never edit or run mutating commands, never spawn agents. Stay in scope; read callers elsewhere only to judge contracts. " +
-  "FIRST read " + R + "SKILL.md sections 'Boundary', 'Child finding schema' and 'Judgement rules', then the five rubrics " + R + "references/{solid,dry,kiss,typing,errors}.md. " +
-  "Dimensions: SOLID, DRY, KISS, typing, error handling. Judge against the repo's own conventions (payo/biome.json, tsconfig strictness) first. Skip *.test.* files except to check what contract they pin. " +
-  "Out of scope (name in one line, do not analyse): architecture/boundaries, security, performance, test strategy. " +
-  "Report at most 10 findings, ranked, in the finding schema (finding ID prefixed with your key, severity P0/P1/P2, confidence, location path:line, verbatim excerpt, violated contract, consequence, counterevidence considered, correction). " +
-  "Group systemic issues once with representative instances. Also list dimensions that are solid as `No issues found. Checked: ... Solid because: ...`, and what you did not read.";
+  "Read " + R + "SKILL.md, references/checks.md and references/review.md. Apply their evidence and coverage contract. " +
+  "Review SOLID, DI, DRY, KISS, typing and errors against adopted requirements and concrete consequences. " +
+  "Inspect tests and callers as needed. Report every confirmed finding, grouped by root cause, with coverage and unresolved concerns.";
 const res = await runs.all(scopes.map((x) => ({
   key: "cq-" + x.k,
   label: "Code quality " + x.k,
-  agent: "reviewer",
+  agent: "audit-reviewer",
   output: "cq-payo/" + x.k + ".md",
-  task: "Code-quality audit. Key: " + x.k + ". Scope: " + x.s + ". Repo root /Users/alvaro.gomez/code/agentic-hub, project payo/." + rules,
+  task: "Code-quality audit. Key: " + x.k + ". Scope: " + x.s + ". Project payo/ in the current repository." + rules,
 })));
 return res.map((r, i) => ({ key: scopes[i].k, ok: r.ok, output: r.output }));

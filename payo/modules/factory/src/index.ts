@@ -62,6 +62,7 @@ export {
 	codeQualityRubricPaths,
 	lenses,
 	planLensResourcePaths,
+	reviewContractPath,
 	snapshotRole,
 } from "./roles.ts";
 export type {

@@ -6,10 +6,12 @@ import {
 	EXECUTION_PREPARER_SOURCE,
 	planLensResourcePaths,
 	type RoleSource,
+	reviewContractPath,
 } from "@payo/factory";
 import { type GitExec, readBlobAt, resolveBaseCommit } from "@payo/git";
 
 const planningResources = [
+	reviewContractPath,
 	...architectureRubricPaths,
 	...codeQualityRubricPaths,
 ];
@@ -37,6 +39,7 @@ export const roleSkillPaths = {
 type Role = keyof typeof roleSkillPaths;
 
 const testingResources = [
+	reviewContractPath,
 	"skills/testing-strategy/references/overview.md",
 	"skills/testing-strategy/references/unit.md",
 	"skills/testing-strategy/references/integration.md",

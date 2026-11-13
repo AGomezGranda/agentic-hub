@@ -17,14 +17,14 @@ const roleSource: RoleSource = {
 	sha: "implement-sha",
 	content: "Implement the selected phase.",
 	resources: {
-		"skills/architecture-audit/references/boundaries.md":
+		"skills/architecture-audit/references/checks.md":
 			"Architecture rubric body.",
 		"skills/architecture-audit/references/standard.md":
 			"Architecture standard body.",
-		"skills/architecture-audit/references/structure.md":
-			"Architecture structure body.",
-		"skills/code-quality-audit/references/solid.md": "SOLID rubric body.",
-		"skills/code-quality-audit/references/dry.md": "DRY rubric body.",
+		"skills/_shared/review.md": "Architecture review contract.",
+		"skills/code-quality-audit/references/checks.md": "Code quality checks.",
+		"skills/code-quality-audit/references/review.md":
+			"Quality review contract.",
 		"skills/architecture-audit/SKILL.md": "Architecture audit skill.",
 		"skills/code-quality-audit/SKILL.md": "Code quality audit skill.",
 		"skills/testing-strategy/SKILL.md": "Testing strategy skill.",
@@ -193,7 +193,7 @@ describe("execution role specs", () => {
 			"trusted local-code execution boundary, not a sandbox",
 		);
 		expect(spec.instructions).toContain("Architecture rubric body.");
-		expect(spec.instructions).toContain("SOLID rubric body.");
+		expect(spec.instructions).toContain("Code quality checks.");
 		expect(spec.instructions).toContain("Do not spawn agents or delegate");
 		expect(spec.instructions).toContain(QUALITY_EXPECTATIONS);
 		expectOutputShape(
@@ -279,10 +279,11 @@ describe("execution role specs", () => {
 		});
 		expect(architecture.instructions).toContain("Architecture rubric body.");
 		expect(architecture.instructions).toContain("Architecture standard body.");
-		expect(architecture.instructions).toContain("Architecture structure body.");
-		expect(architecture.instructions).not.toContain("DRY rubric body.");
-		expect(quality.instructions).toContain("SOLID rubric body.");
-		expect(quality.instructions).toContain("DRY rubric body.");
+		expect(architecture.instructions).toContain(
+			"Architecture review contract.",
+		);
+		expect(quality.instructions).toContain("Code quality checks.");
+		expect(quality.instructions).toContain("Architecture review contract.");
 
 		const scout = await executionScoutSpec(store, reviewRole, {
 			plan,
