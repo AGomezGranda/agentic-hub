@@ -28,9 +28,18 @@ testing skill needed:
    the missing behaviour.
 3. Implement the smallest sufficient change. Wire side-effecting collaborators
    at startup, pass each consumer only what it uses, and call pure helpers
-   directly. Rerun the test, then the phase's
+   directly. Keep domain code free of framework/I/O imports, business rules
+   out of use cases and adapters, and invariants inside their owner — per the
+   governing architecture contract (repo standard, else the
+   `architecture-audit` skill's `references/standard.md`). Rerun the test, then the phase's
    full automated success criteria (tests/lint/build from the plan).
-4. Refactor while green, with the tests as a safety net.
+4. Refactor while green, with the tests as a safety net. Leave touched code
+   cleaner than you found it (boy-scout rule): small splits, renames to the
+   domain language, extracting a value object or port the change needed.
+   A restructure the plan didn't foresee that spans many callers or another
+   context is a scope change — record it under the plan's Structural Debt
+   and ask, rather than doing it silently. Commit pure moves separately from
+   behaviour changes.
 5. Repeat for the next behaviour.
 
 Trivial prose/glue changes (a one-line pass-through, a constant, a comment)

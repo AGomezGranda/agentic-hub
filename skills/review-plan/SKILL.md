@@ -16,6 +16,14 @@ behavior, migration or compatibility hazards, unjustified abstractions and
 verification gaps. Avoid prescribing additional work without a requirement,
 adopted rule or concrete consequence.
 
+Moving touched code toward the governing contract is an adopted rule (the
+boy-scout rule), not scope creep. Report as a finding a plan that adds code
+to a touched module still violating the contract without a restructure phase
+or a stated reason (P1 when the new code deepens a P1 violation, else P2).
+Check that restructure phases are behaviour-preserving, come before the
+feature phases, keep moves separate from behaviour changes, and stay bounded
+to the touched area; out-of-boundary debt belongs in Structural Debt.
+
 If a previous review exists, compare its scope and source state and track its
 findings while assessing remaining coverage. Distinguish newly missed issues
 from changes to the plan or its assumptions.

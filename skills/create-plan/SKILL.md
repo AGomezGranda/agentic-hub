@@ -43,12 +43,39 @@ child or research yourself.
 
 <!-- agentic-hub: fanout -->
 
+## 1b. Leave the touched area cleaner (boy-scout rule)
+
+Every plan moves the code it touches toward the governing architecture
+contract — that is a standing requirement, not scope creep. For each module
+the change touches (and the boundary it crosses), compare against the
+contract and decide the target shape *before* deciding where new code goes:
+
+- **Split** a file or class that mixes independent reasons to change
+  (pricing + notification, rule + I/O) so the new code lands in a cohesive home.
+- **Move** code into its context/layer folder (`<context>/domain|application|adapters`)
+  instead of growing a layer-first or junk-drawer module (`services/`, `utils/`).
+- **Extract** what the change needs to be clean: a port for a side effect
+  constructed inline, a value object for a primitive with rules, an invariant
+  owner for a rule duplicated across callers, a composition-root wiring point.
+- **Add enforcement** (import-linter / dependency-cruiser contract) for a
+  boundary the plan establishes, so it stays fixed.
+
+Bound it: restructure what the change touches and what new code must depend
+on — not the whole repository. Prefer the target design that makes the next
+feature in this area a one-folder change. Violations outside that boundary go
+in a **Structural Debt** list (location, rule ID, suggested follow-up), not
+into the phases. If a restructure is too large to bundle (many callers,
+cross-context, migration), say so and propose it as its own PR ahead of the
+feature, with the trade-off stated — never silently add to a non-compliant area.
+
 ## 2. Agree on structure before details
 
-Propose phases first, get a nod, then write details:
+Propose phases first, get a nod, then write details. Structural phases come
+first and are behaviour-preserving (moves/splits/extractions with tests green
+before and after), so the feature phases build on the clean shape:
 ```
 ## Implementation Phases
-1. [Phase] - [what it accomplishes]
+1. [Restructure] - [target shape and why it eases this and later changes]
 2. [Phase] - [what it accomplishes]
 Does this phasing make sense?
 ```
@@ -60,8 +87,10 @@ If one exists (e.g. `meta/plans/`, `docs/plans/`), save there without asking.
 Otherwise create `plans/` and save there. Frontmatter: just `date`, `title`,
 `status: draft`. Top-level, where material: **Current State** (key facts with
 `file:line` refs), **Design Decisions** (decision + rationale, else none
-beyond conventions), **Risks & Mitigations** (risk → mitigation). Body, per
-phase:
+beyond conventions), **Target Structure** (before → after tree of the
+touched area, with the rule IDs each move satisfies), **Structural Debt**
+(out-of-boundary violations noticed, for follow-up), **Risks & Mitigations**
+(risk → mitigation). Body, per phase:
 
 - **Overview** — 1-2 sentences
 - **Changes** — specific files/functions, not vague intent
@@ -80,7 +109,9 @@ Give every executable phase a unique numbered heading in the form
 Include a **PR Strategy** even for one PR. List PRs in delivery order and give
 each a title and its ordered phase headings, copied verbatim without the
 Markdown hashes. Assign every phase exactly once. Group phases when they ship
-together and note dependencies between PRs. After edits, check the mapping
+together and note dependencies between PRs. Keep pure moves/renames in their
+own commits (or PR) separate from behaviour changes so the diff stays
+reviewable. After edits, check the mapping
 against the final headings before presenting the plan.
 
 No blocking questions in the final plan — resolve every one before writing it
@@ -91,7 +122,8 @@ another testing skill to say it. No placeholders — never write TODO, TBD,
 or vague intent; every change names the exact file and the exact change
 (types, signatures, commands). Self-review before presenting: (a) every
 requirement maps to a phase, (b) no placeholders, (c) names/types consistent
-across phases.
+across phases, (d) no new code lands in a touched area that still violates
+the contract without a restructure phase or a stated reason.
 
 ## 4. Iterate
 
@@ -108,6 +140,13 @@ that already covers the case.
 ## Guidelines
 
 - Be skeptical: question vague requirements, verify instead of assuming.
-- Be thorough: read full files, cite `file:line`, use real patterns already in
-  the codebase (grep for similar features before inventing a new one).
+- Be thorough: read full files, cite `file:line`, reuse existing patterns
+  (grep for similar features before inventing a new one) — but only where
+  they comply with the governing architecture contract below.
+- Place every new file, port, adapter and wiring point per the governing
+  architecture contract: the repo's declared standard/ADRs, else the
+  `architecture-audit` skill's `references/standard.md`. Existing structure is
+  not the baseline; a plan that copies a violation fails review-plan. Cite the
+  rule IDs (L/T/D/S) a placement decision rests on in **Design Decisions**,
+  and name invariant owners and value objects for domain changes.
 - Be practical: incremental phases, explicit non-goals, edge cases named.

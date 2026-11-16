@@ -79,7 +79,8 @@ the composition root.
 - **D4** Inject the narrowest capability (a port), not `container` or `settings`.
 - **D5** Pure helpers and value objects are not injected, and interfaces
   exist only at ports (L3). An interface over pure logic with one
-  implementation is over-engineering: route to ponytail, not a D finding.
+  implementation is over-engineering: report it as a code-quality-audit
+  simplicity (KISS) finding, not a D finding.
 
 ## S — Folder structure
 

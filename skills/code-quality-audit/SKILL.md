@@ -17,9 +17,12 @@ bounded inventory of modules and public contracts.
 
 Identify domain vocabulary, explicit requirements, dependency lifecycles and
 error conventions. Conventions explain scope and compatible corrections;
-consistency alone does not excuse a defect. Apply the adopted architecture
-contract to DI choices. Without one, justify recommendations by testability,
-lifecycle or caller-visible effects; do not silently impose another profile.
+consistency alone does not excuse a defect. Apply the same governing
+architecture contract as architecture-audit to DI, typing and value-object
+choices: the requested or repository-declared contract, else
+`../architecture-audit/references/standard.md` as the strict default —
+disclose which one applies. Read references/examples.md for calibrated
+findings and non-findings per rule.
 
 Work through applicable checks against the inventory. Follow behavior through
 callers, error paths and tests; do not stop after a few promising examples.

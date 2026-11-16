@@ -1,6 +1,6 @@
 ---
 name: address-pr-comments
-description: Triage the review comments on a GitHub PR, validate each against the code, apply fixes for the valid ones and draft replies to every comment. Use when asked to address, handle, or respond to PR comments or review feedback. Not reviewing a PR yourself (ponytail-review) or writing the PR.
+description: Triage the review comments on a GitHub PR, validate each against the code, apply fixes for the valid ones and draft replies to every comment. Use when asked to address, handle, or respond to PR comments or review feedback. Not reviewing a PR yourself (code-review) or writing the PR.
 ---
 
 # Address PR Comments

@@ -7,7 +7,8 @@ argument-hint: '[repo | path/bounded context | diff/PR ref]'
 # Architecture Audit
 
 Produce a read-only audit. Read references/review.md for evidence, severity
-and completion requirements and references/checks.md for investigation checks.
+and completion requirements, references/checks.md for investigation checks
+and references/examples.md for calibrated findings and non-findings.
 
 ## Scope and standard
 
