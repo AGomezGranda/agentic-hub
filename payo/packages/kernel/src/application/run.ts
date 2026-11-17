@@ -1,7 +1,10 @@
+import type { RunIdInput } from "@payo/contracts";
 import { type Json, RunConfig, RunEventBody } from "@payo/contracts";
+import { recover } from "../domain/recovery.ts";
 import { fold, type RunState, reduce } from "../domain/state.ts";
-import { incompleteUsage, UNKNOWN_USAGE } from "../domain/usage.ts";
 import type { RunStore } from "./store.ts";
+
+export { recover } from "../domain/recovery.ts";
 
 /** Recursive merge of plain objects; arrays and scalars in `overrides` replace the defaults. */
 export function resolveRunConfig(
@@ -44,53 +47,6 @@ function rejectProtoKey(value: unknown): void {
 	}
 }
 
-/**
- * Startup only: a running attempt after a restart was interrupted, and a running step with no running attempt
- * and no open gate (the window between attempts) gets a gate. Returns [] once nothing is left to gate.
- */
-export function recover(state: RunState): RunEventBody[] {
-	const bodies: RunEventBody[] = [];
-	for (const attempt of state.attempts.values()) {
-		if (attempt.status !== "running") continue;
-		bodies.push({
-			type: "attempt.finished",
-			attemptId: attempt.attemptId,
-			outcome: "interrupted",
-			// Keep observed spend; recovery cannot claim the attempt was fully observed.
-			usage:
-				attempt.usage === null ? UNKNOWN_USAGE : incompleteUsage(attempt.usage),
-		});
-		bodies.push({
-			type: "gate.raised",
-			gateId: `interrupted:${attempt.attemptId}`,
-			stepId: attempt.stepId,
-			kind: "interrupted-attempt",
-			allowedCommands: ["retry", "abandon"],
-			reason: "attempt was running when the process stopped",
-		});
-	}
-	for (const step of state.steps.values()) {
-		if (step.status !== "running") continue;
-		const busy = [...state.attempts.values()].some(
-			(a) => a.stepId === step.stepId && a.status === "running",
-		);
-		const gated = [...state.gates.values()].some(
-			(g) => g.stepId === step.stepId && g.status === "open",
-		);
-		if (busy || gated) continue;
-		// The seq suffix keeps the id unique if a resolved gate is followed by another crash in the same window.
-		bodies.push({
-			type: "gate.raised",
-			gateId: `interrupted-step:${step.stepId}:${state.lastSeq}`,
-			stepId: step.stepId,
-			kind: "interrupted-step",
-			allowedCommands: ["retry", "abandon"],
-			reason: "step had no running attempt when the process stopped",
-		});
-	}
-	return bodies;
-}
-
 /** Validates and folds every body before any write, so a bad batch never reaches the log. */
 export async function commit(
 	store: RunStore,
@@ -113,17 +69,25 @@ export async function commit(
 
 export function startRun(
 	store: RunStore,
-	input: { runId: string; repo: string; baseBranch: string; config: RunConfig },
+	input: {
+		runId: RunIdInput;
+		repo: string;
+		baseBranch: string;
+		config: RunConfig;
+	},
 ): Promise<RunState> {
 	return commit(store, null, [{ type: "run.created", ...input }]);
 }
 
 export async function openRun(
 	store: RunStore,
-	runId: string,
+	runId: RunIdInput,
+	options: { recover?: boolean } = {},
 ): Promise<RunState> {
 	const events = await store.read(runId);
 	if (events.length === 0) throw new Error(`run ${runId} not found`);
 	const state = fold(events);
-	return commit(store, state, recover(state));
+	return options.recover === false
+		? state
+		: commit(store, state, recover(state));
 }

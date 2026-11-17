@@ -1,6 +1,6 @@
 **OpenCode** — first check which dispatch tools this environment actually
 documents. If a subagent mechanism is available, dispatch children the same
-way this skill's Pi/Claude Code branches do — one message/call per batch,
+way this skill's Pi/Claude Code branches do — at most three children total, within the remaining task budget,
 not a loop — and say in one line that you used it instead of the serial
 path below. A directory's presence (e.g. an `agent/` dir) is not evidence
 of a callable subagent API. If no mechanism is documented, or you can't

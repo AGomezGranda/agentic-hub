@@ -14,6 +14,7 @@ import {
 import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
 	ExecutionDiffTooLargeError,
+	ExecutionWorkspaceNotFound,
 	type ExecutionWorkspace as ExecutionWorkspacePort,
 	type ExecutionWorkspacePrepareInput,
 	type ExecutionWorkspaceSnapshot,
@@ -693,14 +694,20 @@ async function checkedWorktreePath(
 ): Promise<string> {
 	const target = resolve(path);
 	assertInside(root, target);
-	const [realRoot, realTarget] = await Promise.all([
-		realpath(root),
-		realpath(target),
-	]);
-	assertInside(realRoot, realTarget);
-	const statInfo = await lstat(target);
-	if (!statInfo.isDirectory())
-		throw new Error(`execution worktree is not a directory: ${target}`);
+	try {
+		const [realRoot, realTarget] = await Promise.all([
+			realpath(root),
+			realpath(target),
+		]);
+		assertInside(realRoot, realTarget);
+		const statInfo = await lstat(target);
+		if (!statInfo.isDirectory())
+			throw new Error(`execution worktree is not a directory: ${target}`);
+	} catch (error) {
+		if (error instanceof Error && "code" in error && error.code === "ENOENT")
+			throw new ExecutionWorkspaceNotFound(target, error);
+		throw error;
+	}
 	return target;
 }
 
@@ -824,7 +831,7 @@ async function untrackedDiffs(
 				throw new ExecutionDiffTooLargeError(maxBytes);
 			throw error;
 		}
-		if (result.exitCode !== 1 && result.stdout.length === 0)
+		if (result.exitCode !== 0 && result.exitCode !== 1)
 			throw new Error(
 				`could not diff untracked file ${path}: ${result.stderr}`,
 			);

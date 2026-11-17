@@ -4,6 +4,7 @@ export * from "./application/agent.ts";
 export * from "./application/agent-step.ts";
 export * from "./application/checks.ts";
 export * from "./application/code-host.ts";
+export * from "./application/command-error.ts";
 export * from "./application/execution-workspace.ts";
 export * from "./application/fanout.ts";
 export * from "./application/repository-publication.ts";

@@ -107,3 +107,23 @@ it("keeps the web dependency graph directed from app to features to shared", () 
 	}
 	expect(violations).toEqual([]);
 });
+
+it("keeps execution naming and generic resume APIs in their owning features", () => {
+	const owners = {
+		correctExecutionNaming: "features/run-workspace/api.ts",
+		resumeRun: "features/runs/api.ts",
+	};
+	for (const [command, owner] of Object.entries(owners)) {
+		const definitions = readdirSync(sourceRoot, {
+			recursive: true,
+			encoding: "utf8",
+		}).filter(
+			(file) =>
+				file.endsWith("/api.ts") &&
+				new RegExp(`export async function ${command}\\(`).test(
+					readFileSync(resolve(sourceRoot, file), "utf8"),
+				),
+		);
+		expect(definitions, command).toEqual([owner]);
+	}
+});

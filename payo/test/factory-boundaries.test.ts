@@ -27,7 +27,6 @@ it("keeps factory domain policy independent of application and infrastructure", 
 				: specifier;
 			expect(
 				target.startsWith("domain/") ||
-					target === "errors.ts" ||
 					target === "@payo/contracts" ||
 					target === "@payo/kernel",
 				`${file} -> ${specifier}`,
@@ -45,7 +44,9 @@ it("keeps factory domain policy independent of application and infrastructure", 
 });
 
 it("keeps publication orchestration behind injected ports", () => {
-	for (const file of files.filter((file) => file.startsWith("publication/"))) {
+	for (const file of files.filter((file) =>
+		file.startsWith("application/publication/"),
+	)) {
 		const source = readFileSync(resolve(root, file), "utf8");
 		for (const specifier of imports(source))
 			expect(specifier, `${file} -> ${specifier}`).not.toMatch(
@@ -77,4 +78,45 @@ it("keeps the factory implementation import graph acyclic", () => {
 			visit(dependency, [...path, file]);
 	}
 	for (const file of files) visit(file, []);
+});
+
+it("keeps factory code in owned layers with inward dependencies", () => {
+	for (const file of files) {
+		if (file === "index.ts") continue;
+		const layer = file.split("/")[0];
+		expect(["domain", "application", "infrastructure"], file).toContain(layer);
+		if (layer === "infrastructure") continue;
+		const source = readFileSync(resolve(root, file), "utf8");
+		for (const specifier of imports(source).filter((value) =>
+			value.startsWith("."),
+		)) {
+			const target = relative(root, resolve(root, dirname(file), specifier));
+			expect(
+				target.startsWith("domain/") ||
+					(layer === "application" && target.startsWith("application/")),
+				`${file} -> ${specifier}`,
+			).toBe(true);
+		}
+		expect(source, file).not.toMatch(/NodeJS\.ErrnoException|["']ENOENT["']/);
+	}
+});
+
+it("keeps domain tests beside domain behavior rather than application storage", () => {
+	for (const file of readdirSync(resolve(root, "domain"), {
+		recursive: true,
+		encoding: "utf8",
+	}).filter((file) => file.endsWith(".test.ts"))) {
+		for (const specifier of imports(
+			readFileSync(resolve(root, "domain", file), "utf8"),
+		)) {
+			if (!specifier.startsWith(".")) continue;
+			const target = relative(
+				root,
+				resolve(root, "domain", dirname(file), specifier),
+			);
+			expect(target.startsWith("domain/"), `${file} -> ${specifier}`).toBe(
+				true,
+			);
+		}
+	}
 });

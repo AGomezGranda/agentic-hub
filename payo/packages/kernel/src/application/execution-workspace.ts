@@ -1,5 +1,13 @@
+import type { RunIdInput } from "@payo/contracts";
+export class ExecutionWorkspaceNotFound extends Error {
+	constructor(path: string, cause?: unknown) {
+		super(`execution workspace not found: ${path}`, { cause });
+		this.name = "ExecutionWorkspaceNotFound";
+	}
+}
+
 export interface ExecutionWorkspacePrepareInput {
-	executionId: string;
+	executionId: RunIdInput;
 	repo: string;
 	worktreeRoot: string;
 	branch: string;

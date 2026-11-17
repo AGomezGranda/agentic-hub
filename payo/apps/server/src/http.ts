@@ -1,9 +1,11 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { isAbsolute } from "node:path";
 import { ConfigRevisionConflictError, PayoConfigPathError } from "@payo/config";
+import type { RunIdInput } from "@payo/contracts";
 import {
 	AnswerRequest,
 	type ApiError,
+	ApiRunId,
 	ConfigSettingsSnapshot,
 	DoctorReport,
 	EventsResponse,
@@ -21,7 +23,6 @@ import {
 	PublicationPreviewRequest,
 	PublishRequest,
 	ResumeRequest,
-	RunId,
 	RunIdResponse,
 	RunReview,
 	RunSummary,
@@ -49,7 +50,13 @@ import {
 	notFound,
 } from "./errors.ts";
 import type { WorkspaceOpener } from "./open-workspace.ts";
+import type { RunApplication } from "./run-application.ts";
 import type { ConfigSettingsService } from "./settings.ts";
+
+type HttpServices = Pick<
+	Composition,
+	keyof RunApplication | "config" | "doctor"
+>;
 
 const JSON_LIMIT = 64 * 1024;
 
@@ -57,7 +64,7 @@ export interface HandlerOptions {
 	token: string;
 	webOrigins: readonly string[];
 	getPort(): number;
-	getServices(): Composition | null;
+	getServices(): HttpServices | null;
 	configSettings: ConfigSettingsService;
 	pickDirectory: DirectoryPicker;
 	openWorkspace: WorkspaceOpener;
@@ -205,7 +212,7 @@ async function handle(
 	}
 
 	const runId = segments[3];
-	if (!runId || !RunId.safeParse(runId).success)
+	if (!runId || !ApiRunId.safeParse(runId).success)
 		throw new ApiFailure(400, "invalid_request", "invalid run id");
 	if (!services.hasRun(runId)) throw notFound(`run ${runId} not found`);
 
@@ -539,8 +546,8 @@ function respondFailure(
 async function stream(
 	req: IncomingMessage,
 	res: ServerResponse,
-	services: Composition,
-	runId: string,
+	services: HttpServices,
+	runId: RunIdInput,
 	fromSeq: number | undefined,
 	cors: Record<string, string>,
 ): Promise<void> {

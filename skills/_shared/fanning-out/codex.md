@@ -1,8 +1,8 @@
-**Codex** — when this skill calls for independent parallel work, spawn one
-subagent per bounded question, dimension, or review lens. Dispatch independent
+**Codex** — when this skill calls for independent parallel work, delegate bounded
+assignments within the shared three-subagent limit. Dispatch independent
 children before waiting, then collect all results and synthesize them in the
 parent. Use the available subagent tools; do not assume a particular tool name
-or a fixed concurrency cap. Give each child the relevant scope, expected
+beyond the tools documented for this session. Give each child the relevant scope, expected
 output, and read-only constraint when appropriate.
 The bundled `agents/*.md` definitions in this repository are for Pi, so
 use generic Codex subagents unless matching Codex custom agents are configured.

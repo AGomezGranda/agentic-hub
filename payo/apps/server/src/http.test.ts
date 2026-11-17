@@ -77,6 +77,7 @@ async function setup(
 	});
 	const token = await ensureServerToken(dataDir);
 	const composition = await createComposition({
+		env: {},
 		config,
 		...(adapters ? { adapters } : {}),
 		doctor: async () => ({

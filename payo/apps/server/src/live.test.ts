@@ -77,6 +77,7 @@ describe.runIf(process.env.PAYO_LIVE === "1")("live Pi smoke", () => {
 		});
 		const worktree = await workspace.create("live-run", repo, base);
 		const runner = createPiRunner({
+			env: { ...process.env },
 			bin: process.env.PAYO_PI_BIN?.trim() || "pi",
 			provider: process.env.PAYO_PI_PROVIDER?.trim() || "anthropic",
 			sessionRoot: join(dataDir, "sessions"),

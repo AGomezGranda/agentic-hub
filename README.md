@@ -12,7 +12,7 @@ hosts' subagent support is unverified.
 
 | Host | Skills | Subagents | Custom agents | State |
 |---|---|---|---|---|
-| **Pi** (primary) | `~/.agents/skills/` | `subagent` tool, `runs.all`, concurrent (cap 20, 64/run) | 4 scopes, incl. `~/.pi/agent/agents/` | fully capable |
+| **Pi** (primary) | `~/.agents/skills/` | `subagent` tool, `runs.all`, at most 3 active task subagents | 4 scopes, incl. `~/.pi/agent/agents/` | fully capable |
 | **Claude Code** | `~/.claude/skills/` | `Agent` tool; children cannot nest (unverified) | none shipped | built-in agents only |
 | **Codex** | `~/.agents/skills/` | subagents (when requested) | `~/.codex/agents/` | native skills |
 | **OpenCode** | `~/.agents/skills/` | unverified | unverified | installed on other machines |

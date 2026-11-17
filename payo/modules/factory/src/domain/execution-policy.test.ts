@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { assertAcceptanceEvidence, repairContinuation } from "./execution.ts";
+import {
+	assertAcceptanceEvidence,
+	implementationReportDecision,
+	repairContinuation,
+} from "./execution.ts";
 
 const artifact = {
 	sha256: "a".repeat(64),
@@ -60,4 +64,40 @@ describe("execution outcome policy", () => {
 			).toThrow("phase acceptance is missing report or review evidence");
 		},
 	);
+});
+
+it("reconciles an incomplete implementation once, then escalates without losing its reasons", () => {
+	const incomplete = {
+		completedCriteria: ["first"],
+		planIssues: ["unclear API"],
+	};
+	const reason =
+		"implementer reported plan issues: unclear API\nimplementation did not report all acceptance criteria: second";
+	expect(
+		implementationReportDecision(["first", "second"], incomplete, false),
+	).toEqual({ decision: "Reconcile", reason });
+	expect(
+		implementationReportDecision(["first", "second"], incomplete, true),
+	).toEqual({ decision: "Escalated", reason });
+	expect(
+		implementationReportDecision(
+			["first"],
+			{ completedCriteria: ["first"], planIssues: [] },
+			true,
+		),
+	).toEqual({ decision: "Check" });
+	expect(
+		implementationReportDecision(
+			["first"],
+			{ completedCriteria: ["first"], planIssues: ["conflict"] },
+			false,
+		).decision,
+	).toBe("Reconcile");
+	expect(
+		implementationReportDecision(
+			["first"],
+			{ completedCriteria: [], planIssues: [] },
+			false,
+		).decision,
+	).toBe("Reconcile");
 });

@@ -12,8 +12,8 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
-import type { AgentEvent, AgentSpec } from "@payo/contracts";
-import { afterEach, describe, expect, it } from "vitest";
+import { AgentEvent, type AgentSpec } from "@payo/contracts";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	checkPi,
 	createPiRunner as createPiRunnerWithArtifacts,
@@ -24,8 +24,9 @@ import {
 const dirs: string[] = [];
 type PiRunnerTestOptions = Omit<
 	Parameters<typeof createPiRunnerWithArtifacts>[0],
-	"readArtifact"
+	"readArtifact" | "env"
 > & {
+	env?: NodeJS.ProcessEnv;
 	readArtifact?: Parameters<
 		typeof createPiRunnerWithArtifacts
 	>[0]["readArtifact"];
@@ -33,6 +34,7 @@ type PiRunnerTestOptions = Omit<
 function createPiRunner(options: PiRunnerTestOptions) {
 	return createPiRunnerWithArtifacts({
 		...options,
+		env: options.env ?? { ...process.env },
 		readArtifact:
 			options.readArtifact ??
 			(async () => {
@@ -407,6 +409,47 @@ function usageEvents(events: AgentEvent[]) {
 }
 
 describe("mapPiRecord cost accounting", () => {
+	it.each([
+		{ input: -1, cacheRead: 0, current: 0, output: -1 },
+		{
+			input: Number.MAX_VALUE,
+			cacheRead: Number.MAX_VALUE,
+			current: 0,
+			output: 1,
+		},
+		{
+			input: Number.MAX_VALUE,
+			cacheRead: 0,
+			current: Number.MAX_VALUE,
+			output: 1,
+		},
+	])(
+		"maps invalid or overflowing counters to unknown: %j",
+		({ input, cacheRead, current, output }) => {
+			const state = baseState({
+				usage: { tokensIn: current, tokensOut: 0, cost: 0 },
+			});
+			const events = mapPiRecord(
+				assistant("valid result", {
+					...nativeUsage(input, output, -1),
+					cacheRead,
+				}),
+				state,
+			);
+			for (const event of events)
+				expect(AgentEvent.safeParse(event).success).toBe(true);
+			expect(usageEvents(events)[0]).toMatchObject({
+				tokensIn: "unknown",
+				cost: "unknown",
+			});
+			if (output < 0) expect(usageEvents(events)[0]?.tokensOut).toBe("unknown");
+			expect(mapPiRecord({ type: "agent_settled" }, state)).toContainEqual({
+				type: "result",
+				text: "valid result",
+			});
+		},
+	);
+
 	it("treats two assistant calls as cumulative replacement snapshots", () => {
 		const state = baseState();
 		mapPiRecord(assistant("first", nativeUsage(1, 1, 0.002)), state);
@@ -794,9 +837,9 @@ describe("createPiRunner", () => {
 	it("kills and awaits a write process group, including a descendant", async () => {
 		if (process.platform === "win32") return;
 		const root = await tempDir();
-		const marker = join(root, "late-write.txt");
+		const marker = join(root, "descendant.pid");
 		const bin = join(root, "fake-pi");
-		const child = `setTimeout(() => require('fs').writeFileSync(${JSON.stringify(marker)}, 'alive'), 650)`;
+		const child = `require('fs').writeFileSync(${JSON.stringify(marker)}, String(process.pid)); setInterval(()=>{},10000)`;
 		await writeFile(
 			bin,
 			`#!/usr/bin/env node\nconst { spawn } = require('node:child_process');\nspawn(process.execPath, ['-e', ${JSON.stringify(child)}], { stdio: 'ignore' });\nsetTimeout(() => {}, 10000);\n`,
@@ -807,18 +850,45 @@ describe("createPiRunner", () => {
 		const collected = collect(
 			runner.run(specFor({ tools: "write" }), controller.signal),
 		);
-		await new Promise((resolve) => setTimeout(resolve, 75));
-		controller.abort();
-		await collected;
-		await new Promise((resolve) => setTimeout(resolve, 750));
-		await expect(readFile(marker, "utf8")).rejects.toThrow();
-	});
+		let descendantPid = 0;
+		try {
+			descendantPid = await vi.waitFor(
+				async () => {
+					const pid = Number(await readFile(marker, "utf8"));
+					expect(pid).toBeGreaterThan(1);
+					return pid;
+				},
+				{ timeout: 3000 },
+			);
+			controller.abort();
+			await vi.waitFor(() => collected, { timeout: 3000 });
+			expect(() => process.kill(descendantPid, 0)).toThrow(
+				expect.objectContaining({ code: "ESRCH" }),
+			);
+		} finally {
+			controller.abort();
+			if (descendantPid) {
+				try {
+					process.kill(descendantPid, "SIGKILL");
+				} catch (error) {
+					expect(error).toMatchObject({ code: "ESRCH" });
+				}
+			}
+			await vi.waitFor(() => collected, { timeout: 3000 });
+		}
+	}, 10000);
 
 	it("spawns in the worktree with ignored stdin, merged env and no shell", async () => {
 		const root = await tempDir();
 		const spec = specFor({ cwd: "/tmp/worktree" });
 		const stub = spawnStub({ stdout: fixture("valid") });
-		const runner = createPiRunner({ sessionRoot: root, spawn: stub.spawn });
+		const env = { PATH: "/configured/bin", PAYO_RUN_ID: "foreign" };
+		const runner = createPiRunner({
+			sessionRoot: root,
+			spawn: stub.spawn,
+			env,
+		});
+		env.PATH = "/changed/bin";
 
 		await collect(runner.run(spec, new AbortController().signal));
 
@@ -829,7 +899,7 @@ describe("createPiRunner", () => {
 		expect(options?.env?.PAYO_RUN_ID).toBe("r1");
 		expect(options?.env?.PAYO_STEP_ID).toBe("s1");
 		expect(options?.env?.PAYO_ATTEMPT_ID).toBe("a1");
-		expect(options?.env?.PATH).toBe(process.env.PATH);
+		expect(options?.env?.PATH).toBe("/configured/bin");
 	});
 
 	it("puts the session directory under the session root and creates it private", async () => {

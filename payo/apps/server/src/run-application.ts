@@ -10,6 +10,7 @@ import type {
 	PublishRequest,
 	ResumeRequest,
 	RunEvent,
+	RunIdInput,
 	RunReview,
 	RunSummary,
 	WorkCostTree,
@@ -69,41 +70,41 @@ import { readRunSummary } from "./run-summary.ts";
 
 export interface RunApplication {
 	implementPreview(
-		sourceRunId: string,
+		sourceRunId: RunIdInput,
 		input: ImplementPreviewRequest,
 	): Promise<ImplementPreview>;
 	executionNaming(
-		runId: string,
+		runId: RunIdInput,
 		input: ExecutionNamingRequest,
 	): Promise<ImplementPreview>;
-	implement(sourceRunId: string, input: ImplementRequest): Promise<string>;
-	publicationPreview(executionId: string): Promise<PublicationPreview>;
-	publish(executionId: string, input: PublishRequest): Promise<string>;
-	summary(runId: string): Promise<RunSummary>;
-	costs(runId: string): Promise<WorkCostTree>;
-	review(runId: string): Promise<RunReview>;
-	planVersions(runId: string): Promise<PlanVersionDetail[]>;
-	planVersion(runId: string, number: number): Promise<PlanVersionDetail>;
+	implement(sourceRunId: RunIdInput, input: ImplementRequest): Promise<string>;
+	publicationPreview(executionId: RunIdInput): Promise<PublicationPreview>;
+	publish(executionId: RunIdInput, input: PublishRequest): Promise<string>;
+	summary(runId: RunIdInput): Promise<RunSummary>;
+	costs(runId: RunIdInput): Promise<WorkCostTree>;
+	review(runId: RunIdInput): Promise<RunReview>;
+	planVersions(runId: RunIdInput): Promise<PlanVersionDetail[]>;
+	planVersion(runId: RunIdInput, number: number): Promise<PlanVersionDetail>;
 	planUpdate(
-		runId: string,
+		runId: RunIdInput,
 		input: PlanUpdateRequest | PlanRestoreRequest,
 	): Promise<void>;
 	listRuns(): Promise<RunSummary[]>;
-	readEvents(runId: string, fromSeq?: number): Promise<RunEvent[]>;
-	hasRun(runId: string): boolean;
-	isActive(runId: string): boolean;
+	readEvents(runId: RunIdInput, fromSeq?: number): Promise<RunEvent[]>;
+	hasRun(runId: RunIdInput): boolean;
+	isActive(runId: RunIdInput): boolean;
 	start(input: {
 		workItemRequest: WorkItemRequest;
 		repo: string;
 		baseBranch: string;
 	}): Promise<string>;
 	answer(
-		runId: string,
+		runId: RunIdInput,
 		input: { questionId: string; text: string },
 	): Promise<RunSummary>;
-	approve(runId: string): Promise<RunSummary>;
-	requestChanges(runId: string): Promise<void>;
-	resume(runId: string, input?: ResumeRequest): Promise<void>;
+	approve(runId: RunIdInput): Promise<RunSummary>;
+	requestChanges(runId: RunIdInput): Promise<void>;
+	resume(runId: RunIdInput, input?: ResumeRequest): Promise<void>;
 }
 export interface RunApplicationOptions {
 	store: RunStore;
@@ -148,7 +149,7 @@ export async function createRunApplication(
 	const handles = new Map<string, FactoryHandle>();
 	const executionHandles = new Map<string, ExecutionHandle>();
 	const publicationHandles = new Map<string, PublicationHandle>();
-	const summaryOf = (runId: string) =>
+	const summaryOf = (runId: RunIdInput) =>
 		readRunSummary(
 			store,
 			runId,
@@ -197,7 +198,7 @@ export async function createRunApplication(
 		}
 	}
 
-	function handleOf(runId: string): FactoryHandle {
+	function handleOf(runId: RunIdInput): FactoryHandle {
 		const handle = handles.get(runId);
 		if (!handle)
 			throw new ApplicationError("not_found", `run ${runId} not found`);
@@ -259,7 +260,8 @@ export async function createRunApplication(
 						signal,
 					);
 					const publicationId = handle.log.current().runId;
-					publicationHandles.set(publicationId, handle);
+					if (!publicationHandles.has(publicationId))
+						publicationHandles.set(publicationId, handle);
 					if (created)
 						schedule((signal) => executePublication(handle, { signal }));
 					return publicationId;

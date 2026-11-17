@@ -1,7 +1,8 @@
 import type { ImplementPreview } from "@payo/contracts";
+import { correctExecutionNaming } from "@web/features/run-workspace/api.ts";
 import { Button } from "@web/shared/ui/Button.tsx";
 import { useState } from "react";
-import { correctExecutionNaming } from "../plan-review/api.ts";
+
 export function ExecutionNamingForm({
 	token,
 	runId,

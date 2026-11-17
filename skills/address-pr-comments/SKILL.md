@@ -94,3 +94,8 @@ Leave resolving threads to the reviewer. Only if asked:
 
 Counts per verdict, commits made, replies posted vs drafted, and anything
 not checked.
+
+Limit delegation to three subagents total across the entire task, excluding
+the parent; scouts and reviewers share those slots. Only the parent delegates,
+and every child must be told not to spawn agents. Completed children still count; reuse them for follow-ups where supported,
+otherwise finish remaining work in the parent. Preserve all required checks.

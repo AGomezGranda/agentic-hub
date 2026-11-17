@@ -9,13 +9,17 @@ const name = z
 	.string()
 	.regex(/^[A-Za-z0-9_.-]+$/)
 	.refine((value) => value !== "." && value !== "..");
-export const GitHubTarget = z.strictObject({
-	host: z.literal("github.com"),
+export const RepositoryTarget = z.strictObject({
+	host: nonBlank,
 	owner,
 	name,
 	repositoryId: nonBlank,
 	baseBranch: nonBlank,
 	baseCommit: sha,
+});
+export type RepositoryTarget = z.infer<typeof RepositoryTarget>;
+export const GitHubTarget = RepositoryTarget.extend({
+	host: z.literal("github.com"),
 });
 export type GitHubTarget = z.infer<typeof GitHubTarget>;
 

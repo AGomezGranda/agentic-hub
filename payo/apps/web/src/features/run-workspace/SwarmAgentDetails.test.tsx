@@ -1,4 +1,5 @@
 import type { SwarmAttempt } from "@payo/contracts";
+import { AttemptId } from "@payo/contracts";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -25,7 +26,7 @@ it("renders markdown safely and closes by keyboard", async () => {
 				seq: 1,
 				at: "2026-11-01",
 				type: "attempt.event",
-				attemptId: "a",
+				attemptId: AttemptId.parse("a"),
 				event: {
 					type: "message",
 					text: "## Findings\n\n**Important**\n\n[unsafe](javascript:alert(1))\n\n<img src=x>",
@@ -68,7 +69,7 @@ it("renders structured plan markdown and retains the full data", async () => {
 				seq: 1,
 				at: "2026-11-01",
 				type: "attempt.event",
-				attemptId: "a",
+				attemptId: AttemptId.parse("a"),
 				event: {
 					type: "message",
 					text: JSON.stringify({
@@ -81,7 +82,7 @@ it("renders structured plan markdown and retains the full data", async () => {
 				seq: 2,
 				at: "2026-11-01",
 				type: "attempt.event",
-				attemptId: "a",
+				attemptId: AttemptId.parse("a"),
 				event: {
 					type: "result",
 					text: JSON.stringify({
@@ -94,7 +95,7 @@ it("renders structured plan markdown and retains the full data", async () => {
 				seq: 3,
 				at: "2026-11-01",
 				type: "attempt.event",
-				attemptId: "a",
+				attemptId: AttemptId.parse("a"),
 				event: { type: "message", text: "{not json" },
 			},
 		],

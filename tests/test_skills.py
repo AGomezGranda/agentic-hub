@@ -96,8 +96,8 @@ def test_serial_branch_states_ordering_and_budget(agent: str) -> None:
 
 def test_codex_branch_dispatches_independent_subagents() -> None:
     text = _host_branch_text("codex")
-    assert "spawn one" in text
-    assert "subagent per bounded question" in text
+    assert "bounded" in text
+    assert "shared three-subagent limit" in text
     assert "collect all results" in text
 
 
@@ -366,3 +366,12 @@ def test_bundled_agent_references_resolve() -> None:
     for name in _skills_with_fanout():
         for filename in re.findall(r"agents/([a-z-]+[.]md)", _skill_text(name)):
             assert (AGENTS_DIR / filename).is_file(), (name, filename)
+
+
+@pytest.mark.parametrize("agent", agents.AGENTS)
+def test_generated_skills_include_shared_delegation_policy(agent: str) -> None:
+    common = (HOST_BRANCH_DIR / "common.md").read_text()
+    for name in _skills_with_fanout():
+        generated = agents._spliced_output(name, agent)
+        assert generated.count(common) == 1
+        assert agents.FANOUT_MARKER not in generated

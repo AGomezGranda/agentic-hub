@@ -6,7 +6,7 @@ import {
 	DoctorReport,
 	ImplementRequest,
 	ResumeRequest,
-	RunId,
+	ApiRunId as RunId,
 	RunReview,
 	RunSummary,
 	RunSummaryList,

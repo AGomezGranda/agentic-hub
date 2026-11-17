@@ -1,4 +1,5 @@
 import type { CostSummary, RunCostTree, WorkCostTree } from "@payo/contracts";
+import { AttemptId, RunId, StepId } from "@payo/contracts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
 	act,
@@ -31,7 +32,7 @@ function run(
 	status: "active" | "ended" = "ended",
 ): RunCostTree {
 	return {
-		runId,
+		runId: RunId.parse(runId),
 		status,
 		outcome: status === "ended" ? "approved" : null,
 		asOfSeq: 5,
@@ -41,14 +42,14 @@ function run(
 				? []
 				: [
 						{
-							stepId: "step",
+							stepId: StepId.parse("step"),
 							name: "Plan",
 							status: "succeeded",
 							cost,
 							attempts: [
 								{
-									attemptId: "attempt",
-									stepId: "step",
+									attemptId: AttemptId.parse("attempt"),
+									stepId: StepId.parse("step"),
 									role: "planner",
 									runner: "pi",
 									model: "openai/model",
@@ -66,7 +67,7 @@ function run(
 
 function tree(cost = known(0.123456)): WorkCostTree {
 	return {
-		sourceRunId: "plan",
+		sourceRunId: RunId.parse("plan"),
 		planning: run("plan", cost),
 		executions: [],
 		total: cost,

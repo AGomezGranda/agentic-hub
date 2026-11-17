@@ -1,6 +1,6 @@
 import type { OpenQuestion, RunReview as RunReviewData } from "@payo/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { getRun } from "@web/features/runs/api.ts";
+import { getRun, resumeRun } from "@web/features/runs/api.ts";
 import { Button } from "@web/shared/ui/Button.tsx";
 import { Markdown } from "@web/shared/ui/Markdown.tsx";
 import { type FormEvent, useCallback, useEffect, useState } from "react";
@@ -10,7 +10,6 @@ import {
 	getPlanVersions,
 	getRunReview,
 	requestChanges,
-	resumeRun,
 	submitPlanUpdate,
 } from "./api.ts";
 import { GateActions, type GateCommand } from "./GateActions.tsx";

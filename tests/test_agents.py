@@ -105,6 +105,7 @@ def make_fanout_branches(src_dir: Path, agents_: tuple[str, ...]) -> None:
     doesn't leak another host's branch."""
     branch_dir = src_dir / "_shared" / "fanning-out"
     branch_dir.mkdir(parents=True, exist_ok=True)
+    (branch_dir / "common.md").write_text("[shared delegation policy]\n")
     for agent in agents_:
         (branch_dir / f"{agent}.md").write_text(f"[{agent} branch content]\n")
 
@@ -601,6 +602,7 @@ def test_native_host_splice_lifecycle(
     assert agents.install_one(agent, "demo")
     tp = fake_agents[agent][0] / "demo"
     skill_text = (tp / "SKILL.md").read_text()
+    assert skill_text.count("[shared delegation policy]") == 1
     assert f"[{agent} branch content]" in skill_text
     for other in NATIVE_HOSTS:
         if other != agent:

@@ -1,14 +1,13 @@
+import { resumeRun } from "@web/features/runs/api.ts";
 import { getApiBaseUrl } from "@web/shared/api/client.ts";
 import { afterEach, expect, it, vi } from "vitest";
 import {
 	answerQuestion,
 	approveRun,
-	correctExecutionNaming,
 	getRunReview,
 	implementRun,
 	previewImplementation,
 	requestChanges,
-	resumeRun,
 } from "./api.ts";
 
 const token = "memory-only-token";
@@ -104,7 +103,7 @@ it("launches with default or explicit base", async () => {
 	]);
 });
 
-it("sends server-backed naming previews and correction confirmations", async () => {
+it("sends an implementation naming preview", async () => {
 	const preview = {
 		candidates: [],
 		ticketId: null,
@@ -112,35 +111,15 @@ it("sends server-backed naming previews and correction confirmations", async () 
 		errors: {},
 		previewHash: "hash",
 	};
-	const fetchMock = vi.fn(
-		async (_url: RequestInfo | URL, _init?: RequestInit) => response(preview),
-	);
+	const fetchMock = vi.fn(async () => response(preview));
 	vi.stubGlobal("fetch", fetchMock);
 	expect(
 		await previewImplementation(token, runId, { prId: "one", ticketId: null }),
 	).toEqual(preview);
-	await correctExecutionNaming(token, runId, { slug: "create-todo-entity" });
-	await correctExecutionNaming(token, runId, {
-		slug: "create-todo-entity",
-		previewHash: "hash",
-	});
-	expect(
-		fetchMock.mock.calls.map(([url, init]) => [
-			String(url),
-			JSON.parse(String(init?.body)),
-		]),
-	).toEqual([
-		[
-			`${getApiBaseUrl()}/runs/${runId}/implement-preview`,
-			{ prId: "one", ticketId: null },
-		],
-		[
-			`${getApiBaseUrl()}/runs/${runId}/execution-naming`,
-			{ slug: "create-todo-entity" },
-		],
-		[
-			`${getApiBaseUrl()}/runs/${runId}/execution-naming`,
-			{ slug: "create-todo-entity", previewHash: "hash" },
-		],
-	]);
+	expect(fetchMock).toHaveBeenCalledWith(
+		`${getApiBaseUrl()}/runs/${runId}/implement-preview`,
+		expect.objectContaining({
+			body: JSON.stringify({ prId: "one", ticketId: null }),
+		}),
+	);
 });

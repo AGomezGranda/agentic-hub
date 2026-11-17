@@ -1,12 +1,15 @@
-import { ExecutionSummary } from "@payo/contracts";
+import { ExecutionSummary, GateId, RunId, StepId } from "@payo/contracts";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { correctExecutionNaming } from "@web/features/run-workspace/api.ts";
 import { afterEach, expect, it, vi } from "vitest";
-import { correctExecutionNaming } from "../plan-review/api.ts";
+
 import { ExecutionNamingForm } from "./ExecutionNamingForm.tsx";
 import { ExecutionView } from "./ExecutionView.tsx";
 
-vi.mock("../plan-review/api.ts", () => ({ correctExecutionNaming: vi.fn() }));
+vi.mock("@web/features/run-workspace/api.ts", () => ({
+	correctExecutionNaming: vi.fn(),
+}));
 afterEach(() => {
 	cleanup();
 	vi.resetAllMocks();
@@ -55,8 +58,8 @@ it("requires a server preview before confirming a preparation slug correction", 
 
 it("offers correction only before a preparation workspace exists", () => {
 	const execution = ExecutionSummary.parse({
-		runId: "execution",
-		sourceRunId: "source",
+		runId: RunId.parse("execution"),
+		sourceRunId: RunId.parse("source"),
 		prId: "pr",
 		status: "active",
 		outcome: null,
@@ -87,8 +90,8 @@ it("offers correction only before a preparation workspace exists", () => {
 	const props = {
 		token: "token",
 		gate: {
-			gateId: "gate",
-			stepId: "step",
+			gateId: GateId.parse("gate"),
+			stepId: StepId.parse("step"),
 			kind: "execution-escalation",
 			reason: "collision",
 			allowedCommands: ["resume"],

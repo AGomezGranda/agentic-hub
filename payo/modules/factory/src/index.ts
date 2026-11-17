@@ -12,18 +12,16 @@ export {
 	resume,
 	start,
 	updatePlan,
-} from "./commands.ts";
-export { readWorkCosts } from "./cost-read-model.ts";
-export { validatePublicationPolicy } from "./domain/naming.ts";
+} from "./application/commands.ts";
+export { readWorkCosts } from "./application/cost-read-model.ts";
 export {
 	ApplicationError,
 	type ApplicationErrorCode,
-	CommandError,
-} from "./errors.ts";
+} from "./application/errors.ts";
 export {
 	correctExecutionNaming,
 	previewExecutionNaming,
-} from "./execution/naming.ts";
+} from "./application/execution/naming.ts";
 export {
 	assertExecutionResumable,
 	type BeginExecutionInput,
@@ -38,25 +36,25 @@ export {
 	prepareExecutionResume,
 	readExecutionSummary,
 	resumeExecution,
-} from "./execution.ts";
-export { readExecutionGates } from "./execution-read-model.ts";
-export { reviewImplementation } from "./execution-review.ts";
+} from "./application/execution.ts";
+export { readExecutionGates } from "./application/execution-read-model.ts";
+export { reviewImplementation } from "./application/execution-review.ts";
 export {
 	EXECUTION_PREPARER_SOURCE,
 	IMPLEMENTATION_LENSES,
-} from "./execution-roles.ts";
-export { readPlan, writePlan } from "./infrastructure/plans.ts";
+} from "./application/execution-roles.ts";
+export { PlanNotFound } from "./application/plan-store.ts";
 export {
 	type ExecutionPreparation,
 	prepareExecution,
-} from "./prepare-execution.ts";
-export * from "./publication.ts";
-export { QUALITY_EXPECTATIONS } from "./quality.ts";
+} from "./application/prepare-execution.ts";
+export * from "./application/publication.ts";
+export { QUALITY_EXPECTATIONS } from "./application/quality.ts";
 export {
 	readPlanVersion,
 	readPlanVersions,
 	readRunReview,
-} from "./read-model.ts";
+} from "./application/read-model.ts";
 export {
 	architectureRubricPaths,
 	codeQualityRubricPaths,
@@ -64,10 +62,13 @@ export {
 	planLensResourcePaths,
 	reviewContractPath,
 	snapshotRole,
-} from "./roles.ts";
+} from "./application/roles.ts";
 export type {
 	FactoryDeps,
 	FactoryHandle,
 	RoleSource,
 	StartInput,
-} from "./types.ts";
+} from "./application/types.ts";
+export { CommandError } from "./domain/errors.ts";
+export { validatePublicationPolicy } from "./domain/naming.ts";
+export { readPlan, writePlan } from "./infrastructure/plans.ts";

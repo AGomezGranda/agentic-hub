@@ -58,6 +58,37 @@ pnpm install
 pnpm check
 ```
 
+## Testing and external compatibility
+
+CI runs `pnpm check` and `pnpm web:build`. Ordinary tests use local fixtures and
+temporary repositories/databases; live provider probes remain opt-in.
+
+Before upgrading supported GitHub/Jira CLIs, run the read-only probes from
+`payo/` with logged-in `gh` and `acli` on `PATH`:
+
+```sh
+PAYO_SMOKE_GITHUB_REMOTE=https://github.com/OWNER/REPO.git \
+PAYO_SMOKE_GITHUB_BASE=main \
+PAYO_SMOKE_GITHUB_HEAD=existing-pr-head-branch \
+PAYO_SMOKE_JIRA_KEY=ABC-123 \
+pnpm smoke:external
+```
+
+Choose a same-repository head branch with an existing open, closed or merged
+PR targeting the selected base (`main` by default). The probes resolve the
+repository/base, parse matching PRs and resolve the Jira ticket through the real
+adapters. They print CLI versions and fail if required targets are missing;
+they do not push commits, create PRs, change tickets or invoke a paid model.
+The separate `pnpm smoke` command exercises live Pi/Git and can incur model cost.
+
+Fixture provenance: `payo/adapters/gh/src/fixtures/*.json` and
+`payo/adapters/jira-acli/src/fixtures/*.json` have no recorded producing CLI
+version. Treat them as local protocol examples, not proof of current provider
+compatibility. When refreshing them from a real response, remove private data
+and record the producing CLI version, capture date, read-only command and any
+normalization alongside the fixtures. Keep the smoke output with upgrade
+validation results; the probes deliberately do not overwrite fixtures.
+
 ## Try it offline first
 
 Fake mode needs no logins and supports the fixed `ABC-123` Jira fixture and direct prompts.

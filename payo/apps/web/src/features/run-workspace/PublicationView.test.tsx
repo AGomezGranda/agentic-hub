@@ -1,3 +1,4 @@
+import { RunId } from "@payo/contracts";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
@@ -16,13 +17,15 @@ it("shows linkage and explicitly resumes a paused publication", async () => {
 	);
 	vi.stubGlobal("fetch", fetchMock);
 	const refresh = vi.fn();
+	const selectRun = vi.fn();
 	render(
 		<PublicationView
+			onSelectRun={selectRun}
 			token="token"
 			runId="pub"
 			publication={{
-				sourceRunId: "plan",
-				executionRunId: "exec",
+				sourceRunId: RunId.parse("plan"),
+				executionRunId: RunId.parse("exec"),
 				stage: "Escalated",
 				branch: "branch",
 				reviewedCommit: "sha",
@@ -47,6 +50,9 @@ it("shows linkage and explicitly resumes a paused publication", async () => {
 	);
 	expect(screen.getByText("Push uncertain")).toBeVisible();
 	expect(fetchMock).not.toHaveBeenCalled();
+	await userEvent.click(screen.getByRole("link", { name: "Planning" }));
+	await userEvent.click(screen.getByRole("link", { name: "Execution" }));
+	expect(selectRun.mock.calls).toEqual([["plan"], ["exec"]]);
 	await userEvent.click(
 		screen.getByRole("button", { name: "Resume publication" }),
 	);

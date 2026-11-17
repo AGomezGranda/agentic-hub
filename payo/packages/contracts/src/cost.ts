@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CostAmounts, Id } from "./primitives.ts";
+import { CostAmounts, RunId } from "./primitives.ts";
 import { AttemptRecord, StepRecord } from "./run.ts";
 
 export const CostCoverage = z.enum(["complete", "partial", "unknown"]);
@@ -97,7 +97,7 @@ export type StepCost = z.infer<typeof StepCost>;
 
 export const RunCostTree = z
 	.object({
-		runId: Id,
+		runId: RunId,
 		status: z.enum(["active", "ended"]),
 		outcome: z.string().nullable(),
 		asOfSeq: z.int().nonnegative(),

@@ -60,3 +60,16 @@ retry, partial success or log only. Find success reported after failure,
 lost context and fallback masking permanent failure. Broad catches at deliberate
 process/task boundaries are legitimate when failures remain visible and
 lifecycles are handled correctly. Preserve useful causes and language conventions.
+
+## Resource ownership and recovery
+
+For side-effecting collaborators, trace acquisition, timeout/cancellation and
+cleanup on success, failure and shutdown. Check bounded queues/concurrency and
+retry limits; distinguish transient failures from permanent rejection. Report
+missing bounds against a concrete workload or lifecycle consequence.
+
+Trace partial failure across writes and external calls. Verify atomicity,
+duplicate-safe retries and concurrent update handling where the use case needs
+them. Recommend an outbox/inbox only when durable write/delivery consistency
+requires it, not as a default layer. Errors must retain useful causes and
+operation context without exposing secrets; failed work must remain observable.

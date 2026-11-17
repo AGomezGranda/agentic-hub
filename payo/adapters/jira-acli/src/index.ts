@@ -126,7 +126,7 @@ function createAcliExec(bin: string): AcliExec {
 						resolve({ stdout, stderr, exitCode: error.code });
 						return;
 					}
-					reject(error);
+					reject(new Error("could not launch Jira command", { cause: error }));
 				},
 			);
 		});

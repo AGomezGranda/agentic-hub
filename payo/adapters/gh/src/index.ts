@@ -1,9 +1,11 @@
 import { GitHubTarget, PullRequestRecord } from "@payo/contracts";
 import type { CodeHost } from "@payo/kernel";
+import { commandErrorDetail } from "@payo/kernel";
 import { createGhExec, type GhExec } from "./exec.ts";
 
 export { createGhExec, type GhExec } from "./exec.ts";
 export interface GitHubCodeHostOptions {
+	env: NodeJS.ProcessEnv;
 	bin?: string;
 	exec?: GhExec;
 	timeoutMs?: number;
@@ -80,10 +82,8 @@ function requireRef(branch: string) {
 		throw new Error("invalid GitHub branch");
 }
 
-export function createGitHubCodeHost(
-	options: GitHubCodeHostOptions = {},
-): CodeHost {
-	const exec = options.exec ?? createGhExec(options.bin);
+export function createGitHubCodeHost(options: GitHubCodeHostOptions): CodeHost {
+	const exec = options.exec ?? createGhExec(options.bin ?? "gh", options.env);
 	const run = async (args: string[], signal: AbortSignal, input?: string) => {
 		signal.throwIfAborted();
 		const result = await exec(args, {
@@ -94,7 +94,7 @@ export function createGitHubCodeHost(
 		});
 		if (result.exitCode !== 0)
 			throw new Error(
-				`GitHub ${args[0]} failed (exit ${result.exitCode}); outcome may be unknown`,
+				`GitHub ${args[0]} failed (exit ${result.exitCode}); outcome may be unknown: ${commandErrorDetail(result.stderr)}`,
 			);
 		return result.stdout;
 	};

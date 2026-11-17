@@ -19,7 +19,10 @@ const api = vi.hoisted(() => ({
 	previewImplementation: vi.fn(),
 }));
 vi.mock("./api.ts", () => api);
-vi.mock("@web/features/runs/api.ts", () => ({ getRun: api.getRun }));
+vi.mock("@web/features/runs/api.ts", () => ({
+	getRun: api.getRun,
+	resumeRun: api.resumeRun,
+}));
 
 const RUN_ID = "6f1f1b1e-2b4c-4f7a-9d3e-2f4a5b6c7d8e";
 const timestamp = "2026-10-30T00:00:00.000Z";

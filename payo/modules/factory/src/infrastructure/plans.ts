@@ -9,7 +9,9 @@ import {
 	writeFile,
 } from "node:fs/promises";
 import { join } from "node:path";
-import { validateRunId } from "../plans.ts";
+import type { RunIdInput } from "@payo/contracts";
+import { PlanNotFound } from "../application/plan-store.ts";
+import { validateRunId } from "../domain/plans.ts";
 
 async function ownerOnly(path: string, mode: number): Promise<void> {
 	if (process.platform !== "win32") await chmod(path, mode);
@@ -17,7 +19,7 @@ async function ownerOnly(path: string, mode: number): Promise<void> {
 
 async function pathFor(
 	dataDir: string,
-	runId: string,
+	runId: RunIdInput,
 	create: boolean,
 ): Promise<string> {
 	validateRunId(runId);
@@ -49,13 +51,19 @@ async function pathFor(
 }
 export async function readPlan(
 	dataDir: string,
-	runId: string,
+	runId: RunIdInput,
 ): Promise<string> {
-	return readFile(await pathFor(dataDir, runId, false), "utf8");
+	try {
+		return await readFile(await pathFor(dataDir, runId, false), "utf8");
+	} catch (error) {
+		if (error instanceof Error && "code" in error && error.code === "ENOENT")
+			throw new PlanNotFound(runId, error);
+		throw error;
+	}
 }
 export async function writePlan(
 	dataDir: string,
-	runId: string,
+	runId: RunIdInput,
 	markdown: string,
 ): Promise<void> {
 	const file = await pathFor(dataDir, runId, true);

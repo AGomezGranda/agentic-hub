@@ -20,12 +20,12 @@ Work incrementally, one observable behaviour at a time, with no external
 testing skill needed:
 
 1. Select one observable behaviour from the phase.
-2. Write one focused test for it first, at the cheapest level that can catch
-   the bug (favour fast unit tests, fewer integration, a thin e2e top). Run
-   it and confirm it fails for the intended reason — a test that passes
-   before you write code tests nothing. A pre-existing passing test stays
-   useful as regression coverage, but it never proves a new test exercised
-   the missing behaviour.
+2. For new or changed behaviour, write a focused test at the cheapest level
+   that can catch the bug. Confirm it fails for the intended reason before
+   implementing the change. For a behaviour-preserving refactor, run the
+   relevant existing checks before editing. If they leave a meaningful
+   caller-visible behaviour uncovered, add a focused test for it and
+   confirm it passes on the current code.
 3. Implement the smallest sufficient change. Wire side-effecting collaborators
    at startup, pass each consumer only what it uses, and call pure helpers
    directly. Keep domain code free of framework/I/O imports, business rules
@@ -33,7 +33,8 @@ testing skill needed:
    governing architecture contract (repo standard, else the
    `architecture-audit` skill's `references/standard.md`). Rerun the test, then the phase's
    full automated success criteria (tests/lint/build from the plan).
-4. Refactor while green, with the tests as a safety net. Leave touched code
+4. Refactor while green. Rerun the focused checks after each small
+   structural step. Leave touched code
    cleaner than you found it (boy-scout rule): small splits, renames to the
    domain language, extracting a value object or port the change needed.
    A restructure the plan didn't foresee that spans many callers or another
@@ -78,3 +79,8 @@ impact): stop and ask with the block above instead of diverging silently.
 
 Use subagents sparingly here — mainly for a targeted debugging dive or
 exploring one unfamiliar corner, not as the default way of working.
+
+Limit delegation to three subagents total across the entire task, excluding
+the parent; scouts and reviewers share those slots. Only the parent delegates,
+and every child must be told not to spawn agents. Completed children still count; reuse them for follow-ups where supported,
+otherwise finish remaining work in the parent. Preserve all required checks.

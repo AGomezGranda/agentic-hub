@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ArtifactRef } from "./primitives.ts";
+import { ArtifactRef, RunId } from "./primitives.ts";
 import {
 	GitHubTarget,
 	PublicationCommit,
@@ -53,8 +53,8 @@ export type ExecutionNamingRequest = z.infer<typeof ExecutionNamingRequest>;
 
 export const PublicationRunConfig = z.strictObject({
 	kind: z.literal("factory-publication"),
-	sourceRunId: z.string().min(1),
-	executionRunId: z.string().min(1),
+	sourceRunId: RunId,
+	executionRunId: RunId,
 	plan: ArtifactRef,
 	reviewedCommit: z.string().min(1),
 	baseCommit: z.string().min(1),
@@ -84,8 +84,8 @@ export const PublicationCheckpoint = z.strictObject({
 });
 export type PublicationCheckpoint = z.infer<typeof PublicationCheckpoint>;
 export const PublicationSummary = z.strictObject({
-	sourceRunId: z.string(),
-	executionRunId: z.string(),
+	sourceRunId: RunId,
+	executionRunId: RunId,
 	stage: PublicationStage,
 	branch: z.string(),
 	reviewedCommit: z.string(),
@@ -99,7 +99,7 @@ export type PublicationPreviewRequest = z.infer<
 	typeof PublicationPreviewRequest
 >;
 export const PublicationPreview = z.strictObject({
-	executionRunId: z.string(),
+	executionRunId: RunId,
 	eligible: z.boolean(),
 	errors: z.array(z.string()),
 	previewHash: z.string().optional(),
@@ -133,3 +133,5 @@ export const PublicationChecks = z.object({
 		.array(z.object({ name: z.string().min(1), status: z.literal("passed") }))
 		.min(1),
 });
+
+export type PublicationFinalResult = z.infer<typeof PublicationFinalResult>;

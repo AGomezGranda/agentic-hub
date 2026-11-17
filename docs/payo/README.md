@@ -11,6 +11,7 @@ not display independent Pi swarms.
 
 ## Start here
 
+- [Inside Payo](inside-payo.html) is a standalone visual guide to the workflows, code layout and local setup. Open it in a browser from the checkout.
 - [Usage guide](usage.md): setup, TOML and environment configuration, CLI and
   web workflows, plan history, security notes, and recovery. This is the
   user-facing source of truth for supported behavior.

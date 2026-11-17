@@ -1,4 +1,8 @@
-import type { ExecutionCheckpoint, ExecutionRunConfig } from "@payo/contracts";
+import type {
+	ExecutionCheckpoint,
+	ExecutionRunConfig,
+	RunIdInput,
+} from "@payo/contracts";
 export function executionNaming(
 	config: ExecutionRunConfig,
 	checkpoint: Pick<ExecutionCheckpoint, "naming">,
@@ -8,7 +12,7 @@ export function executionNaming(
 export function expectedExecutionBranch(
 	config: ExecutionRunConfig,
 	checkpoint: Pick<ExecutionCheckpoint, "naming">,
-	runId: string,
+	runId: RunIdInput,
 ) {
 	return executionNaming(config, checkpoint)?.branch ?? `payo/${runId}`;
 }

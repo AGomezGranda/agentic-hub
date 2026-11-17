@@ -1,4 +1,5 @@
 import type { RunEventBody } from "@payo/contracts";
+import { StepId } from "@payo/contracts";
 import { describe, expect, it } from "vitest";
 import { startRun } from "./application/run.ts";
 import { openRunLog } from "./application/run-log.ts";
@@ -45,7 +46,7 @@ describe("openRunLog", () => {
 		const started = await startRun(store, testRunInput("r1"));
 		const log = openRunLog(store, started);
 		started.steps.set("fake", {
-			stepId: "fake",
+			stepId: StepId.parse("fake"),
 			name: "fake",
 			status: "running",
 		});

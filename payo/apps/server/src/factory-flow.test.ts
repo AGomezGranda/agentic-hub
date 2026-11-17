@@ -364,7 +364,7 @@ it("keeps an answer made after a restore installation conflict", async () => {
 
 it("starts a new round for updates and restores from a high-round approval", async () => {
 	const finding = {
-		id: "f",
+		id: "architecture:f",
 		severity: "P1",
 		title: "Bug",
 		path: null,
@@ -379,7 +379,7 @@ it("starts a new round for updates and restores from a high-round approval", asy
 		envelope({
 			verdicts: [
 				{
-					sourceIds: ["f"],
+					sourceIds: ["architecture:f"],
 					classification: "BLOCKER",
 					severity: "P1",
 					reason: "confirmed",
@@ -571,13 +571,116 @@ it("requestChanges reviews the edited snapshot in a new cycle", async () => {
 	).toContain("# Edit for review");
 });
 
+it.each([
+	{ command: "requestChanges", fails: false },
+	{ command: "requestChanges", fails: true },
+	{ command: "resume", fails: false },
+	{ command: "resume", fails: true },
+])(
+	"preserves an edit during $command review (fails=$fails)",
+	async ({ command, fails }) => {
+		const { deps, input, runner } = await setup([envelope(plan), ...clean()]);
+		if (command === "resume") {
+			deps.runner = {
+				...runner,
+				async *run(spec, signal) {
+					if (spec.role === "reviewer")
+						yield { type: "error", message: "review unavailable" };
+					else if (spec.role === "verifier")
+						yield { type: "result", text: JSON.stringify({ verdicts: [] }) };
+					else yield* runner.run(spec, signal);
+				},
+			};
+		}
+		const handle = await start(deps, input);
+		const path = join(deps.dataDir, "runs", "run", "plan.md");
+		let edited = false;
+		deps.runner = {
+			...runner,
+			async *run(spec) {
+				if (spec.role === "reviewer") {
+					if (!edited) {
+						edited = true;
+						await writeFile(path, "# External edit during review\n");
+					}
+					if (fails) yield { type: "error", message: "review unavailable" };
+					else yield { type: "result", text: JSON.stringify({ findings: [] }) };
+				} else yield { type: "result", text: JSON.stringify({ verdicts: [] }) };
+			},
+		};
+		await (command === "resume" ? resume : requestChanges)(handle, {
+			signal: input.signal,
+		});
+		expect(handle.checkpoint.stage).toBe("Escalated");
+		expect(await readFile(path, "utf8")).toBe(
+			"# External edit during review\n",
+		);
+		deps.runner = createFakeRunner(clean());
+		await resume(handle, { signal: input.signal });
+		expect(handle.checkpoint.stage).toBe("Approval");
+		expect(await readFile(path, "utf8")).toContain(
+			"# External edit during review",
+		);
+	},
+);
+
+it("retries an unprefixed finding at its reviewer before running verification", async () => {
+	const { deps, input, runner } = await setup([envelope(plan)]);
+	let architectureCalls = 0;
+	let verifierCalls = 0;
+	deps.runner = {
+		...runner,
+		async *run(spec, signal) {
+			if (spec.role === "reviewer") {
+				const findings = spec.instructions.includes(
+					"through the architecture lens:",
+				)
+					? [
+							{
+								id: ++architectureCalls === 1 ? "F1" : "architecture:F1",
+								severity: "P2",
+								title: "Finding",
+								path: null,
+								line: null,
+								evidence: "Evidence",
+								consequence: "Consequence",
+								suggestedFix: "Fix",
+							},
+						]
+					: [];
+				yield { type: "result", text: JSON.stringify({ findings }) };
+			} else if (spec.role === "verifier") {
+				verifierCalls++;
+				yield {
+					type: "result",
+					text: JSON.stringify({
+						verdicts: [
+							{
+								sourceIds: ["architecture:F1"],
+								classification: "NON-BLOCKER",
+								severity: "P2",
+								reason: "Outside scope",
+								counterEvidence: null,
+							},
+						],
+					}),
+				};
+			} else yield* runner.run(spec, signal);
+		},
+	};
+	const handle = await start(deps, input);
+	expect(handle.checkpoint.stage).toBe("Approval");
+	expect(architectureCalls).toBe(2);
+	expect(verifierCalls).toBe(1);
+});
+
 it("requires answers to new questions introduced by a revision", async () => {
 	const questionPlan = {
 		...plan,
 		openQuestions: [{ id: "old", question: "Old?" }],
 	};
 	const finding = {
-		id: "f",
+		id: "architecture:f",
 		severity: "P1",
 		title: "Bug",
 		path: null,
@@ -594,7 +697,7 @@ it("requires answers to new questions introduced by a revision", async () => {
 		envelope({
 			verdicts: [
 				{
-					sourceIds: ["f"],
+					sourceIds: ["architecture:f"],
 					classification: "BLOCKER",
 					severity: "P1",
 					reason: "confirmed",
@@ -794,7 +897,7 @@ it("escalates a runner exception and resumes with a fresh planner attempt", asyn
 
 it("escalates after three blocking rounds and records each decision", async () => {
 	const finding = {
-		id: "f",
+		id: "architecture:f",
 		severity: "P1",
 		title: "Bug",
 		path: null,
@@ -809,7 +912,7 @@ it("escalates after three blocking rounds and records each decision", async () =
 		envelope({
 			verdicts: [
 				{
-					sourceIds: ["f"],
+					sourceIds: ["architecture:f"],
 					classification: "BLOCKER",
 					severity: "P1",
 					reason: "confirmed",
@@ -850,7 +953,11 @@ it("escalates after three blocking rounds and records each decision", async () =
 			unchecked: [],
 			verdicts: {
 				verdicts: [
-					{ sourceIds: ["f"], classification: "BLOCKER", severity: "P1" },
+					{
+						sourceIds: ["architecture:f"],
+						classification: "BLOCKER",
+						severity: "P1",
+					},
 				],
 			},
 		});
@@ -884,7 +991,7 @@ it("retries malformed verifier references before escalating", async () => {
 
 it("rejects revision references to unknown findings", async () => {
 	const finding = {
-		id: "f",
+		id: "architecture:f",
 		severity: "P1",
 		title: "Bug",
 		path: null,
@@ -895,7 +1002,7 @@ it("rejects revision references to unknown findings", async () => {
 	};
 	const verdicts = [
 		{
-			sourceIds: ["f"],
+			sourceIds: ["architecture:f"],
 			classification: "BLOCKER",
 			severity: "P1",
 			reason: "confirmed",
@@ -920,7 +1027,7 @@ it("rejects revision references to unknown findings", async () => {
 
 it("revises a blocker and then reaches approval", async () => {
 	const finding = {
-		id: "f",
+		id: "architecture:f",
 		severity: "P1",
 		title: "Bug",
 		path: null,
@@ -931,7 +1038,7 @@ it("revises a blocker and then reaches approval", async () => {
 	};
 	const verdicts = [
 		{
-			sourceIds: ["f"],
+			sourceIds: ["architecture:f"],
 			classification: "BLOCKER",
 			severity: "P1",
 			reason: "confirmed",
@@ -958,7 +1065,7 @@ it("revises a blocker and then reaches approval", async () => {
 
 it("allows a non-blocking finding and escalates an unreconciled revision", async () => {
 	const finding = {
-		id: "f",
+		id: "architecture:f",
 		severity: "P2",
 		title: "Issue",
 		path: null,
@@ -975,7 +1082,7 @@ it("allows a non-blocking finding and escalates an unreconciled revision", async
 		envelope({
 			verdicts: [
 				{
-					sourceIds: ["f"],
+					sourceIds: ["architecture:f"],
 					classification,
 					severity,
 					reason: "reviewed",
@@ -995,7 +1102,7 @@ it("allows a non-blocking finding and escalates an unreconciled revision", async
 		envelope(plan),
 		...reports(),
 		verdict("BLOCKER", "P1"),
-		envelope({ plan, unreconciledFindingIds: ["f"] }),
+		envelope({ plan, unreconciledFindingIds: ["architecture:f"] }),
 	]);
 	const handle = await start(second.deps, second.input);
 	expect(handle.checkpoint).toMatchObject({ stage: "Escalated", round: 1 });

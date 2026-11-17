@@ -10,7 +10,11 @@ export type GhExec = (
 	},
 ) => Promise<{ stdout: string; stderr: string; exitCode: number }>;
 
-export function createGhExec(bin = "gh"): GhExec {
+export function createGhExec(
+	bin: string,
+	environment: NodeJS.ProcessEnv,
+): GhExec {
+	const env = { ...environment };
 	return (args, { signal, timeoutMs, maxBuffer, input }) =>
 		new Promise((resolve, reject) => {
 			signal.throwIfAborted();
@@ -23,7 +27,7 @@ export function createGhExec(bin = "gh"): GhExec {
 					maxBuffer,
 					shell: false,
 					env: {
-						...process.env,
+						...env,
 						GH_HOST: "github.com",
 						GH_PROMPT_DISABLED: "1",
 						GH_PAGER: "cat",

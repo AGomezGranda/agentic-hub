@@ -30,7 +30,9 @@ small changes. For independent substantial areas, pass the exact scope,
 plan requirements, applicable check references and references/review.md by
 absolute path. The parent owns interactions across assignments and verifies
 material findings. Hosts with the Pi workflow may use pi/workflows/swarm.js
-with the same exact scope; other hosts use their native delegation tools.
+with the same exact scope and sufficient unused child slots. Its reports still
+require parent verification; follow-up rounds reuse children or run directly.
+Other hosts use their native delegation tools.
 
 <!-- agentic-hub: fanout -->
 

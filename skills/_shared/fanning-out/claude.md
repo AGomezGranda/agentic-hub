@@ -1,4 +1,4 @@
-**Claude Code** — one message containing N `Agent` (historically
+**Claude Code** — one message containing up to three remaining-budget `Agent` (historically
 `Task`/`subagent_type`) calls, dispatched together, never a loop of
 one-at-a-time calls. Pick the agent per sub-question shape: `Explore` for
 locate/inventory work, `general-purpose` for judgement or synthesis.
@@ -15,7 +15,7 @@ Code has no shipped agent definitions here — it uses only its built-ins.
 One child per question answerable independently; don't split a question
 whose halves would read the same files — a child starts from a cold
 context each time, so two children reading the same files is not free
-just because it runs in parallel. Cap fan-out at 4 children; merge
+just because it runs in parallel. Honor the shared three-subagent limit; merge
 smaller areas into one child rather than adding more. Fanning out wider buys wall-clock, not lower total
 tokens — more children cost more tokens in total, in exchange for running
 at once instead of in sequence. A child's `path:line` claim is

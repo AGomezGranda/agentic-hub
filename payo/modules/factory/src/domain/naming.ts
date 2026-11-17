@@ -1,5 +1,9 @@
-import type { PublicationPolicy, WorkItemOrigin } from "@payo/contracts";
-import { CommandError } from "../errors.ts";
+import type {
+	PublicationPolicy,
+	RunIdInput,
+	WorkItemOrigin,
+} from "@payo/contracts";
+import { CommandError } from "./errors.ts";
 
 const ticketPattern = /^[A-Z][A-Z0-9_]*-\d+$/;
 const controls = /[\p{Cc}\p{Zl}\p{Zp}]/u;
@@ -152,7 +156,7 @@ export function renderBranch(
 	policy: PublicationPolicy,
 	ticketId: string | null,
 	slug: string,
-	executionId: string,
+	executionId: RunIdInput,
 ): string {
 	if (ticketId === null) return `payo/${executionId}`;
 	assertTicket(ticketId);
@@ -210,7 +214,7 @@ export function renderPrBody(
 		summary: string;
 		changes: string;
 		checks: string;
-		executionId: string;
+		executionId: RunIdInput;
 	},
 ): string {
 	return substitute(policy.prBodyTemplate, {

@@ -9,7 +9,10 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ExecutionDiffTooLargeError } from "@payo/kernel";
+import {
+	ExecutionDiffTooLargeError,
+	ExecutionWorkspaceNotFound,
+} from "@payo/kernel";
 import { afterEach, describe, expect, it } from "vitest";
 import { createExecutionWorkspace } from "./execution.ts";
 
@@ -320,6 +323,30 @@ describe("createExecutionWorkspace", () => {
 		).rejects.toThrow(/worktree root|outside/i);
 	});
 
+	it("rejects fatal untracked diffs even when Git emits partial output", async () => {
+		const root = await tempDir("payo-diff-failure-");
+		const path = join(root, "workspace");
+		await mkdir(path);
+		await writeFile(join(path, "new.txt"), "new content");
+		const workspace = createExecutionWorkspace({
+			root,
+			exec: async (args) => {
+				if (args[0] === "status")
+					return { exitCode: 0, stdout: "?? new.txt\0", stderr: "" };
+				if (args.includes("--no-index"))
+					return {
+						exitCode: 2,
+						stdout: "partial diff",
+						stderr: "fatal: corrupt input",
+					};
+				return { exitCode: 0, stdout: "", stderr: "" };
+			},
+		});
+		await expect(
+			workspace.diff(path, "a".repeat(40), signal()),
+		).rejects.toThrow("fatal: corrupt input");
+	});
+
 	it("captures tracked and untracked content in diffs and changes the fingerprint", async () => {
 		const { workspace, input } = await fixture();
 		const prepared = await workspace.prepare(input, signal());
@@ -532,4 +559,16 @@ describe("createExecutionWorkspace", () => {
 			/abort/i,
 		);
 	});
+});
+
+it("reports an absent workspace through the port without hiding unsafe paths", async () => {
+	const root = await tempDir("payo-missing-workspace-");
+	const workspace = createExecutionWorkspace({ root });
+	const signal = new AbortController().signal;
+	await expect(
+		workspace.inspect(join(root, "missing"), signal),
+	).rejects.toBeInstanceOf(ExecutionWorkspaceNotFound);
+	await expect(workspace.inspect(root, signal)).rejects.toThrow(
+		"path escapes worktree root",
+	);
 });

@@ -170,14 +170,15 @@ describe("createSqliteRunStore", () => {
 		}
 	});
 
-	it("rethrows a read error that is not a missing file", async () => {
+	it("translates read failures while retaining the filesystem cause", async () => {
 		const dataDir = tempDir();
 		try {
 			const store = await createSqliteRunStore({ dataDir });
 			mkdirSync(join(dataDir, "artifacts", "b".repeat(64)));
-			await expect(store.readArtifact("b".repeat(64))).rejects.toThrow(
-				/EISDIR/,
-			);
+			await expect(store.readArtifact("b".repeat(64))).rejects.toMatchObject({
+				message: "could not read artifact",
+				cause: expect.objectContaining({ code: "EISDIR" }),
+			});
 			await store.close();
 		} finally {
 			rmSync(dataDir, { recursive: true, force: true });
@@ -314,7 +315,12 @@ describe("createSqliteRunStore", () => {
 
 			await expect(
 				store.append("r1", [body.stepStarted("s1"), body.stepStarted("s2")], 1),
-			).rejects.toThrow(/boom/);
+			).rejects.toMatchObject({
+				message: "could not write run store",
+				cause: expect.objectContaining({
+					message: expect.stringContaining("boom"),
+				}),
+			});
 			expect((await store.read("r1")).map((e) => e.seq)).toEqual([1]);
 
 			const drop = new DatabaseSync(join(dataDir, "payo.db"));

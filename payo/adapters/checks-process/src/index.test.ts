@@ -1,7 +1,7 @@
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createProcessChecks } from "./index.ts";
 
 const dirs: string[] = [];
@@ -96,21 +96,43 @@ describe("createProcessChecks", () => {
 
 	it("kills descendants and waits for them before returning", async () => {
 		const cwd = await tempDir();
-		const marker = join(cwd, "escaped.txt");
-		const child = `const fs=require('fs'); setTimeout(()=>fs.writeFileSync(${JSON.stringify(marker)}, 'alive'), 700)`;
+		const marker = join(cwd, "descendant.pid");
+		const child = `require('fs').writeFileSync(${JSON.stringify(marker)}, String(process.pid)); setInterval(()=>{},10000)`;
 		const parent = `const {spawn}=require('child_process'); spawn(process.execPath,['-e',${JSON.stringify(child)}],{stdio:'ignore'}); setTimeout(()=>{},10000)`;
 		const controller = new AbortController();
 		const running = checks.run(
 			cwd,
-			[command("tree", parent)],
+			[command("tree", parent, 10000)],
 			controller.signal,
 		);
-		setTimeout(() => controller.abort(), 60);
-		const [result] = await running;
-		expect(result?.status).toBe("cancelled");
-		await new Promise((resolve) => setTimeout(resolve, 800));
-		await expect(readFile(marker, "utf8")).rejects.toThrow();
-	});
+		let descendantPid = 0;
+		try {
+			descendantPid = await vi.waitFor(
+				async () => {
+					const pid = Number(await readFile(marker, "utf8"));
+					expect(pid).toBeGreaterThan(1);
+					return pid;
+				},
+				{ timeout: 3000 },
+			);
+			controller.abort();
+			const [result] = await vi.waitFor(() => running, { timeout: 3000 });
+			expect(result?.status).toBe("cancelled");
+			expect(() => process.kill(descendantPid, 0)).toThrow(
+				expect.objectContaining({ code: "ESRCH" }),
+			);
+		} finally {
+			controller.abort();
+			if (descendantPid) {
+				try {
+					process.kill(descendantPid, "SIGKILL");
+				} catch (error) {
+					expect(error).toMatchObject({ code: "ESRCH" });
+				}
+			}
+			await vi.waitFor(() => running, { timeout: 3000 });
+		}
+	}, 10000);
 
 	it("rejects process-tree execution on unsupported hosts", async () => {
 		if (process.platform !== "win32") return;

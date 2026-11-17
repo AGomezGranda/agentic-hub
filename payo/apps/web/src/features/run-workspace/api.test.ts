@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { getRunEvents, getWorkCosts } from "./api.ts";
+import { correctExecutionNaming, getRunEvents, getWorkCosts } from "./api.ts";
 
 afterEach(() => vi.unstubAllGlobals());
 it("requests full history with the supplied signal", async () => {
@@ -51,4 +51,38 @@ it("requests validated costs with an encoded run ID and cancellation signal", as
 			),
 	);
 	await expect(getWorkCosts("token", "plan")).rejects.toThrow();
+});
+
+it("sends execution naming corrections and confirmation hashes", async () => {
+	const preview = {
+		candidates: [],
+		ticketId: null,
+		slug: "",
+		errors: {},
+		previewHash: "hash",
+	};
+	const fetchMock = vi.fn(
+		async (_url: RequestInfo | URL, _init?: RequestInit) =>
+			new Response(JSON.stringify(preview)),
+	);
+	vi.stubGlobal("fetch", fetchMock);
+	await correctExecutionNaming("token", "execution/id", {
+		slug: "create-todo-entity",
+	});
+	await correctExecutionNaming("token", "execution/id", {
+		slug: "create-todo-entity",
+		previewHash: "hash",
+	});
+	expect(
+		fetchMock.mock.calls.map(([url, init]) => [
+			String(url).split("/runs/")[1],
+			JSON.parse(String(init?.body)),
+		]),
+	).toEqual([
+		["execution%2Fid/execution-naming", { slug: "create-todo-entity" }],
+		[
+			"execution%2Fid/execution-naming",
+			{ slug: "create-todo-entity", previewHash: "hash" },
+		],
+	]);
 });

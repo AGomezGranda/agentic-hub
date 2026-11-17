@@ -1,5 +1,6 @@
 import type { PublicationSummary } from "@payo/contracts";
-import { resumeRun } from "@web/features/plan-review/api.ts";
+import { resumeRun } from "@web/features/runs/api.ts";
+
 import { Button } from "@web/shared/ui/Button.tsx";
 import { useState } from "react";
 export function PublicationView({
@@ -8,12 +9,14 @@ export function PublicationView({
 	publication,
 	canResume,
 	onRefresh,
+	onSelectRun,
 }: {
 	token: string;
 	runId: string;
 	publication: PublicationSummary;
 	canResume: boolean;
 	onRefresh: () => Promise<unknown>;
+	onSelectRun: (runId: string) => void;
 }) {
 	const [pending, setPending] = useState(false);
 	const [error, setError] = useState<string | null>(null);
@@ -40,12 +43,32 @@ export function PublicationView({
 					<h2>GitHub publication · {publication.stage}</h2>
 				</div>
 				<nav aria-label="Publication sources" className="flex flex-wrap gap-3">
-					<a className="underline" href={`/runs/${publication.sourceRunId}`}>
-						Planning
-					</a>
-					<a className="underline" href={`/runs/${publication.executionRunId}`}>
-						Execution
-					</a>
+					{(
+						[
+							["Planning", publication.sourceRunId],
+							["Execution", publication.executionRunId],
+						] as const
+					).map(([label, id]) => (
+						<a
+							key={label}
+							className="underline"
+							href={`/runs/${id}`}
+							onClick={(event) => {
+								if (
+									event.button !== 0 ||
+									event.metaKey ||
+									event.ctrlKey ||
+									event.shiftKey ||
+									event.altKey
+								)
+									return;
+								event.preventDefault();
+								onSelectRun(id);
+							}}
+						>
+							{label}
+						</a>
+					))}
 				</nav>
 			</header>
 			<div className="workspace-layout">

@@ -3,30 +3,37 @@ import type {
 	AttemptRecord,
 	GateRecord,
 	RunConfig,
-	RunEvent,
 	RunEventBody,
+	RunId,
 	StepRecord,
 	UsageRecord,
 } from "@payo/contracts";
+import {
+	type AttemptIdInput,
+	type GateIdInput,
+	RunEventBody as RunEventBodySchema,
+	type StepIdInput,
+} from "@payo/contracts";
 
 export interface RunState {
-	runId: string;
+	runId: RunId;
 	repo: string;
 	baseBranch: string;
 	config: RunConfig;
 	status: "active" | "ended";
 	outcome: string | null;
 	lastSeq: number;
-	steps: Map<string, StepRecord>;
-	attempts: Map<string, AttemptRecord>;
-	gates: Map<string, GateRecord>;
+	steps: Map<StepIdInput, StepRecord>;
+	attempts: Map<AttemptIdInput, AttemptRecord>;
+	gates: Map<GateIdInput, GateRecord>;
 	artifacts: ArtifactRef[];
 }
 
 type Sequenced = RunEventBody & { seq: number };
 
 // Pure: returns a new state and throws on any invariant break. Never mutates `state`.
-export function reduce(state: RunState | null, event: Sequenced): RunState {
+export function reduce(state: RunState | null, input: Sequenced): RunState {
+	const event = { ...RunEventBodySchema.parse(input), seq: input.seq };
 	if (state === null) {
 		if (event.type !== "run.created") {
 			throw new Error(`first event must be run.created, got ${event.type}`);
@@ -201,7 +208,7 @@ export function reduce(state: RunState | null, event: Sequenced): RunState {
 	}
 }
 
-export function fold(events: RunEvent[]): RunState {
+export function fold(events: (RunEventBody & { seq: number })[]): RunState {
 	const [first, ...rest] = events;
 	if (first === undefined) throw new Error("cannot fold an empty event log");
 	let state = reduce(null, first);

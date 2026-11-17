@@ -72,9 +72,13 @@ def _fanout_branch(agent: str) -> str:
             branches.append(path.read_text(encoding="utf-8"))
         except OSError as e:
             raise ValueError(f"agent {host!r} has no fan-out branch at {path}") from e
+    common = (catalog.SKILLS_DIR / "_shared/fanning-out/common.md").read_text(
+        encoding="utf-8"
+    )
     if len(hosts) == 1:
-        return branches[0]
+        return common + "\n" + branches[0]
     return (
+        common + "\n"
         "Use only the section matching the current harness; ignore the others.\n\n"
         + "\n\n".join(
             f"#### {host}\n\n{branch.rstrip()}"

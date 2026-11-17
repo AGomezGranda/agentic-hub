@@ -2,7 +2,10 @@ import { execFile, spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { stat } from "node:fs/promises";
 import { afterEach, expect, it, vi } from "vitest";
-import { openWorkspace } from "./open-workspace.ts";
+import { createWorkspaceOpener } from "./open-workspace.ts";
+
+const env = { SHELL: "/test/shell", PATH: "/test/bin" };
+const openWorkspace = createWorkspaceOpener(env);
 
 vi.mock("node:child_process", () => ({ execFile: vi.fn(), spawn: vi.fn() }));
 vi.mock("node:fs/promises", () => ({ stat: vi.fn() }));
@@ -34,7 +37,7 @@ it.each(["terminal", "vscode"] as const)(
 		expect(execFile).toHaveBeenCalledWith(
 			"open",
 			["-a", target === "terminal" ? "Terminal" : "Visual Studio Code", path],
-			{ cwd: path, timeout: 10_000 },
+			{ cwd: path, env, timeout: 10_000 },
 			expect.any(Function),
 		);
 	},
@@ -62,16 +65,8 @@ it("detaches a Linux terminal without waiting for the terminal to close", async 
 	expect(child.unref).toHaveBeenCalled();
 	expect(spawn).toHaveBeenCalledWith(
 		"x-terminal-emulator",
-		[
-			"-e",
-			"sh",
-			"-c",
-			'cd -- "$1" && exec "$2"',
-			"sh",
-			"/tmp/repo",
-			process.env.SHELL ?? "/bin/sh",
-		],
-		{ cwd: "/tmp/repo", detached: true, stdio: "ignore" },
+		["-e", "sh", "-c", 'cd -- "$1" && exec "$2"', "sh", "/tmp/repo", env.SHELL],
+		{ cwd: "/tmp/repo", env, detached: true, stdio: "ignore" },
 	);
 });
 it("rejects missing directories and unsupported platforms without launching", async () => {
@@ -102,5 +97,24 @@ it("reports launcher failures", async () => {
 	await expect(openWorkspace("/tmp/repo", "vscode")).rejects.toMatchObject({
 		status: 503,
 		code: "launch_failed",
+	});
+});
+
+it("keeps the configured shell and child environment after the input changes", async () => {
+	directory("linux");
+	const environment = { SHELL: "/configured/shell", PATH: "/configured/bin" };
+	const open = createWorkspaceOpener(environment);
+	environment.SHELL = "/changed/shell";
+	const child = Object.assign(new EventEmitter(), { unref: vi.fn() });
+	vi.mocked(spawn).mockReturnValue(
+		child as unknown as ReturnType<typeof spawn>,
+	);
+	const opening = open("/tmp/repo", "terminal");
+	await vi.waitFor(() => expect(spawn).toHaveBeenCalled());
+	child.emit("spawn");
+	await opening;
+	expect(vi.mocked(spawn).mock.calls[0]?.[1]).toContain("/configured/shell");
+	expect(vi.mocked(spawn).mock.calls[0]?.[2]).toMatchObject({
+		env: { SHELL: "/configured/shell", PATH: "/configured/bin" },
 	});
 });

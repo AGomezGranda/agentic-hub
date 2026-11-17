@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { Finding } from "./factory.ts";
-import { ArtifactRef, Id } from "./primitives.ts";
+import { ArtifactRef, Id, RunId } from "./primitives.ts";
 import { ExecutionNamingSnapshot } from "./publication.ts";
 
 const text = z
@@ -155,7 +155,7 @@ const RoleProvenance = z.object({ path: text, sha: text });
 export const ExecutionRunConfig = z.object({
 	kind: z.literal("factory-execution"),
 	naming: ExecutionNamingSnapshot.optional(),
-	sourceRunId: Id,
+	sourceRunId: RunId,
 	sourceBaseBranch: text,
 	plan: ArtifactRef,
 	prId: Id,
@@ -269,8 +269,8 @@ const CheckStatus = z.enum([
 export const ExecutionSummary = z.object({
 	naming: ExecutionNamingSnapshot.optional(),
 	publicationIneligibleReason: z.string().optional(),
-	runId: Id,
-	sourceRunId: Id,
+	runId: RunId,
+	sourceRunId: RunId,
 	prId: Id,
 	phaseCount: z.int().nonnegative().default(0),
 	phases: z.array(z.object({ id: Id, title: text })).optional(),

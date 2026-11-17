@@ -1,4 +1,4 @@
-import { RunId } from "@payo/contracts";
+import { ApiRunId } from "@payo/contracts";
 import { useEffect, useRef, useState } from "react";
 
 const DISCARD_PROMPT = "Discard unsaved settings changes?";
@@ -44,7 +44,7 @@ export function useRunNavigation({
 			? null
 			: (/^\/runs\/([^/]+)\/?$/.exec(pathname)?.[1] ?? null);
 	const selectedRunId =
-		runPathId && RunId.safeParse(runPathId).success ? runPathId : null;
+		runPathId && ApiRunId.safeParse(runPathId).success ? runPathId : null;
 
 	return {
 		page:

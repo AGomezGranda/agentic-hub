@@ -7,7 +7,7 @@ import {
 	VerifiedOutput,
 	WorkItemRequest,
 } from "./factory.ts";
-import { Id } from "./primitives.ts";
+import { Id, RunId } from "./primitives.ts";
 import { PublicationSummary } from "./publication.ts";
 import { GateRecord, RunEventSchema } from "./run.ts";
 
@@ -15,7 +15,7 @@ const nonBlank = z
 	.string()
 	.refine((value) => value.trim().length > 0, "must not be blank");
 
-export const RunId = z.uuid();
+export const ApiRunId = z.uuid().pipe(RunId);
 
 export const StartRunRequest = z
 	.object({
@@ -134,7 +134,7 @@ export const OpenGateSummary = GateRecord.pick({
 export type OpenGateSummary = z.infer<typeof OpenGateSummary>;
 
 export const RunSummary = z.object({
-	runId: RunId,
+	runId: ApiRunId,
 	repo: z.string().min(1),
 	baseBranch: z.string().min(1),
 	status: z.enum(["active", "ended"]),
@@ -213,7 +213,7 @@ export type RunReview = z.infer<typeof RunReview>;
 export const RunSummaryList = z.object({ runs: z.array(RunSummary) });
 export type RunSummaryList = z.infer<typeof RunSummaryList>;
 
-export const StartRunResponse = z.object({ runId: RunId });
+export const StartRunResponse = z.object({ runId: ApiRunId });
 export type StartRunResponse = z.infer<typeof StartRunResponse>;
 
 export const EventsResponse = z.object({ events: z.array(RunEventSchema) });
@@ -230,7 +230,7 @@ export const OpenWorkspaceRequest = z
 	.strict();
 export type OpenWorkspaceRequest = z.infer<typeof OpenWorkspaceRequest>;
 
-export const RunIdResponse = z.object({ runId: RunId });
+export const RunIdResponse = z.object({ runId: ApiRunId });
 export type RunIdResponse = z.infer<typeof RunIdResponse>;
 
 /** Stable identifier used by the CLI and server before a run exists. */

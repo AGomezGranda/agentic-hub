@@ -50,6 +50,21 @@ async function fixture() {
 	};
 }
 
+it("retains command diagnostics on publication failure", async () => {
+	const port = createRepositoryPublication({
+		exec: async () => ({
+			stdout: "",
+			stderr: "remote: hook declined",
+			exitCode: 1,
+		}),
+	});
+	await expect(
+		port.resolveRemote("/repo", "origin", new AbortController().signal),
+	).rejects.toThrow(
+		"publication git remote failed (exit 1): remote: hook declined",
+	);
+});
+
 it("pushes exactly the supplied SHA without tags or current HEAD", async () => {
 	const f = await fixture();
 	await f.git("-C", f.repo, "tag", "-a", "do-not-push", "-m", "tag");

@@ -1,11 +1,16 @@
 // Test support for kernel and adapters. Imported only through "@payo/kernel/testing", never from the root.
 import type {
+	AttemptIdInput,
 	AttemptOutcome,
+	GateIdInput,
 	RunConfig,
 	RunEvent,
 	RunEventBody,
+	RunIdInput,
+	StepIdInput,
 	StepOutcome,
 } from "@payo/contracts";
+import { RunEventSchema } from "@payo/contracts";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { commit, openRun, startRun } from "./application/run.ts";
 import { fold } from "./domain/state.ts";
@@ -25,20 +30,23 @@ export const body = {
 		type: "run.ended",
 		outcome,
 	}),
-	stepStarted: (stepId: string): RunEventBody => ({
+	stepStarted: (stepId: StepIdInput): RunEventBody => ({
 		type: "step.started",
 		stepId,
 		name: stepId,
 	}),
 	stepFinished: (
-		stepId: string,
+		stepId: StepIdInput,
 		outcome: StepOutcome = "succeeded",
 	): RunEventBody => ({
 		type: "step.finished",
 		stepId,
 		outcome,
 	}),
-	attemptStarted: (attemptId: string, stepId: string): RunEventBody => ({
+	attemptStarted: (
+		attemptId: AttemptIdInput,
+		stepId: StepIdInput,
+	): RunEventBody => ({
 		type: "attempt.started",
 		attemptId,
 		stepId,
@@ -49,7 +57,7 @@ export const body = {
 		inputArtifacts: [],
 	}),
 	attemptFinished: (
-		attemptId: string,
+		attemptId: AttemptIdInput,
 		outcome: AttemptOutcome = "succeeded",
 	): RunEventBody => ({
 		type: "attempt.finished",
@@ -57,7 +65,7 @@ export const body = {
 		outcome,
 		usage: { tokensIn: 1, tokensOut: 2, cost: "unknown" },
 	}),
-	gateRaised: (gateId: string, stepId: string): RunEventBody => ({
+	gateRaised: (gateId: GateIdInput, stepId: StepIdInput): RunEventBody => ({
 		type: "gate.raised",
 		gateId,
 		stepId,
@@ -65,7 +73,7 @@ export const body = {
 		allowedCommands: ["approve", "reject"],
 		reason: "needs a human",
 	}),
-	gateResolved: (gateId: string, command = "approve"): RunEventBody => ({
+	gateResolved: (gateId: GateIdInput, command = "approve"): RunEventBody => ({
 		type: "gate.resolved",
 		gateId,
 		command,
@@ -73,7 +81,7 @@ export const body = {
 	}),
 	artifactRecorded: (
 		hash: string,
-		attemptId: string | null = null,
+		attemptId: AttemptIdInput | null = null,
 	): RunEventBody => ({
 		type: "artifact.recorded",
 		artifact: { sha256: hash, size: 3, kind: "diff", mediaType: "text/x-diff" },
@@ -81,17 +89,19 @@ export const body = {
 	}),
 };
 
-export function testRunInput(runId: string) {
+export function testRunInput(runId: RunIdInput) {
 	return { runId, repo: "acme/app", baseBranch: "main", config: {} };
 }
 
 // Gives bodies the seq 1..n the store would assign.
 export function seqd(bodies: RunEventBody[]): RunEvent[] {
-	return bodies.map((event, i) => ({
-		...event,
-		seq: i + 1,
-		at: "2026-10-30T00:00:00.000Z",
-	}));
+	return bodies.map((event, i) =>
+		RunEventSchema.parse({
+			...event,
+			seq: i + 1,
+			at: "2026-10-30T00:00:00.000Z",
+		}),
+	);
 }
 
 export interface StoreHarness {

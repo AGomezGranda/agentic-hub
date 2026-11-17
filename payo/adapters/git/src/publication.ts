@@ -1,6 +1,7 @@
 import { isAbsolute } from "node:path";
 import { PublicationCommit } from "@payo/contracts";
 import type { RepositoryPublication } from "@payo/kernel";
+import { commandErrorDetail } from "@payo/kernel";
 import { createGitExec, type GitExec } from "./exec.ts";
 
 export interface RepositoryPublicationOptions {
@@ -62,7 +63,7 @@ export function createRepositoryPublication(
 		);
 		if (result.exitCode !== 0)
 			throw new Error(
-				`publication git ${args[0]} failed (exit ${result.exitCode})`,
+				`publication git ${args[0]} failed (exit ${result.exitCode}): ${commandErrorDetail(result.stderr)}`,
 			);
 		return result.stdout;
 	};

@@ -1,3 +1,4 @@
+import { AttemptId, StepId } from "@payo/contracts";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it } from "vitest";
@@ -16,8 +17,8 @@ it("keeps agent output as text inside an expandable attempt", async () => {
 			events={[
 				{
 					type: "attempt.started",
-					attemptId: ATTEMPT_ID,
-					stepId: STEP_ID,
+					attemptId: AttemptId.parse(ATTEMPT_ID),
+					stepId: StepId.parse(STEP_ID),
 					role: "planner",
 					runner: "pi",
 					model: null,
@@ -28,7 +29,7 @@ it("keeps agent output as text inside an expandable attempt", async () => {
 				},
 				{
 					type: "attempt.event",
-					attemptId: ATTEMPT_ID,
+					attemptId: AttemptId.parse(ATTEMPT_ID),
 					event: { type: "message", text: "<script>alert('unsafe')</script>" },
 					seq: 2,
 					at: timestamp,
@@ -52,15 +53,15 @@ it("filters attempts while retaining new events and their order", async () => {
 	const user = userEvent.setup();
 	const first = {
 		type: "step.started" as const,
-		stepId: STEP_ID,
+		stepId: StepId.parse(STEP_ID),
 		name: "planning",
 		seq: 1,
 		at: timestamp,
 	};
 	const attempt = {
 		type: "attempt.started" as const,
-		attemptId: ATTEMPT_ID,
-		stepId: STEP_ID,
+		attemptId: AttemptId.parse(ATTEMPT_ID),
+		stepId: StepId.parse(STEP_ID),
 		role: "planner",
 		runner: "pi",
 		model: null,
@@ -71,7 +72,7 @@ it("filters attempts while retaining new events and their order", async () => {
 	};
 	const last = {
 		type: "step.finished" as const,
-		stepId: STEP_ID,
+		stepId: StepId.parse(STEP_ID),
 		outcome: "succeeded" as const,
 		seq: 3,
 		at: timestamp,

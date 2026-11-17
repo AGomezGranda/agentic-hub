@@ -1,5 +1,7 @@
 import {
 	EventsResponse,
+	ExecutionNamingRequest,
+	ImplementPreview,
 	PublicationPreview,
 	PublishRequest,
 	type RunEvent,
@@ -58,5 +60,19 @@ export async function publishRun(
 		"POST",
 		(data) => RunIdResponse.parse(data),
 		PublishRequest.parse(input),
+	);
+}
+
+export async function correctExecutionNaming(
+	token: string,
+	runId: string,
+	input: ExecutionNamingRequest,
+): Promise<ImplementPreview> {
+	return getJson(
+		`/runs/${encodeURIComponent(runId)}/execution-naming`,
+		token,
+		"POST",
+		(data) => ImplementPreview.parse(data),
+		ExecutionNamingRequest.parse(input),
 	);
 }

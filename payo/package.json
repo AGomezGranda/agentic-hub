@@ -13,7 +13,8 @@
 		"web:dev": "pnpm --dir apps/web dev",
 		"payo": "node apps/cli/src/index.ts",
 		"preflight": "node apps/server/src/main.ts --check",
-		"smoke": "PAYO_LIVE=1 vitest run apps/server/src/live.test.ts"
+		"smoke": "PAYO_LIVE=1 vitest run apps/server/src/live.test.ts",
+		"smoke:external": "PAYO_EXTERNAL_LIVE=1 vitest run apps/server/src/external-live.test.ts"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.6.4",

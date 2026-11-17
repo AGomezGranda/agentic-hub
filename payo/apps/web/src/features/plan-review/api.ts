@@ -1,5 +1,4 @@
 import {
-	ExecutionNamingRequest,
 	ImplementPreview,
 	ImplementPreviewRequest,
 	ImplementRequest,
@@ -7,7 +6,6 @@ import {
 	PlanUpdateRequest,
 	PlanVersionDetail,
 	PlanVersionList,
-	ResumeRequest,
 	RunIdResponse,
 	RunReview,
 	type RunSummary,
@@ -117,20 +115,6 @@ export async function requestChanges(
 	);
 }
 
-export async function resumeRun(
-	token: string,
-	runId: string,
-	input?: ResumeRequest,
-): Promise<{ runId: string }> {
-	return getJson(
-		`/runs/${encodeURIComponent(runId)}/resume`,
-		token,
-		"POST",
-		(data) => RunIdResponse.parse(data),
-		input ? ResumeRequest.parse(input) : undefined,
-	);
-}
-
 export async function implementRun(
 	token: string,
 	runId: string,
@@ -156,18 +140,5 @@ export async function previewImplementation(
 		"POST",
 		(data) => ImplementPreview.parse(data),
 		ImplementPreviewRequest.parse(input),
-	);
-}
-export async function correctExecutionNaming(
-	token: string,
-	runId: string,
-	input: ExecutionNamingRequest,
-): Promise<ImplementPreview> {
-	return getJson(
-		`/runs/${encodeURIComponent(runId)}/execution-naming`,
-		token,
-		"POST",
-		(data) => ImplementPreview.parse(data),
-		ExecutionNamingRequest.parse(input),
 	);
 }

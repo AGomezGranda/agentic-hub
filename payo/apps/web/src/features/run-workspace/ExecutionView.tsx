@@ -1,5 +1,6 @@
 import type { ExecutionSummary, OpenGateSummary } from "@payo/contracts";
-import { resumeRun } from "@web/features/plan-review/api.ts";
+import { resumeRun } from "@web/features/runs/api.ts";
+
 import { Button } from "@web/shared/ui/Button.tsx";
 import { type ReactNode, useState } from "react";
 import { ExecutionNamingForm } from "./ExecutionNamingForm.tsx";

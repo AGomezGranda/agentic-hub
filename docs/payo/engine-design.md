@@ -69,11 +69,25 @@ cost and artifact rules; `application/` holds orchestration and its owned ports;
 exports remain stable. Server composition injects scheduling for attempt deadlines,
 cooperative yields and read-only cleanup grace periods.
 
-Inside `modules/factory/src`, `domain/` holds pure planning/execution rules,
-`planning/` and `execution/` own their lifecycle flows, and `infrastructure/plans.ts`
-owns mutable plan-file access. The server's `run-application.ts` coordinates
+Server bootstrap snapshots the environment supplied to Pi, GitHub commands and
+workspace launchers. These adapters retain that snapshot; restart the server to
+pick up environment changes. HTTP handlers receive application capabilities,
+configuration and doctor access, without direct store or shutdown access.
+
+Inside `modules/factory/src`, `domain/` holds pure planning/execution/publication rules,
+`application/{planning,execution,publication}/` owns lifecycle orchestration,
+and `infrastructure/plans.ts` owns mutable plan-file access. The server's `run-application.ts` coordinates
 commands and queries; `http.ts` handles transport and `composition.ts` wires
-dependencies. Package and factory boundary tests enforce these divisions.
+dependencies. Package and factory boundary tests enforce these divisions. Plan-file absence is
+translated into the application-owned `PlanNotFound` error; workspace absence uses
+the kernel-owned `ExecutionWorkspaceNotFound` error. Filesystem errno values stay
+inside adapters.
+
+Run, step, attempt and gate IDs are validated branded strings in engine records.
+Ports accept raw string inputs or the matching validated identity, rejecting a
+known identity of another kind. Historical non-UUID engine IDs remain readable;
+`ApiRunId` retains UUID validation at HTTP/browser boundaries. The brands do not
+change serialized events or require a storage migration.
 
 ## Ownership
 
@@ -262,3 +276,14 @@ Linear is future work; there is no source registry or auto-detection.
 - Later, not v1: Ollama Cloud as a model provider through Pi's `models.json`. Open: whether its models follow the final JSON envelope reliably, and whether it reports usage and cost (otherwise `unknown`).
 - Whether Biome's restricted-import rules are enough to enforce the dependency rules, or if a dependency checker is needed.
 - Broader UI execution controls and independent Pi-swarm dashboards. The server and CLI implement Payo's local baseline: per-install bearer token, loopback-only binding, exact Origin allowlist, `payo token` handoff, session-memory token storage, and authenticated fetch-based SSE rather than token-bearing URLs or native `EventSource`.
+
+
+Run opening with recovery is reserved for bootstrap. Duplicate execution and
+publication acceptance opens without recovery and retains any live registered
+handle. Each store instance owns its acceptance queue; unrelated engines do not
+share an application-global queue. This is in-process serialization, while the
+store's expected-sequence check remains the durable write guard.
+
+The kernel code-host port uses a neutral RepositoryTarget. Factory publication
+records still validate GitHubTarget, preserving the GitHub-only publication
+feature and existing persisted records.

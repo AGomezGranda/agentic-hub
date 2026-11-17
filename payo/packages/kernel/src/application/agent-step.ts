@@ -1,3 +1,4 @@
+import type { AttemptIdInput, StepIdInput } from "@payo/contracts";
 import {
 	AgentEvent,
 	AgentSpec,
@@ -40,9 +41,9 @@ export interface AgentDeps {
 }
 
 export interface StepInput {
-	stepId: string;
+	stepId: StepIdInput;
 	stepName: string;
-	attemptIds: readonly [string, string];
+	attemptIds: readonly [AttemptIdInput, AttemptIdInput];
 	runner: AgentRunner;
 	spec: AgentSpec;
 	validate: OutputValidator;
@@ -157,7 +158,7 @@ interface Watch {
 async function executeAttempt(
 	deps: AgentDeps,
 	input: StepInput,
-	attemptId: string,
+	attemptId: AttemptIdInput,
 	spec: AgentSpec,
 ): Promise<AttemptRun> {
 	if (input.signal.aborted) return { outcome: "cancelled" };
@@ -248,7 +249,7 @@ function attemptUsage(watch: Watch): UsageRecord {
 async function captureRawLog(
 	deps: AgentDeps,
 	rawLog: RawLogCapture | undefined,
-	attemptId: string,
+	attemptId: AttemptIdInput,
 ): Promise<void> {
 	if (rawLog === undefined) return;
 	try {
@@ -267,7 +268,7 @@ async function captureRawLog(
 async function streamAttempt(
 	deps: AgentDeps,
 	input: StepInput,
-	attemptId: string,
+	attemptId: AttemptIdInput,
 	spec: AgentSpec,
 	watch: Watch,
 ): Promise<AttemptRun> {
@@ -400,7 +401,7 @@ function watchAttempt(
 
 async function closeWithGate(
 	deps: AgentDeps,
-	stepId: string,
+	stepId: StepIdInput,
 	outcome: "failed" | "escalated",
 	reason: string,
 ): Promise<StepResult> {
@@ -422,7 +423,7 @@ async function recordText(
 	deps: AgentDeps,
 	text: string,
 	kind: string,
-	attemptId: string,
+	attemptId: AttemptIdInput,
 ): Promise<ArtifactRef> {
 	const artifact = await deps.store.putArtifact(
 		new TextEncoder().encode(text),

@@ -26,6 +26,7 @@ export type PiExec = (
 ) => Promise<{ stdout: string; stderr: string; exitCode: number }>;
 
 export interface PiRunnerOptions {
+	env: NodeJS.ProcessEnv;
 	bin?: string;
 	provider?: string;
 	sessionRoot: string;
@@ -63,6 +64,7 @@ export function createPiRunner(options: PiRunnerOptions): AgentRunner {
 	const bin = options.bin ?? "pi";
 	const provider = options.provider ?? "anthropic";
 	const spawnFn = options.spawn ?? spawn;
+	const env = { ...options.env };
 
 	return {
 		id: "pi",
@@ -97,7 +99,7 @@ export function createPiRunner(options: PiRunnerOptions): AgentRunner {
 				cwd: spec.cwd,
 				stdio: ["ignore", "pipe", "pipe"],
 				env: {
-					...process.env,
+					...env,
 					PAYO_RUN_ID: correlation.runId,
 					PAYO_STEP_ID: correlation.stepId,
 					PAYO_ATTEMPT_ID: correlation.attemptId,
@@ -675,15 +677,17 @@ function usageSnapshot(state: PiMapState, complete: boolean): AgentEvent {
 function sumUsage(values: unknown[]): number | null {
 	let total = 0;
 	for (const value of values) {
-		if (typeof value !== "number" || !Number.isFinite(value)) return null;
+		if (typeof value !== "number" || !Number.isFinite(value) || value < 0)
+			return null;
 		total += value;
 	}
-	return total;
+	return Number.isFinite(total) ? total : null;
 }
 
 function addUsageValue(current: Usage, value: number | null): Usage {
 	if (current === "unknown" || value === null) return "unknown";
-	return current + value;
+	const total = current + value;
+	return Number.isFinite(total) ? total : "unknown";
 }
 
 function excerpt(value: string): string {

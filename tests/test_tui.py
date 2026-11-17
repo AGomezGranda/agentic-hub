@@ -1008,6 +1008,7 @@ def test_skill_write_error_notifies_continues_and_allows_retry(
         skill_md.write_text(skill_md.read_text() + agents.FANOUT_MARKER + "\n")
         branches = catalog.SKILLS_DIR / "_shared" / "fanning-out"
         branches.mkdir(parents=True)
+        (branches / "common.md").write_text("Shared delegation policy.\n")
         (branches / "fake2.md").write_text("Host instructions.\n")
         blocked = branches / "fake1.md"
         diagnostic = "no fan-out branch"

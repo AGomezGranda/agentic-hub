@@ -26,7 +26,7 @@ Judge the surface first:
 - **Narrow** (one file, one function, "where is X defined") — just grep and
   read. A fan-out of subagents here costs more than it returns.
 - **Broad** (a subsystem, a cross-cutting flow, "how does X work end to end") —
-  decompose into 3-5 independent sub-questions and fan out.
+  group independent sub-questions into at most three child assignments total.
 
 Say which mode you picked in one line, then proceed.
 

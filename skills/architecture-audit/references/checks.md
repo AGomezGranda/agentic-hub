@@ -24,6 +24,9 @@ Find duplicated rules with different owners, bypassable invariant checks,
 and modules whose independent responsibilities force unrelated changes
 together. Cite affected paths and explain the rightful owner.
 Data-only objects are valid where no invariant requires enforcement.
+Trace transaction boundaries, concurrent writers and recovery paths: identify
+who owns atomicity, duplicate handling and cross-context consistency. An event
+or process manager alone does not prove delivery or recovery guarantees.
 
 Inspect representative changes or concrete change scenarios for locality.
 Co-change alone is insufficient; module/test co-change is expected.

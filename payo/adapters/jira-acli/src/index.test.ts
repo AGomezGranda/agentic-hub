@@ -183,3 +183,13 @@ describe("checkAcli", () => {
 		expect(check.detail).toContain("ENOENT");
 	});
 });
+
+it("translates command launch failure without exposing the process error", async () => {
+	const source = createAcliTicketSource({ bin: "/nonexistent/payo-acli" });
+	await expect(
+		source.resolve({ source: "jira", key: "ABC-123" }),
+	).rejects.toMatchObject({
+		message: "could not launch Jira command",
+		cause: expect.objectContaining({ code: "ENOENT" }),
+	});
+});

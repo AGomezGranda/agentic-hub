@@ -1,4 +1,5 @@
 import type { RunEvent } from "@payo/contracts";
+import { RunId, StepId } from "@payo/contracts";
 import { PayoApiError, setServerPort } from "@web/shared/api/client.ts";
 import { afterEach, expect, it, vi } from "vitest";
 import {
@@ -16,7 +17,7 @@ const timestamp = "2026-10-30T00:00:00.000Z";
 function stepEvent(seq: number, name = `step ${seq}`): RunEvent {
 	return {
 		type: "step.started",
-		stepId: STEP_ID,
+		stepId: StepId.parse(STEP_ID),
 		name,
 		seq,
 		at: timestamp,
@@ -90,7 +91,7 @@ it("streams authenticated events across UTF-8 chunk boundaries from the cursor",
 	const seen: string[] = [];
 
 	const result = await streamRunEvents({
-		runId: RUN_ID,
+		runId: RunId.parse(RUN_ID),
 		token: "secret",
 		fromSeq: 4,
 		fetchImpl,
@@ -110,7 +111,7 @@ it("rejects a malformed token before opening the stream", async () => {
 	const fetchImpl = vi.fn();
 	await expect(
 		streamRunEvents({
-			runId: RUN_ID,
+			runId: RunId.parse(RUN_ID),
 			token: "token“",
 			fetchImpl,
 			onEvent: vi.fn(),
@@ -135,7 +136,7 @@ it("stops after run.ended and reports unauthorized stream responses", async () =
 	) as unknown as typeof fetch;
 	const seen: number[] = [];
 	const result: RunEventStreamResult = await streamRunEvents({
-		runId: RUN_ID,
+		runId: RunId.parse(RUN_ID),
 		token: "secret",
 		fetchImpl,
 		onEvent: (event) => seen.push(event.seq),
@@ -145,7 +146,7 @@ it("stops after run.ended and reports unauthorized stream responses", async () =
 
 	await expect(
 		streamRunEvents({
-			runId: RUN_ID,
+			runId: RunId.parse(RUN_ID),
 			token: "secret",
 			fetchImpl: (async () =>
 				new Response("{}", { status: 401 })) as typeof fetch,
@@ -154,7 +155,7 @@ it("stops after run.ended and reports unauthorized stream responses", async () =
 	).rejects.toMatchObject({ status: 401 });
 	await expect(
 		streamRunEvents({
-			runId: RUN_ID,
+			runId: RunId.parse(RUN_ID),
 			token: "secret",
 			fetchImpl: (async () =>
 				new Response("{}", { status: 401 })) as typeof fetch,
@@ -170,7 +171,7 @@ it("rejects malformed events instead of retrying them forever", async () => {
 		})) as typeof fetch;
 	await expect(
 		streamRunEvents({
-			runId: RUN_ID,
+			runId: RunId.parse(RUN_ID),
 			token: "secret",
 			fetchImpl,
 			onEvent: () => {},
@@ -191,7 +192,7 @@ it("cancels a pending stream when its signal is aborted", async () => {
 		)) as typeof fetch;
 	const controller = new AbortController();
 	const pending = streamRunEvents({
-		runId: RUN_ID,
+		runId: RunId.parse(RUN_ID),
 		token: "secret",
 		signal: controller.signal,
 		fetchImpl,
@@ -213,7 +214,7 @@ it("streams from the selected loopback port", async () => {
 	}) as typeof fetch;
 
 	await streamRunEvents({
-		runId: RUN_ID,
+		runId: RunId.parse(RUN_ID),
 		token: "secret",
 		fetchImpl,
 		onEvent: () => {},

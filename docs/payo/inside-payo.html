@@ -1,0 +1,162 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Inside Payo · A visual code guide</title><style>
+:root {
+  color-scheme: light;
+  --canvas: #f4efdf;
+  --surface: #fbf7ea;
+  --raised: #e9e2ce;
+  --line: #b8b09c;
+  --text: #242620;
+  --muted: #515348;
+  --accent: #006671;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+* { box-sizing: border-box }
+html { scroll-padding-top: 20px }
+body { margin: 0; background: var(--canvas); color: var(--text); font: 15px/1.7 var(--mono) }
+main, header > div, footer { max-width: 1160px; margin: auto; padding-inline: clamp(18px, 4vw, 48px) }
+h1, h2, h3, p { margin: 0 }
+a { color: var(--accent); text-underline-offset: .22em }
+a:hover { text-decoration-thickness: 2px }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px }
+header { border-block: 3px solid var(--accent); border-bottom: 1px solid var(--line); background: var(--surface) }
+header > div { display: grid; grid-template-columns: 1.15fr 1fr; column-gap: 7%; padding-bottom: 32px }
+nav { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px; padding-block: 18px; border-bottom: 1px solid var(--line); font: .8rem var(--mono) }
+nav strong { margin-right: auto; color: var(--accent); text-transform: uppercase; letter-spacing: .12em }
+nav a { color: var(--muted); text-decoration: none }
+nav a:hover { color: var(--accent) }
+h1 { grid-column: 1; align-self: end; font-size: clamp(3rem, 6vw, 5rem); letter-spacing: -.065em; line-height: 1.05; margin: 24px 0 14px }
+header p, .intro, .card p, .step p, details > div { color: var(--muted) }
+header p { grid-column: 1; max-width: 50ch }
+.rail { grid-column: 2; grid-row: 2 / 4; margin-top: 24px; padding: 15px 20px; border: 1px solid var(--line); background: radial-gradient(var(--line) .8px, transparent .8px) 0 0 / 12px 12px, var(--canvas) }
+.rail a { position: relative; display: flex; align-items: baseline; gap: 14px; padding: 8px 12px; background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--accent); color: var(--text); text-decoration: none }
+.rail a:hover, summary:hover { background: var(--raised) }
+.rail small, .over { font: 600 .72rem/1.4 var(--mono); text-transform: uppercase; letter-spacing: .075em; color: var(--accent) }
+.rail small { min-width: 15ch }
+.rail span { color: var(--accent); display: block; width: 18px; text-align: center; line-height: 18px; margin-left: 15px; transform: rotate(90deg) }
+section { padding-block: 36px; border-bottom: 1px solid var(--line) }
+.over { display: flex; align-items: center; gap: 9px }
+.over::before { content: ""; width: 22px; height: 2px; background: currentColor }
+h2 { font-size: clamp(1.8rem, 4vw, 2.65rem); letter-spacing: -.045em; line-height: 1.16; margin: 8px 0 12px }
+h3 { font-size: 1.13rem; letter-spacing: -.018em }
+.intro { max-width: 80ch; margin-bottom: 20px }
+.grid, .twocol { display: grid; gap: 14px; grid-template-columns: repeat(3, minmax(0,1fr)) }
+.twocol { grid-template-columns: repeat(2,minmax(0,1fr)) }
+.card, details, .step { border: 1px solid var(--line); background: var(--surface) }
+.card { display: flex; flex-direction: column; padding: 20px; background: linear-gradient(var(--accent),var(--accent)) top left / 32px 2px no-repeat, var(--surface) }
+.card p { margin-top: 10px }
+.refs { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 12px }
+.card .refs { margin-top: auto; padding-top: 16px }
+.refs a { font: .81rem/1.6 var(--mono); overflow-wrap: anywhere }
+.diagram { border: 1px solid var(--line); padding: 20px; text-align: center; margin: 18px 0; background: var(--surface) }
+.nodes { display: flex; justify-content: center; align-items: center; gap: 10px }
+.nodes b { flex: 1; padding: 8px; background: var(--canvas); border: 1px solid var(--line); font: 600 .9rem var(--mono) }
+.nodes span, summary code { color: var(--accent) }
+.diagram small { display: block; margin-top: 12px; color: var(--muted) }
+details { margin-top: 8px }
+summary { padding: 12px 16px; cursor: pointer; font-weight: 600 }
+summary::marker { color: var(--accent) }
+summary code { display: inline-block; min-width: 22ch }
+details[open] { border-left: 2px solid var(--accent) }
+details > div { padding: 4px 17px 18px; max-width: 90ch }
+.trace { list-style: none; padding: 0 0 0 19px; margin: 20px 0 0; counter-reset: trace }
+.step { counter-increment: trace; position: relative; padding: 14px 18px 14px 32px; margin-bottom: 10px }
+.step::before { content: counter(trace, decimal-leading-zero); position: absolute; left: -18px; top: 14px; background: var(--accent); color: var(--canvas); padding: 3px 7px; font: bold .85rem/1.4 var(--mono) }
+.step .refs { margin-top: 5px }
+code { font: .9em var(--mono) }
+pre { background: var(--surface); padding: 14px; border-left: 2px solid var(--accent); white-space: pre-wrap; overflow-wrap: anywhere }
+footer { padding-block: 22px; font: .85rem var(--mono) }
+.pattern { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 20px 32px; padding: 24px 0; border-top: 1px solid var(--line) }
+.pattern h3 { color: var(--text); font-size: 1.12rem }
+.pattern p { margin-top: 8px; color: var(--muted) }
+.pattern figure { margin: 0; align-self: start; border: 1px solid var(--line); background: var(--surface) }
+.pattern figcaption { padding: 8px 14px; border-bottom: 1px solid var(--line); font: .78rem/1.5 var(--mono); color: var(--accent) }
+.pattern pre { margin: 0; font: .84rem/1.7 var(--mono); border: 0 }
+.pattern .refs { margin-top: 10px }
+@media (max-width: 800px) {
+  header > div { display: block }
+  .grid, .twocol, .pattern { grid-template-columns: 1fr }
+  .nodes { flex-direction: column }
+  .nodes b { width: 100% }
+  .nodes span { transform: rotate(90deg) }
+  section { padding-block: 28px }
+}
+@media (max-width: 480px) {
+  nav { gap: 12px 18px }
+  nav strong { width: 100% }
+  .rail { padding: 12px }
+  .rail a { display: grid; gap: 2px }
+  summary code { display: block }
+}
+@media print {
+  nav, footer { display: none }
+  .card, .step { break-inside: avoid }
+}
+</style><header id="top"><div><nav aria-label="Guide sections"><strong>payo / docs</strong><a href="#code">Code map</a><a href="#patterns">Patterns</a><a href="#flows">Workflow</a><a href="#trace">Request trace</a><a href="#setup">Local setup</a></nav><h1>Inside Payo</h1><p>A local TypeScript engine takes a ticket or prompt through planning, implementation and publication. Follow a run across the workspace to see where decisions, state and external tools belong.</p><div class="rail"><a href="#plan"><small>Planning run</small><strong>Approve a plan</strong></a><span aria-hidden="true">→</span><a href="#execute"><small>Execution run</small><strong>Build one PR unit</strong></a><span aria-hidden="true">→</span><a href="#publish"><small>Publication run</small><strong>Open a draft PR</strong></a></div></div></header><main>
+<section id="code"><div class="over">Repository anatomy</div><h2>How the code fits together</h2><p class="intro">Payo lives in the payo/ TypeScript workspace. Follow a command inward from either client. The factory decides which workflow step comes next. The server supplies the concrete tools that perform it.</p>
+<div class="diagram"><div class="nodes"><b>Web or CLI</b><span>→</span><b>HTTP server</b><span>→</span><b>Factory workflow</b><span>→</span><b>Injected ports</b></div><small>Runtime call path · A port is an interface for a capability such as running an agent or reading a Git branch.</small></div>
+<article class="pattern" id="microkernel">
+<div><h3>Does Payo follow a microkernel architecture?</h3><p>Partly. The kernel supplies reusable run state, event logging and agent execution. The factory builds planning, implementation and publication on top. The dependency points inward: the factory uses the kernel, while the kernel’s only workspace dependency is contracts.</p></div>
+<div><p><strong>Look at how a new capability gets added.</strong> A different GitHub client can implement the existing CodeHost port and be selected in the server’s wiring. A new workflow needs an explicit entry point in the run service, which imports and calls the supported factory workflows directly. Payo has a microkernel-like core, with ports and adapters providing the concrete extension points.</p>
+<div class="refs"><a href="../../payo/packages/kernel/package.json">Kernel dependencies ↗</a><a href="../../payo/apps/server/src/run-application.ts">Workflow dispatch ↗</a><a href="../../payo/apps/server/src/adapters.ts">Adapter wiring ↗</a></div></div>
+</article>
+<details><summary><code>apps/web + apps/cli</code> Two clients, one server</summary><div>React screens are grouped by feature. The run workspace renders activity, phase progress, reviews and costs. Feature API functions use the shared HTTP client. The CLI sends commands to the same local server. Closing a client leaves the server in charge of the run.<div class="refs"><a href="../../payo/apps/web/src/app/App.tsx">Web entry and navigation ↗</a> <a href="../../payo/apps/cli/src/client.ts">CLI transport ↗</a></div></div></details>
+<details><summary><code>apps/server</code> Transport and wiring</summary><div>HTTP handlers parse requests and call the run application service. That service owns live handles and schedules workflows. At startup the composition root opens the store, sets the concurrency limiter and injects real or fake adapters. This is the place to trace which implementation a running workflow actually uses.<div class="refs"><a href="../../payo/apps/server/src/http.ts">HTTP routes ↗</a> <a href="../../payo/apps/server/src/run-application.ts">Run service ↗</a> <a href="../../payo/apps/server/src/composition.ts">Composition root ↗</a></div></div></details>
+<details open><summary><code>modules/factory</code> Workflow policy</summary><div>domain/ contains decisions such as naming and publication eligibility. application/ sequences steps, gates, checks and checkpoints for planning, execution and publication. infrastructure/ implements local plan-file access. For a publication rule, start in domain/publication.ts. For the timing of a push, follow application/publication/run.ts.<div class="refs"><a href="../../payo/modules/factory/src/domain/publication.ts">Publication rules ↗</a> <a href="../../payo/modules/factory/src/application/publication/run.ts">Publication sequence ↗</a> <a href="../../payo/modules/factory/src/infrastructure/plans.ts">Plan files ↗</a></div></div></details>
+<details><summary><code>packages/kernel</code> Reusable run mechanics</summary><div>The kernel tracks run state, serializes event writes and executes agent steps. It defines the interfaces that workflows use for agents, storage, workspaces, checks and code hosts. Factory-specific decisions stay in the factory so that the event log can record any supported run type.<div class="refs"><a href="../../payo/packages/kernel/src/application/run-log.ts">Ordered writes ↗</a> <a href="../../payo/packages/kernel/src/application/agent-step.ts">Agent attempts ↗</a> <a href="../../payo/packages/kernel/src/application/code-host.ts">CodeHost interface ↗</a></div></div></details>
+<details><summary><code>packages/contracts</code> Shared data shapes</summary><div>The browser and server use the same schemas for API requests, responses and events. The browser may import this workspace package directly. Its remaining Payo dependencies sit behind HTTP. packages/config handles TOML parsing and settings resolution.<div class="refs"><a href="../../payo/packages/contracts/src/api.ts">API schemas ↗</a> <a href="../../payo/packages/contracts/src/run.ts">Run events ↗</a> <a href="../../payo/packages/config/src/index.ts">Configuration ↗</a></div></div></details>
+<details><summary><code>adapters</code> External tools and storage</summary><div>runner-pi invokes Pi, jira-acli resolves tickets, git handles worktrees and pushes, gh talks to GitHub, and checks-process runs configured commands. The SQLite adapter persists the run log and stores artifact files by hash. The server can substitute deterministic fake capabilities for an offline run.<div class="refs"><a href="../../payo/apps/server/src/adapters.ts">Real and fake selection ↗</a> <a href="../../payo/adapters/git/src/publication.ts">Git operations ↗</a> <a href="../../payo/adapters/gh/src/index.ts">GitHub operations ↗</a> <a href="../../payo/adapters/store-sqlite/src/index.ts">Durable store ↗</a></div></div></details>
+</section>
+<section id="patterns">
+<div class="over">Architecture in practice</div>
+<h2>Patterns you can see in the code</h2>
+<p class="intro">Take one question through the system. A publication run has restarted after a push. How does Payo decide whether it can continue?</p>
+<article class="pattern"><div><h3>Layered domain policy</h3><p>The factory’s application layer reads the remote head and passes three facts to <code>reconcileRemote</code>. The domain function can decide what to do with those values alone. Changing the ownership rule belongs here. Changing how Git reads the head belongs in the Git adapter.</p><div class="refs"><a href="../../payo/modules/factory/src/domain/publication.ts">Decision function ↗</a> <a href="../../payo/modules/factory/src/domain/publication.test.ts">Policy tests ↗</a></div></div><figure><figcaption>reconcileRemote · decision table</figcaption><pre>Remote head       Saved push intent    Decision
+absent            either               push
+reviewed commit   yes                  confirmed
+reviewed commit   no                   conflict
+different commit  either               conflict</pre></figure></article>
+<article class="pattern"><div><h3>Ports, adapters and dependency injection</h3><p>The workflow receives a <code>PublicationDeps</code> object. Its <code>repository</code> port can inspect or push a commit. Its <code>codeHost</code> port can find or create a PR. The server constructs both implementations at startup. A fake can answer the same calls during a test, so the real decision and retry logic still run.</p><div class="refs"><a href="../../payo/modules/factory/src/application/publication/handle.ts">PublicationDeps ↗</a> <a href="../../payo/packages/kernel/src/application/code-host.ts">Port ↗</a> <a href="../../payo/apps/server/src/adapters.ts">Wiring ↗</a></div></div><figure><figcaption>Publication dependencies · runtime wiring</figcaption><pre>apps/server → createAdapterSet
+  ├─ RepositoryPublication → Git operations
+  └─ CodeHost              → GitHub via gh
+
+Factory calls deps.codeHost.findPullRequests(…)
+Kernel defines the CodeHost interface.</pre></figure></article>
+<article class="pattern"><div><h3>Event-sourced run state</h3><p>When a run writes a batch, the kernel validates every event and applies the reducer in sequence. It then asks the store to append against the expected previous sequence. On reopen, it folds the saved events to reconstruct the run and records any recovery events. A failed append leaves the in-memory run log at its last committed state.</p><div class="refs"><a href="../../payo/packages/kernel/src/application/run.ts">commit / openRun ↗</a> <a href="../../payo/packages/kernel/src/application/run-log.ts">Write serialization ↗</a> <a href="../../payo/packages/kernel/src/domain/state.ts">Reducer ↗</a></div></div><figure><figcaption>Kernel · write and reopen paths</figcaption><pre>write   bodies → validate → reduce → append
+                                      ↓
+                               ordered events
+                                      ↓
+reopen  read events → fold → recover → commit</pre></figure></article>
+<article class="pattern"><div><h3>Checkpointed workflow and reconciliation</h3><p>A checkpoint tells the factory which stage needs attention. Publication saves a push intent before contacting Git. If the process stops after Git succeeds, explicit resume can compare the remote head with the reviewed commit. A match with saved intent lets the workflow proceed to draft creation. A mismatch raises a gate for inspection.</p><div class="refs"><a href="../../payo/modules/factory/src/application/publication/run.ts">Effect ordering ↗</a> <a href="../../payo/modules/factory/src/application/publication/lifecycle.ts">Checkpoints and gates ↗</a></div></div><figure><figcaption>Publication · the interruption window</figcaption><pre>Persist push intent
+  ↓
+Push reviewed commit     ← interruption possible here
+  ↓
+Read back remote head
+  ↓
+Checkpoint CreatePr stage</pre></figure></article>
+<article class="pattern"><div><h3>Feature-oriented UI and shared contracts</h3><p>The publication form and its API function live together in the run-workspace feature. The shared HTTP client handles transport. Contract schemas validate the request on the server and the preview response in the browser. For a new preview field, follow its schema through the preview builder to the consuming component.</p><div class="refs"><a href="../../payo/packages/contracts/src/publication.ts">Publication schemas ↗</a> <a href="../../payo/modules/factory/src/application/publication/preview.ts">Preview builder ↗</a> <a href="../../payo/apps/web/src/features/run-workspace/api.ts">Feature API ↗</a></div></div><figure><figcaption>Preview data · producer to consumer</figcaption><pre>factory/application/publication/preview.ts
+  ↓ builds the preview
+server/http.ts → PublicationPreview schema
+  ↓ HTTP response
+web/features/run-workspace/api.ts → form</pre></figure></article>
+<article class="pattern"><div><h3>Executable architecture boundaries</h3><p>The repository tests the import rules themselves. Factory domain code can depend on contracts and kernel state types. Publication orchestration receives its external capabilities through ports. Boundary tests also check for cycles and restrict which web features can import one another. These tests explain where a new dependency can go.</p><div class="refs"><a href="../../payo/test/factory-boundaries.test.ts">Factory rules ↗</a> <a href="../../payo/test/kernel-boundaries.test.ts">Kernel and workspace rules ↗</a> <a href="../../payo/test/web-boundaries.test.ts">Web rules ↗</a></div></div><figure><figcaption>Examples of allowed dependency directions</figcaption><pre>factory/application → factory/domain
+factory/infrastructure → factory/application
+web/run-workspace → web/plan-review → web/runs</pre></figure></article>
+</section>
+<section id="flows"><div class="over">Workflow</div><h2>Where the work changes hands</h2><p class="intro">A PR unit is a group of ordered phases in the approved plan. A plan can describe several PR units. You choose which one to execute and when to publish its result.</p>
+<div class="grid">
+<article class="card" id="plan"><h3>Plan &amp; review</h3><p>Payo resolves the Jira ticket or direct prompt and creates a planning workspace. A planner proposes phases and PR units. Reviewers examine the plan in parallel, a verifier evaluates findings, and a reviser can send a new version through review.</p><p>Answer open questions, inspect phase assignments, then approve or request changes. Approval ends this run.</p><div class="refs"><a href="../../payo/modules/factory/src/application/planning/run.ts">Workflow source ↗</a></div></article>
+<article class="card" id="execute"><h3>Implement &amp; check</h3><p>Select a PR unit, preview its naming and confirm. Payo pins the plan, prepares a Git worktree and executes phases in order. Each phase gets a fresh implementer context. The engine runs configured checks, coordinates review and allows bounded repairs.</p><p>Inspect phase receipts, checks and final PR-level review. A successful execution leaves a reviewed local commit and worktree.</p><div class="refs"><a href="../../payo/modules/factory/src/application/execution/run.ts">Workflow source ↗</a></div></article>
+<article class="card" id="publish"><h3>Preview &amp; publish</h3><p>Preview the target, branch, title and body. Confirming creates a publication child. Payo checks the base, pushes the reviewed commit, verifies the remote branch and creates a GitHub draft PR.</p><p>Open the recorded PR link for human review. Another PR unit starts only when selected.</p><div class="refs"><a href="../../payo/modules/factory/src/application/publication/run.ts">Workflow source ↗</a></div></article>
+</div><details><summary>What happens when a run stops?</summary><div>A gate records why work paused and which commands can continue it. After a server interruption, inspect the gate and explicitly resume. Execution checks the retained worktree and reconciles partial edits. If approved requirements need changing, a corrected planning run goes through approval again while the original execution stays paused. Publication checks remote state before retrying. <a href="../../payo/modules/factory/src/application/execution/resume.ts">Execution recovery ↗</a></div></details></section>
+<section id="trace"><div class="over">One action through the stack</div><h2>Trace “Create draft PR”</h2><p class="intro">Start with the button in an execution workspace. Follow the request to see which layer validates input, which decides whether publication is safe, and which performs the remote operation.</p>
+<ol class="trace">
+<li class="step"><h3>Submit the reviewed preview</h3><p>The form collects the title and body. The feature API sends an authenticated POST to /api/v1/runs/{executionId}/publish.</p><div class="refs"><a href="../../payo/apps/web/src/features/run-workspace/PublishPrForm.tsx">Form ↗</a> <a href="../../payo/apps/web/src/features/run-workspace/api.ts">publishRun ↗</a></div></li>
+<li class="step"><h3>Accept the command</h3><p>The HTTP route validates the payload. The run service calls beginPublication, schedules a newly created run and returns its ID. The client can open that child while the server continues working.</p><div class="refs"><a href="../../payo/apps/server/src/http.ts">Route ↗</a> <a href="../../payo/apps/server/src/run-application.ts">publish ↗</a></div></li>
+<li class="step"><h3>Record intent and perform the operation</h3><p>The factory checks the reviewed commit and base against the publication record. Before a push or draft creation it saves its intent. Git and GitHub adapters carry out the calls. A retry can inspect the remote branch and matching PR before deciding whether to continue or raise a gate.</p><div class="refs"><a href="../../payo/modules/factory/src/application/publication/run.ts">executePublication ↗</a> <a href="../../payo/modules/factory/src/domain/publication.ts">Reconciliation decisions ↗</a></div></li>
+<li class="step"><h3>Show the result</h3><p>The factory records the PR and ends the run as published. The browser follows ordered server-sent events and refreshes workspace data. The publication view displays the recorded result or recovery action.</p><div class="refs"><a href="../../payo/apps/web/src/features/run-workspace/useRunActivity.ts">Activity subscription ↗</a> <a href="../../payo/apps/web/src/features/run-workspace/PublicationView.tsx">Publication result ↗</a></div></li>
+</ol></section>
+<section id="data"><div class="over">Persistence</div><h2>What survives a restart</h2><p class="intro">The default data directory is ~/.payo. Three kinds of evidence answer different questions when you inspect a run.</p>
+<div class="grid"><article class="card"><h3>Event log</h3><p><b>What happened?</b> Ordered SQLite events record step starts, attempt outcomes, gates and run endings. The kernel folds them into the current run state.</p></article><article class="card"><h3>Artifacts &amp; checkpoints</h3><p><b>What did a step use?</b> Content hashes identify saved plans, review output and other evidence. Checkpoints track the workflow stage and references needed to continue.</p></article><article class="card"><h3>Working files</h3><p><b>Where are the edits?</b> A working plan can be edited and reviewed again. An execution worktree retains the branch and partial changes so recovery can inspect actual Git state.</p></article></div></section>
+<section id="setup"><div class="over">Local setup</div><h2>Run the offline example</h2><p class="intro">Use Node 24 and pnpm 10.9. Run the repository setup command from the checkout root to install dependencies, create a starter config if needed and run preflight.</p>
+<pre><code>uv run scripts/setup.py</code></pre><div class="twocol"><div><h3>Start the server</h3><p>In one terminal, run from the checkout root. Fake mode supplies scripted agents and tool responses.</p><pre><code>pnpm -C payo payo serve --dev-fakes</code></pre></div><div><h3>Connect the console</h3><p>In another terminal, print the token and start Vite. Open 127.0.0.1:5173 and enter the token. The default API port is 7331.</p><pre><code>pnpm -C payo payo token
+pnpm -C payo web:dev</code></pre></div></div><p>Start a planning run with the fake Jira ticket <code>ABC-123</code>. Answer <code>q1</code>, approve the plan, then select <code>pr-1</code> to exercise its two phases. Execution requires configured checks.</p><details><summary>What changes in real mode?</summary><div>Start the server without <code>--dev-fakes</code>. Configure models and execution checks in <code>~/.config/payo/config.toml</code>. Pi needs provider credentials, and the target repository needs the role instructions committed at the selected base. Jira intake uses authenticated acli. Publishing uses Git push access and authenticated gh. Restart the server after changing TOML settings. <div class="refs"><a href="../../payo/config.example.toml">Starter TOML ↗</a> <a href="../../payo/apps/server/src/role-sources.ts">Role sources ↗</a></div></div></details></section></main><footer><a href="usage.md">Full operating guide ↗</a> · <a href="#top">Back to top ↑</a></footer></html>

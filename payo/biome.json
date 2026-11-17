@@ -32,7 +32,7 @@
 											"**/modules/**",
 											"**/adapters/**",
 											"**/apps/**",
-											"../../*/**"
+											"**/src/**"
 										],
 										"message": "Import another Payo package by its @payo name, not a relative path."
 									}
@@ -62,7 +62,7 @@
 											"**/modules/**",
 											"**/adapters/**",
 											"**/apps/**",
-											"../../*/**"
+											"**/src/**"
 										],
 										"message": "Import another Payo package by its @payo name, not a relative path."
 									}
@@ -92,7 +92,7 @@
 											"**/modules/**",
 											"../**/adapters/**",
 											"**/apps/**",
-											"../../*/**"
+											"**/src/**"
 										],
 										"message": "Import another Payo package by its @payo name, not a relative path."
 									}
@@ -127,7 +127,7 @@
 											"**/modules/**",
 											"**/adapters/**",
 											"**/apps/**",
-											"../../*/**"
+											"**/src/**"
 										],
 										"message": "Import another Payo package by its @payo name, not a relative path."
 									}
@@ -162,7 +162,7 @@
 											"**/modules/**",
 											"**/adapters/**",
 											"**/apps/**",
-											"../../*/**"
+											"**/src/**"
 										],
 										"message": "Import another Payo package by its @payo name, not a relative path."
 									}
@@ -192,7 +192,7 @@
 											"**/modules/**",
 											"**/adapters/**",
 											"**/apps/**",
-											"../../*/**"
+											"**/src/**"
 										],
 										"message": "Import another Payo package by its @payo name, not a relative path."
 									}
@@ -227,7 +227,7 @@
 											"**/modules/**",
 											"**/adapters/**",
 											"**/apps/**",
-											"../../*/**"
+											"**/src/**"
 										],
 										"message": "Import another Payo package by its @payo name, not a relative path."
 									}
@@ -257,7 +257,7 @@
 											"**/modules/**",
 											"**/adapters/**",
 											"**/apps/**",
-											"../../*/**"
+											"**/src/**"
 										],
 										"message": "Import another Payo package by its @payo name, not a relative path."
 									}
@@ -283,7 +283,7 @@
 											"**/modules/**",
 											"**/adapters/**",
 											"**/apps/**",
-											"../../*/**"
+											"**/src/**"
 										],
 										"message": "Import another Payo package by its @payo name, not a relative path."
 									}

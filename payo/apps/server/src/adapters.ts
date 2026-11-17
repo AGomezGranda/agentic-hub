@@ -5,12 +5,13 @@ import type { RoleSource } from "@payo/factory";
 import { EXECUTION_PREPARER_SOURCE } from "@payo/factory";
 import { createGitHubCodeHost } from "@payo/gh";
 import {
+	checkGit,
 	createExecutionWorkspace,
 	createGitExec,
 	createGitWorkspace,
 	createRepositoryPublication,
 } from "@payo/git";
-import { createAcliTicketSource } from "@payo/jira-acli";
+import { checkAcli, createAcliTicketSource } from "@payo/jira-acli";
 import type {
 	AgentRunner,
 	Checks,
@@ -22,8 +23,9 @@ import type {
 	Workspace,
 } from "@payo/kernel";
 import type { FakeStep } from "@payo/runner-fake";
-import { createPiRunner } from "@payo/runner-pi";
+import { checkPi, createPiRunner } from "@payo/runner-pi";
 import { assertRealModeModels, type ServerConfig } from "./config.ts";
+import type { DoctorProbes } from "./doctor.ts";
 import {
 	createFakeRunner,
 	envelope,
@@ -35,7 +37,11 @@ import {
 	SCENARIOS,
 	type Scenario,
 } from "./factory-fixtures.ts";
-import { loadExecutionRoleSources, loadRoleSources } from "./role-sources.ts";
+import {
+	checkRoleSources,
+	loadExecutionRoleSources,
+	loadRoleSources,
+} from "./role-sources.ts";
 
 export interface AdapterSet {
 	runner: () => AgentRunner;
@@ -166,6 +172,7 @@ export function createWorkItemSource(
 export async function createAdapterSet(
 	config: ServerConfig,
 	store: Pick<RunStore, "readArtifact">,
+	env: NodeJS.ProcessEnv,
 ): Promise<AdapterSet> {
 	if (config.devFakes) {
 		const scenario = scenarioOf(config);
@@ -199,6 +206,7 @@ export async function createAdapterSet(
 	assertRealModeModels(config);
 	const gitExec = createGitExec({ bin: config.gitBin });
 	const pi = createPiRunner({
+		env,
 		bin: config.piBin,
 		provider: config.piProvider,
 		sessionRoot: join(config.dataDir, "sessions"),
@@ -207,7 +215,7 @@ export async function createAdapterSet(
 	return {
 		runner: () => pi,
 		repository: createRepositoryPublication({ bin: config.gitBin }),
-		codeHost: createGitHubCodeHost({ bin: config.ghBin }),
+		codeHost: createGitHubCodeHost({ bin: config.ghBin, env }),
 		workItems: createWorkItemSource(
 			createAcliTicketSource({ bin: config.acliBin }),
 		),
@@ -226,5 +234,15 @@ export async function createAdapterSet(
 		checks: createProcessChecks(),
 		loadExecutionRoleSources: (repo = config.repo, base = config.baseBranch) =>
 			loadExecutionRoleSources(repo, base, gitExec),
+	};
+}
+
+export function createDoctorProbes(config: ServerConfig): DoctorProbes {
+	return {
+		pi: checkPi,
+		acli: checkAcli,
+		git: checkGit,
+		roleSources: checkRoleSources,
+		gitExec: createGitExec({ bin: config.gitBin }),
 	};
 }

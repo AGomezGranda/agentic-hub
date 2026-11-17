@@ -2,6 +2,7 @@ import {
 	ArtifactRef as ArtifactRefSchema,
 	type RunEvent,
 	RunEventBody,
+	RunId,
 } from "@payo/contracts";
 import { type RunStore, StaleSeqError } from "../application/store.ts";
 import { assertSha256, sha256Hex } from "../domain/artifacts.ts";
@@ -14,7 +15,16 @@ export interface MemoryBacking {
 export function createMemoryRunStore(
 	backing: MemoryBacking = { events: new Map(), artifacts: new Map() },
 ): RunStore {
+	let acceptanceTail: Promise<unknown> = Promise.resolve();
 	return {
+		serializeAcceptance(work) {
+			const result = acceptanceTail.then(work, work);
+			acceptanceTail = result.then(
+				() => {},
+				() => {},
+			);
+			return result;
+		},
 		async append(runId, events, expectedSeq) {
 			if (events.length === 0) return;
 			const parsed = events.map((body) => RunEventBody.parse(body));
@@ -41,7 +51,7 @@ export function createMemoryRunStore(
 		},
 
 		async listRunIds() {
-			return [...backing.events.keys()].sort();
+			return [...backing.events.keys()].sort().map((id) => RunId.parse(id));
 		},
 
 		async putArtifact(content, meta) {

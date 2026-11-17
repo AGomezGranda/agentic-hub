@@ -230,6 +230,7 @@ export function RunWorkspace({
 			</nav>
 			{selectedView === "publication" && publication ? (
 				<PublicationView
+					onSelectRun={onSelectRun}
 					token={token}
 					runId={runId}
 					publication={publication}

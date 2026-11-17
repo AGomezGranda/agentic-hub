@@ -1,4 +1,4 @@
-import type { RunSummary } from "@payo/contracts";
+import type { RunIdInput, RunSummary } from "@payo/contracts";
 import {
 	type ExecutionHandle,
 	type FactoryHandle,
@@ -11,7 +11,7 @@ import type { RunStore } from "@payo/kernel";
 import { ApplicationError } from "./errors.ts";
 export async function readRunSummary(
 	store: RunStore,
-	runId: string,
+	runId: RunIdInput,
 	factory: FactoryHandle | undefined,
 	execution: ExecutionHandle | undefined,
 	publication?: PublicationHandle,
@@ -33,7 +33,7 @@ export async function readRunSummary(
 		? readPublicationSummary(publication)
 		: undefined;
 	return {
-		runId,
+		runId: state.runId,
 		repo: state.repo,
 		baseBranch: state.baseBranch,
 		status: state.status,

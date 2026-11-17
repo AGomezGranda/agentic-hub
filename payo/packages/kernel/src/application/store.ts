@@ -1,16 +1,24 @@
-import type { ArtifactRef, RunEvent, RunEventBody } from "@payo/contracts";
+import type {
+	ArtifactRef,
+	RunEvent,
+	RunEventBody,
+	RunId,
+	RunIdInput,
+} from "@payo/contracts";
 
 export interface RunStore {
+	/** Serializes acceptance within this store instance; a failure does not block later requests. */
+	serializeAcceptance<T>(work: () => Promise<T>): Promise<T>;
 	/** Appends bodies after `expectedSeq`; the store assigns `seq` and `at`. An empty batch is a no-op. */
 	append(
-		runId: string,
+		runId: RunIdInput,
 		events: RunEventBody[],
 		expectedSeq: number,
 	): Promise<void>;
 	/** Events with `seq >= fromSeq`, in seq order. */
-	read(runId: string, fromSeq?: number): Promise<RunEvent[]>;
+	read(runId: RunIdInput, fromSeq?: number): Promise<RunEvent[]>;
 	/** Every run with at least one event, in deterministic ascending ID order. */
-	listRunIds(): Promise<string[]>;
+	listRunIds(): Promise<RunId[]>;
 	putArtifact(
 		content: Uint8Array,
 		meta: { kind: string; mediaType: string },

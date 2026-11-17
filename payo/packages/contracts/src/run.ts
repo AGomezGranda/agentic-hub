@@ -1,11 +1,21 @@
 import { z } from "zod";
 import { AgentEvent } from "./agent.ts";
+import type {
+	AttemptIdInput,
+	GateIdInput,
+	RunIdInput,
+	StepIdInput,
+} from "./primitives.ts";
 import {
 	ArtifactRef,
+	AttemptId,
+	GateId,
 	Id,
 	ModelId,
 	RunConfig,
+	RunId,
 	Sha256,
+	StepId,
 	UsageRecord,
 } from "./primitives.ts";
 
@@ -24,7 +34,7 @@ export type StepOutcome = z.infer<typeof StepOutcome>;
 export const RunEventBody = z.discriminatedUnion("type", [
 	z.object({
 		type: z.literal("run.created"),
-		runId: Id,
+		runId: RunId,
 		repo: z.string().min(1),
 		baseBranch: z.string().min(1),
 		config: RunConfig,
@@ -32,18 +42,18 @@ export const RunEventBody = z.discriminatedUnion("type", [
 	z.object({ type: z.literal("run.ended"), outcome: z.string().min(1) }),
 	z.object({
 		type: z.literal("step.started"),
-		stepId: Id,
+		stepId: StepId,
 		name: z.string().min(1),
 	}),
 	z.object({
 		type: z.literal("step.finished"),
-		stepId: Id,
+		stepId: StepId,
 		outcome: StepOutcome,
 	}),
 	z.object({
 		type: z.literal("attempt.started"),
-		attemptId: Id,
-		stepId: Id,
+		attemptId: AttemptId,
+		stepId: StepId,
 		role: Id,
 		runner: Id,
 		model: ModelId.nullable(),
@@ -52,54 +62,70 @@ export const RunEventBody = z.discriminatedUnion("type", [
 	}),
 	z.object({
 		type: z.literal("attempt.event"),
-		attemptId: Id,
+		attemptId: AttemptId,
 		event: AgentEvent,
 	}),
 	z.object({
 		type: z.literal("attempt.finished"),
-		attemptId: Id,
+		attemptId: AttemptId,
 		outcome: AttemptOutcome,
 		usage: UsageRecord,
 		error: z.string().optional(),
 	}),
 	z.object({
 		type: z.literal("gate.raised"),
-		gateId: Id,
-		stepId: Id,
+		gateId: GateId,
+		stepId: StepId,
 		kind: z.string().min(1),
 		allowedCommands: z.array(Id).min(1),
 		reason: z.string(),
 	}),
 	z.object({
 		type: z.literal("gate.resolved"),
-		gateId: Id,
+		gateId: GateId,
 		command: Id,
 		note: z.string().nullable(),
 	}),
 	z.object({
 		type: z.literal("artifact.recorded"),
 		artifact: ArtifactRef,
-		attemptId: Id.nullable(),
+		attemptId: AttemptId.nullable(),
 	}),
 ]);
-export type RunEventBody = z.infer<typeof RunEventBody>;
+type EventInput<T> = T extends unknown
+	? {
+			[K in keyof T]: K extends "runId"
+				? RunIdInput
+				: K extends "stepId"
+					? StepIdInput
+					: K extends "attemptId"
+						? AttemptIdInput | Extract<T[K], null>
+						: K extends "gateId"
+							? GateIdInput
+							: T[K];
+		}
+	: never;
+export type RunEventBody = EventInput<z.input<typeof RunEventBody>>;
 
 // Written by the store, never by callers.
 export const RunEventSchema = RunEventBody.and(
 	z.object({ seq: z.int().positive(), at: z.string().min(1) }),
 );
-export type RunEvent = RunEventBody & { seq: number; at: string };
+export type RunEvent = z.output<typeof RunEventBody> & {
+	seq: number;
+	at: string;
+};
 
 export const StepRecord = z.object({
-	stepId: Id,
+	stepId: StepId,
 	name: z.string().min(1),
 	status: z.union([z.literal("running"), StepOutcome]),
 });
 export type StepRecord = z.infer<typeof StepRecord>;
 
 export const AttemptRecord = z.object({
-	attemptId: Id,
-	stepId: Id,
+	attemptId: AttemptId,
+	stepId: StepId,
 	role: Id,
 	runner: Id,
 	model: ModelId.nullable(),
@@ -112,8 +138,8 @@ export const AttemptRecord = z.object({
 export type AttemptRecord = z.infer<typeof AttemptRecord>;
 
 export const GateRecord = z.object({
-	gateId: Id,
-	stepId: Id,
+	gateId: GateId,
+	stepId: StepId,
 	kind: z.string().min(1),
 	allowedCommands: z.array(Id).min(1),
 	reason: z.string(),

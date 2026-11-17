@@ -1,4 +1,6 @@
 import {
+	ResumeRequest,
+	RunIdResponse,
 	type RunSummary,
 	RunSummaryList,
 	RunSummary as RunSummarySchema,
@@ -52,5 +54,19 @@ export async function startRun(
 		"POST",
 		(data) => StartRunResponse.parse(data),
 		body,
+	);
+}
+
+export async function resumeRun(
+	token: string,
+	runId: string,
+	input?: ResumeRequest,
+): Promise<{ runId: string }> {
+	return getJson(
+		`/runs/${encodeURIComponent(runId)}/resume`,
+		token,
+		"POST",
+		(data) => RunIdResponse.parse(data),
+		input ? ResumeRequest.parse(input) : undefined,
 	);
 }

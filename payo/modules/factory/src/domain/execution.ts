@@ -1,3 +1,4 @@
+import type { GateIdInput, StepIdInput } from "@payo/contracts";
 import {
 	type ArtifactRef,
 	ExecutionCheckpoint,
@@ -5,6 +6,7 @@ import {
 	type ExecutionStage,
 	FactoryRunConfig,
 	type Finding,
+	type ImplementationOutput,
 	type RepairOutput,
 	type VerifiedOutput,
 } from "@payo/contracts";
@@ -35,7 +37,7 @@ export function executionResumeStage(
 
 export function executionResumeConflict(
 	checkpoint: ExecutionCheckpoint,
-	gates: Iterable<{ status: string; stepId: string; gateId: string }>,
+	gates: Iterable<{ status: string; stepId: StepIdInput; gateId: GateIdInput }>,
 ): string | null {
 	if (checkpoint.stage !== "Escalated" || !checkpoint.inFlight)
 		return "execution is not resumable";
@@ -357,4 +359,31 @@ export function assertAcceptanceEvidence(
 			throw new Error("phase acceptance is missing report or review evidence");
 	} else if (!common)
 		throw new Error("final PR acceptance is missing check or review evidence");
+}
+
+export function implementationReportDecision(
+	criteria: readonly string[],
+	output: Pick<ImplementationOutput, "completedCriteria" | "planIssues">,
+	hasFeedback: boolean,
+):
+	| { decision: "Check" }
+	| { decision: "Reconcile" | "Escalated"; reason: string } {
+	const missing = criteria.filter(
+		(criterion) => !output.completedCriteria.includes(criterion),
+	);
+	if (!output.planIssues.length && !missing.length)
+		return { decision: "Check" };
+	const issues = [];
+	if (output.planIssues.length)
+		issues.push(
+			`implementer reported plan issues: ${output.planIssues.join("; ")}`,
+		);
+	if (missing.length)
+		issues.push(
+			`implementation did not report all acceptance criteria: ${missing.join("; ")}`,
+		);
+	return {
+		decision: hasFeedback ? "Escalated" : "Reconcile",
+		reason: issues.join("\n"),
+	};
 }

@@ -1,6 +1,10 @@
 import type { RunState } from "@payo/kernel";
 import { describe, expect, it } from "vitest";
-import { assertPlanApprovable } from "./planning.ts";
+import {
+	assertAnswerable,
+	assertPlanApprovable,
+	assertQuestionAnswer,
+} from "./planning.ts";
 
 describe("plan approval policy", () => {
 	const state: Pick<RunState, "steps" | "attempts"> = {
@@ -39,4 +43,20 @@ describe("plan approval policy", () => {
 			),
 		).not.toThrow();
 	});
+});
+
+it("accepts answers only in answerable stages for a known question and nonblank response", () => {
+	for (const stage of ["Approval", "Escalated"] as const)
+		expect(() => assertAnswerable(stage)).not.toThrow();
+	for (const stage of ["Plan", "PlanReview", "Approved"] as const)
+		expect(() => assertAnswerable(stage)).toThrow("run cannot accept answers");
+	expect(() =>
+		assertQuestionAnswer([{ id: "q" }], "q", "Keep it"),
+	).not.toThrow();
+	expect(() => assertQuestionAnswer([{ id: "q" }], "other", "Keep it")).toThrow(
+		"unknown question",
+	);
+	expect(() => assertQuestionAnswer([{ id: "q" }], "q", "  ")).toThrow(
+		"answer must not be blank",
+	);
 });

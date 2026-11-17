@@ -1,18 +1,18 @@
-import type { GitHubTarget, PullRequestRecord } from "@payo/contracts";
+import type { PullRequestRecord, RepositoryTarget } from "@payo/contracts";
 
 export interface CodeHost {
 	resolveRepository(
 		remoteUrl: string,
 		baseBranch: string,
 		signal: AbortSignal,
-	): Promise<GitHubTarget>;
+	): Promise<RepositoryTarget>;
 	findPullRequests(
-		target: GitHubTarget,
+		target: RepositoryTarget,
 		headBranch: string,
 		signal: AbortSignal,
 	): Promise<PullRequestRecord[]>;
 	createDraftPullRequest(
-		target: GitHubTarget,
+		target: RepositoryTarget,
 		input: { headBranch: string; title: string; body: string },
 		signal: AbortSignal,
 	): Promise<void>;

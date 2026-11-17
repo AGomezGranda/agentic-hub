@@ -1,15 +1,16 @@
 import type { DoctorCheck, DoctorReport } from "@payo/contracts";
-import { checkGit, createGitExec } from "@payo/git";
-import { checkAcli } from "@payo/jira-acli";
-import { checkPi } from "@payo/runner-pi";
+import type { checkGit, GitExec } from "@payo/git";
+import type { checkAcli } from "@payo/jira-acli";
+import type { checkPi } from "@payo/runner-pi";
 import type { ServerConfig } from "./config.ts";
-import { checkRoleSources } from "./role-sources.ts";
+import type { checkRoleSources } from "./role-sources.ts";
 
 export function startupBlockingFailures(report: DoctorReport): DoctorCheck[] {
 	return report.checks.filter((check) => !check.ok && check.name !== "acli");
 }
 
 export interface DoctorProbes {
+	gitExec: GitExec;
 	pi: typeof checkPi;
 	acli: typeof checkAcli;
 	git: typeof checkGit;
@@ -20,13 +21,9 @@ const MAX_DETAIL = 512;
 
 export async function runDoctor(
 	config: ServerConfig,
-	probes: Partial<DoctorProbes> = {},
+	probes: DoctorProbes,
 ): Promise<DoctorReport> {
-	const pi = probes.pi ?? checkPi;
-	const acli = probes.acli ?? checkAcli;
-	const git = probes.git ?? checkGit;
-	const roleSources = probes.roleSources ?? checkRoleSources;
-	const gitExec = createGitExec({ bin: config.gitBin });
+	const { pi, acli, git, roleSources, gitExec } = probes;
 	const providers = [
 		...new Set(
 			Object.values(config.roles).flatMap(({ model }) =>

@@ -54,8 +54,11 @@ function ok(name: string): DoctorCheck {
 	return { name, ok: true, detail: "ready" };
 }
 
-function probes(seen: Record<string, unknown> = {}): Partial<DoctorProbes> {
+function probes(seen: Record<string, unknown> = {}): DoctorProbes {
 	return {
+		gitExec: async () => {
+			throw new Error("unexpected git execution");
+		},
 		pi: async (options) => {
 			seen.pi = options;
 			return ok("pi");
@@ -125,6 +128,7 @@ it("ignores only failed acli checks for startup readiness", async () => {
 	}
 
 	const everyFailure = await runDoctor(config(), {
+		...probes(),
 		pi: async () => ({ name: "pi", ok: false, detail: "pi" }),
 		acli: async () => ({ name: "acli", ok: false, detail: "acli" }),
 		git: async () => ({ name: "git", ok: false, detail: "git" }),
@@ -245,7 +249,8 @@ it("turns a rejecting probe into a failed check", async () => {
 
 it("passes config values and one git exec to the probes", async () => {
 	const seen: Record<string, unknown> = {};
-	await runDoctor(config(), probes(seen));
+	const injected = probes(seen);
+	await runDoctor(config(), injected);
 	expect(seen.pi).toMatchObject({
 		bin: "pi-bin",
 		provider: "openai",
@@ -263,9 +268,8 @@ it("passes config values and one git exec to the probes", async () => {
 		base: "main",
 		exec: expect.any(Function),
 	});
-	expect((seen.git as { exec: unknown }).exec).toBe(
-		(seen.skills as { exec: unknown }).exec,
-	);
+	expect((seen.git as { exec: unknown }).exec).toBe(injected.gitExec);
+	expect((seen.skills as { exec: unknown }).exec).toBe(injected.gitExec);
 });
 
 it("caps and redacts check details", async () => {

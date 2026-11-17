@@ -31,7 +31,8 @@ from changes to the plan or its assumptions.
 ### Fanning out
 
 Bundled agent: `audit-reviewer` (agents/audit-reviewer.md). Delegate only
-independent plan areas that justify it. Pass scope, plan path, governing rules,
+independent plan areas that justify it, or use the three related lens groups
+in references/lenses.md for a connected plan. Pass scope, plan path, governing rules,
 selected lens criteria and references/review.md by absolute path. Reviewers
 may inspect missing evidence themselves. The parent verifies material findings
 and owns interactions between delegated areas.

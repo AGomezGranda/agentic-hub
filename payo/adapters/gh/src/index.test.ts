@@ -41,7 +41,7 @@ it("accepts supported GitHub identities and rejects credentials and other target
 });
 it("resolves repository and exact named base lazily with read-only queries", async () => {
 	const exec = executor([await fixture("repository"), await fixture("branch")]);
-	const port = createGitHubCodeHost({ exec });
+	const port = createGitHubCodeHost({ env: {}, exec });
 	expect(exec).not.toHaveBeenCalled();
 	expect(
 		await port.resolveRepository(
@@ -65,11 +65,10 @@ it("queries every PR state and preserves identity, head, draft and content", asy
 		raw[0][0].state = state;
 		raw[0][0].merged_at = merged_at;
 		const exec = executor([JSON.stringify(raw)]);
-		const records = await createGitHubCodeHost({ exec }).findPullRequests(
-			target,
-			"ABC-1/create-reviewed-result",
-			signal,
-		);
+		const records = await createGitHubCodeHost({
+			env: {},
+			exec,
+		}).findPullRequests(target, "ABC-1/create-reviewed-result", signal);
 		expect(records[0]).toMatchObject({
 			owner: "Owner",
 			name: "repo",
@@ -84,7 +83,7 @@ it("queries every PR state and preserves identity, head, draft and content", asy
 });
 it("creates only an explicitly targeted draft with multiline content through stdin", async () => {
 	const exec = executor(["https://github.com/Owner/repo/pull/1\n"]);
-	await createGitHubCodeHost({ exec }).createDraftPullRequest(
+	await createGitHubCodeHost({ env: {}, exec }).createDraftPullRequest(
 		target,
 		{
 			headBranch: "ABC-1/create-reviewed-result",
@@ -120,11 +119,10 @@ it("creates only an explicitly targeted draft with multiline content through std
 it("preserves query/authentication/effect uncertainty and cancellation", async () => {
 	for (const stdout of ["not-json", "{}", "[[]", "[[{}]]", '[{"number":1}]']) {
 		await expect(
-			createGitHubCodeHost({ exec: executor([stdout]) }).findPullRequests(
-				target,
-				"feature",
-				signal,
-			),
+			createGitHubCodeHost({
+				env: {},
+				exec: executor([stdout]),
+			}).findPullRequests(target, "feature", signal),
 		).rejects.toThrow();
 	}
 	const failure: GhExec = async () => ({
@@ -133,17 +131,17 @@ it("preserves query/authentication/effect uncertainty and cancellation", async (
 		exitCode: 4,
 	});
 	await expect(
-		createGitHubCodeHost({ exec: failure }).findPullRequests(
+		createGitHubCodeHost({ env: {}, exec: failure }).findPullRequests(
 			target,
 			"feature",
 			signal,
 		),
-	).rejects.toThrow();
+	).rejects.toThrow("outcome may be unknown: authentication required");
 	const lost: GhExec = async () => {
 		throw new Error("response lost");
 	};
 	await expect(
-		createGitHubCodeHost({ exec: lost }).createDraftPullRequest(
+		createGitHubCodeHost({ env: {}, exec: lost }).createDraftPullRequest(
 			target,
 			{ headBranch: "feature", title: "title", body: "body" },
 			signal,
@@ -151,7 +149,7 @@ it("preserves query/authentication/effect uncertainty and cancellation", async (
 	).rejects.toThrow("response lost");
 	const exec = executor([]);
 	await expect(
-		createGitHubCodeHost({ exec }).findPullRequests(
+		createGitHubCodeHost({ env: {}, exec }).findPullRequests(
 			target,
 			"feature",
 			AbortSignal.abort(),
@@ -170,16 +168,16 @@ it("rejects partial repository/base facts and retains content whitespace for exa
 		],
 	])
 		await expect(
-			createGitHubCodeHost({ exec: executor(outputs) }).resolveRepository(
-				"https://github.com/Owner/repo",
-				"main",
-				signal,
-			),
+			createGitHubCodeHost({
+				env: {},
+				exec: executor(outputs),
+			}).resolveRepository("https://github.com/Owner/repo", "main", signal),
 		).rejects.toThrow();
 	const raw = JSON.parse(await fixture("pull-requests"));
 	raw[0][0].title = " [ABC-1] Create result ";
 	raw[0][0].body += "\n";
 	const records = await createGitHubCodeHost({
+		env: {},
 		exec: executor([JSON.stringify(raw)]),
 	}).findPullRequests(target, "ABC-1/create-reviewed-result", signal);
 	expect(records[0]?.title).toBe(" [ABC-1] Create result ");

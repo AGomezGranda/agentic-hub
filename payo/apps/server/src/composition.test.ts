@@ -114,7 +114,11 @@ it("waits for run acceptance before closing the store during shutdown", async ()
 			await memory.close();
 		},
 	};
-	const composition = await createComposition({ config: config(), store });
+	const composition = await createComposition({
+		env: {},
+		config: config(),
+		store,
+	});
 	const acceptance = composition.start({
 		workItemRequest: { source: "jira", key: "T" },
 		repo: "/repo",
@@ -127,6 +131,26 @@ it("waits for run acceptance before closing the store during shutdown", async ()
 	release();
 	await acceptance;
 	await shutdown;
+	expect(closed).toBe(true);
+});
+
+it("closes the store when startup enumeration fails without masking the failure", async () => {
+	const memory = createMemoryRunStore();
+	const failure = new Error("cannot enumerate runs");
+	let closed = false;
+	const store: RunStore = {
+		...memory,
+		async listRunIds() {
+			throw failure;
+		},
+		async close() {
+			closed = true;
+			throw new Error("close failed");
+		},
+	};
+	await expect(
+		createComposition({ env: {}, config: config(), store }),
+	).rejects.toBe(failure);
 	expect(closed).toBe(true);
 });
 
@@ -208,7 +232,7 @@ it("rejects a moved execution HEAD but resumes after repository-wide history cha
 		dataDir,
 		checks: [{ name: "unit", command: "true", args: [], timeout_ms: 1000 }],
 	});
-	const adapters = await createAdapterSet(settings, store);
+	const adapters = await createAdapterSet(settings, store, {});
 	const workspace = adapters.executionWorkspace;
 	const runner = adapters.executionRunner;
 	if (!workspace || !runner) throw new Error("execution adapters expected");
@@ -216,6 +240,7 @@ it("rejects a moved execution HEAD but resumes after repository-wide history cha
 	let historyChanged = false;
 	let headChanged = false;
 	const composition = await createComposition({
+		env: {},
 		config: settings,
 		store,
 		adapters: {
@@ -302,11 +327,12 @@ it("allows retrying a plan conflict in the same execution", async () => {
 		dataDir,
 		checks: [{ name: "unit", command: "true", args: [], timeout_ms: 1000 }],
 	});
-	const adapters = await createAdapterSet(settings, store);
+	const adapters = await createAdapterSet(settings, store, {});
 	const runner = adapters.executionRunner;
 	if (!runner) throw new Error("execution runner expected");
 	const issue = "The requested API already exists; preserve its consumers.";
 	const composition = await createComposition({
+		env: {},
 		config: settings,
 		store,
 		adapters: {
@@ -384,7 +410,11 @@ it("caps new runs by active run settings and ignores ended runs", async () => {
 	const store = createMemoryRunStore();
 	await seed(store, "active", 2);
 	await seed(store, "ended", 8, true);
-	const composition = await createComposition({ config: config(), store });
+	const composition = await createComposition({
+		env: {},
+		config: config(),
+		store,
+	});
 
 	const runId = await composition.start({
 		workItemRequest: { source: "jira", key: "T" },
@@ -403,6 +433,7 @@ it("uses the configured value when every run has ended", async () => {
 	const store = createMemoryRunStore();
 	await seed(store, "ended", 8, true);
 	const composition = await createComposition({
+		env: {},
 		config: config({ maxConcurrentAgents: 5 }),
 		store,
 	});
@@ -436,7 +467,11 @@ it("skips a run without a checkpoint without blocking other runs", async () => {
 	);
 	await seed(store, "good", 1);
 
-	const composition = await createComposition({ config: config(), store });
+	const composition = await createComposition({
+		env: {},
+		config: config(),
+		store,
+	});
 
 	expect(composition.hasRun("broken")).toBe(false);
 	expect(composition.hasRun("good")).toBe(true);
@@ -450,6 +485,7 @@ it("rejects an unknown fake scenario and scenarios without --dev-fakes", async (
 	const store = createMemoryRunStore();
 	await expect(
 		createComposition({
+			env: {},
 			config: config({ scenario: "unknown" }),
 			store,
 		}),
@@ -457,6 +493,7 @@ it("rejects an unknown fake scenario and scenarios without --dev-fakes", async (
 	const second = createMemoryRunStore();
 	await expect(
 		createComposition({
+			env: {},
 			config: config({ scenario: "clean", devFakes: false }),
 			store: second,
 		}),
@@ -467,6 +504,7 @@ it("allows planning without an implementer model but rejects implementation acti
 	const store = createMemoryRunStore();
 	const model = { provider: "anthropic", id: "test-model" };
 	const composition = await createComposition({
+		env: {},
 		config: config({
 			devFakes: false,
 			scenario: null,
@@ -498,6 +536,7 @@ it("reports a failed execution role-source load as unavailable", async () => {
 	const store = createMemoryRunStore();
 	const model = { provider: "anthropic", id: "test-model" };
 	const composition = await createComposition({
+		env: {},
 		config: config({
 			devFakes: false,
 			scenario: null,
@@ -540,6 +579,7 @@ it("reports a failed stored execution base resolution as unavailable", async () 
 	const store = createMemoryRunStore();
 	const model = { provider: "anthropic", id: "test-model" };
 	const composition = await createComposition({
+		env: {},
 		config: config({
 			devFakes: false,
 			scenario: null,
@@ -587,6 +627,7 @@ it("reports a failed requested execution base resolution as bad request", async 
 	const store = createMemoryRunStore();
 	const model = { provider: "anthropic", id: "test-model" };
 	const composition = await createComposition({
+		env: {},
 		config: config({
 			devFakes: false,
 			scenario: null,
@@ -633,6 +674,7 @@ it("reports a failed requested execution base resolution as bad request", async 
 it("uses an injected adapter set in real mode", async () => {
 	const store = createMemoryRunStore();
 	const composition = await createComposition({
+		env: {},
 		config: config({ devFakes: false, scenario: null, model: "test-model" }),
 		store,
 		adapters: injected(() => createFakeRunner(cleanScript())),
@@ -684,6 +726,7 @@ it("snapshots provider-qualified models and role timeouts into each new run", as
 		},
 	});
 	const composition = await createComposition({
+		env: {},
 		config: configured,
 		store,
 		adapters: injected(() => createFakeRunner(cleanScript())),
@@ -715,6 +758,7 @@ it("builds a fresh fake runner for every run", async () => {
 	const store = createMemoryRunStore();
 	let calls = 0;
 	const composition = await createComposition({
+		env: {},
 		config: config(),
 		store,
 		adapters: injected(() => {
@@ -741,8 +785,13 @@ it("recovers an interrupted publication child on restart and resumes it explicit
 		checks: [{ name: "unit", command: "true", args: [], timeout_ms: 1000 }],
 	});
 	const store = await createSqliteRunStore({ dataDir });
-	const adapters = await createAdapterSet(settings, store);
-	const first = await createComposition({ config: settings, store, adapters });
+	const adapters = await createAdapterSet(settings, store, {});
+	const first = await createComposition({
+		env: {},
+		config: settings,
+		store,
+		adapters,
+	});
 	const sourceRunId = await first.start({
 		workItemRequest: { source: "jira", key: "ABC-123" },
 		repo: "/repo",
@@ -793,9 +842,10 @@ it("recovers an interrupted publication child on restart and resumes it explicit
 
 	const restartedStore = await createSqliteRunStore({ dataDir });
 	const restarted = await createComposition({
+		env: {},
 		config: settings,
 		store: restartedStore,
-		adapters: await createAdapterSet(settings, restartedStore),
+		adapters: await createAdapterSet(settings, restartedStore, {}),
 	});
 	try {
 		const gated = await restarted.summary(publicationRunId);
@@ -821,6 +871,7 @@ it("recovers an interrupted publication child on restart and resumes it explicit
 it("refuses invalid publication policy before opening the store or adapters", async () => {
 	await expect(
 		createComposition({
+			env: {},
 			config: config({
 				publication: {
 					...config().publication,
@@ -832,4 +883,79 @@ it("refuses invalid publication policy before opening the store or adapters", as
 		code: "invalid_request",
 		message: expect.stringContaining("publication.pr_title_template"),
 	});
+});
+
+it("keeps the live publication handle after a duplicate publish", async () => {
+	const dataDir = await mkdtemp(join(tmpdir(), "payo-publication-restart-"));
+	const settings = config({
+		dataDir,
+		checks: [{ name: "unit", command: "true", args: [], timeout_ms: 1000 }],
+	});
+	const store = await createSqliteRunStore({ dataDir });
+	const adapters = await createAdapterSet(settings, store, {});
+	const first = await createComposition({
+		env: {},
+		config: settings,
+		store,
+		adapters,
+	});
+	const sourceRunId = await first.start({
+		workItemRequest: { source: "jira", key: "ABC-123" },
+		repo: "/repo",
+		baseBranch: "main",
+	});
+	await first.waitForIdle();
+	await first.answer(sourceRunId, { questionId: "q1", text: "Because." });
+	await first.approve(sourceRunId);
+	const naming = await first.implementPreview(sourceRunId, {
+		prId: "pr-1",
+		slug: "create-todo-entity",
+	});
+	if (!naming.previewHash || naming.ticketId === undefined)
+		throw new Error(JSON.stringify(naming.errors));
+	const executionRunId = await first.implement(sourceRunId, {
+		prId: "pr-1",
+		naming: {
+			previewHash: naming.previewHash,
+			ticketId: naming.ticketId,
+			slug: naming.slug,
+		},
+	});
+	await first.waitForIdle();
+	expect((await first.summary(executionRunId)).execution?.outcome).toBe(
+		"reviewed",
+	);
+	const preview = await first.publicationPreview(executionRunId);
+	expect(preview.eligible).toBe(true);
+	if (!preview.previewHash) throw new Error(preview.errors.join("; "));
+	if (!adapters.repository) throw new Error("missing repository");
+	let entered!: () => void, release!: () => void;
+	const started = new Promise<void>((resolve) => {
+		entered = resolve;
+	});
+	const blocked = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	const push = adapters.repository.pushCommit.bind(adapters.repository);
+	adapters.repository.pushCommit = async (...args) => {
+		entered();
+		await blocked;
+		return push(...args);
+	};
+	try {
+		const input = { previewHash: preview.previewHash };
+		const id = await first.publish(executionRunId, input);
+		await started;
+		expect(await first.publish(executionRunId, input)).toBe(id);
+		release();
+		await first.waitForIdle();
+		expect(await first.summary(id)).toMatchObject({
+			status: "ended",
+			outcome: "published",
+			publication: { stage: "Completed" },
+		});
+	} finally {
+		release();
+		await first.shutdown();
+	}
 });

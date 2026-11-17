@@ -1,4 +1,9 @@
-import { RunSummary as RunSummarySchema } from "@payo/contracts";
+import {
+	GateId,
+	RunId,
+	RunSummary as RunSummarySchema,
+	StepId,
+} from "@payo/contracts";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
@@ -26,7 +31,7 @@ function runSummary(
 	} = {},
 ) {
 	return RunSummarySchema.parse({
-		runId,
+		runId: RunId.parse(runId),
 		repo: options.repo ?? "/work/repo",
 		baseBranch: "main",
 		status: options.status ?? "active",
@@ -44,8 +49,8 @@ function runSummary(
 }
 
 const gate = (suffix: string) => ({
-	gateId: `gate-${suffix}`,
-	stepId: `step-${suffix}`,
+	gateId: GateId.parse(`gate-${suffix}`),
+	stepId: StepId.parse(`step-${suffix}`),
 	kind: "approval",
 	allowedCommands: ["continue"],
 	reason: "Approval required",
@@ -263,8 +268,8 @@ it("keeps a plan and its PR together across statuses, grouping modes, and missin
 	const execution = {
 		...runSummary(RUN_B),
 		execution: {
-			runId: RUN_B,
-			sourceRunId: RUN_A,
+			runId: RunId.parse(RUN_B),
+			sourceRunId: RunId.parse(RUN_A),
 			prId: "PR-1",
 			phaseCount: 2,
 			completedPhases: [],
@@ -359,8 +364,8 @@ it("groups publication children with their source planning run", () => {
 	const child = {
 		...runSummary(RUN_B),
 		publication: {
-			sourceRunId: RUN_A,
-			executionRunId: RUN_C,
+			sourceRunId: RunId.parse(RUN_A),
+			executionRunId: RunId.parse(RUN_C),
 			stage: "Push" as const,
 			branch: "branch",
 			reviewedCommit: "sha",

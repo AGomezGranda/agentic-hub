@@ -1,9 +1,9 @@
-import type { RunSummary } from "@payo/contracts";
+import { RunSummary } from "@payo/contracts";
 import { expect, it } from "vitest";
 import { formatSummary } from "./index.ts";
 
 it("renders linked execution status and engine-owned check results", () => {
-	const summary: RunSummary = {
+	const summary = RunSummary.parse({
 		runId: "6f1f1b1e-2b4c-4f7a-9d3e-2f4a5b6c7d8e",
 		repo: "/repo",
 		baseBranch: "main",
@@ -42,7 +42,7 @@ it("renders linked execution status and engine-owned check results", () => {
 				round: 2,
 			},
 		},
-	};
+	});
 
 	const output = formatSummary(summary);
 	expect(output).toContain("execution: 8f1f1b1e-2b4c-4f7a-9d3e-2f4a5b6c7d8e");

@@ -1,3 +1,4 @@
+import { AttemptId, GateId, RunId, StepId } from "@payo/contracts";
 // @vitest-environment jsdom
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -18,7 +19,7 @@ const timestamp = "2026-10-30T00:00:00.000Z";
 
 function summary(stage = "Plan", openGates: unknown[] = [], runId = RUN_ID) {
 	return {
-		runId,
+		runId: RunId.parse(runId),
 		repo: "/work/repo",
 		baseBranch: "main",
 		status: "active",
@@ -39,9 +40,9 @@ function costs(runId: string) {
 		incompleteAttempts: 0,
 	};
 	return {
-		sourceRunId: runId,
+		sourceRunId: RunId.parse(runId),
 		planning: {
-			runId,
+			runId: RunId.parse(runId),
 			status: "ended",
 			outcome: "approved",
 			asOfSeq: 1,
@@ -122,8 +123,8 @@ it("keeps an approved run in its plan view", async () => {
 it("coalesces a burst of stream events into one summary refresh at the latest gate", async () => {
 	let summaryRequests = 0;
 	const gate = {
-		gateId: GATE_ID,
-		stepId: STEP_ID,
+		gateId: GateId.parse(GATE_ID),
+		stepId: StepId.parse(STEP_ID),
 		kind: "approval",
 		allowedCommands: ["approve"],
 		reason: "Review the plan",
@@ -131,22 +132,22 @@ it("coalesces a burst of stream events into one summary refresh at the latest ga
 	const burst = [
 		{
 			type: "step.started",
-			stepId: STEP_ID,
+			stepId: StepId.parse(STEP_ID),
 			name: "approval",
 			seq: 1,
 			at: timestamp,
 		},
 		{
 			type: "step.finished",
-			stepId: STEP_ID,
+			stepId: StepId.parse(STEP_ID),
 			outcome: "succeeded",
 			seq: 2,
 			at: timestamp,
 		},
 		{
 			type: "gate.raised",
-			gateId: GATE_ID,
-			stepId: STEP_ID,
+			gateId: GateId.parse(GATE_ID),
+			stepId: StepId.parse(STEP_ID),
 			kind: "approval",
 			allowedCommands: ["approve"],
 			reason: "Review the plan",
@@ -225,7 +226,7 @@ it("coalesces a burst of stream events into one summary refresh at the latest ga
 it("keeps streamed events after the run ends", async () => {
 	const historyEvent = {
 		type: "step.started",
-		stepId: STEP_ID,
+		stepId: StepId.parse(STEP_ID),
 		name: "planning",
 		seq: 1,
 		at: timestamp,
@@ -290,8 +291,8 @@ it("does not refresh the summary for attempt events", async () => {
 	let summaryRequests = 0;
 	const attemptStarted = {
 		type: "attempt.started",
-		attemptId: "af1f1b1e-2b4c-4f7a-9d3e-2f4a5b6c7d8e",
-		stepId: STEP_ID,
+		attemptId: AttemptId.parse("af1f1b1e-2b4c-4f7a-9d3e-2f4a5b6c7d8e"),
+		stepId: StepId.parse(STEP_ID),
 		role: "reviewer",
 		runner: "fake",
 		model: null,
@@ -302,7 +303,7 @@ it("does not refresh the summary for attempt events", async () => {
 	};
 	const message = {
 		type: "attempt.event",
-		attemptId: attemptStarted.attemptId,
+		attemptId: AttemptId.parse(attemptStarted.attemptId),
 		event: { type: "message", text: "Looking at the plan" },
 		seq: 2,
 		at: timestamp,
@@ -382,7 +383,7 @@ it("reconnects after a dropped stream and resumes from the next sequence", async
 			if (streamRequests === 1) {
 				const event = {
 					type: "step.started",
-					stepId: STEP_ID,
+					stepId: StepId.parse(STEP_ID),
 					name: "planning",
 					seq: 1,
 					at: timestamp,
@@ -575,8 +576,8 @@ it("switches between implementation and activity views", async () => {
 it("shows execution progress, follows its source, and refreshes checkpoints without requesting review", async () => {
 	const source = "9f1f1b1e-2b4c-4f7a-9d3e-2f4a5b6c7d8e";
 	const execution = {
-		runId: RUN_ID,
-		sourceRunId: source,
+		runId: RunId.parse(RUN_ID),
+		sourceRunId: RunId.parse(source),
 		prId: "PR-1",
 		phaseCount: 0,
 		completedPhases: [],
@@ -643,15 +644,15 @@ it("shows execution progress, follows its source, and refreshes checkpoints with
 				events: [
 					{
 						type: "step.started",
-						stepId: STEP_ID,
+						stepId: StepId.parse(STEP_ID),
 						name: "implement",
 						seq: 1,
 						at: timestamp,
 					},
 					{
 						type: "attempt.started",
-						stepId: STEP_ID,
-						attemptId: GATE_ID,
+						stepId: StepId.parse(STEP_ID),
+						attemptId: AttemptId.parse(GATE_ID),
 						role: "implementer",
 						runner: "fake",
 						model: "test-model",
@@ -734,8 +735,8 @@ it("shows execution progress, follows its source, and refreshes checkpoints with
 it("updates execution progress when activity history is unavailable", async () => {
 	let requests = 0;
 	const execution = {
-		runId: RUN_ID,
-		sourceRunId: RUN_ID,
+		runId: RunId.parse(RUN_ID),
+		sourceRunId: RunId.parse(RUN_ID),
 		prId: "PR-1",
 		phaseCount: 0,
 		completedPhases: [],
@@ -818,8 +819,8 @@ it("updates execution progress when activity history is unavailable", async () =
 
 it("shows source phase titles, the active phase, and final review", () => {
 	const execution = {
-		runId: RUN_ID,
-		sourceRunId: RUN_ID,
+		runId: RunId.parse(RUN_ID),
+		sourceRunId: RunId.parse(RUN_ID),
 		prId: "PR-1",
 		phaseCount: 2,
 		phases: [
@@ -869,15 +870,15 @@ it("shows source phase titles, the active phase, and final review", () => {
 
 it("resumes an execution gate, refreshes after rejection and success", async () => {
 	const gate = {
-		gateId: GATE_ID,
-		stepId: STEP_ID,
+		gateId: GateId.parse(GATE_ID),
+		stepId: StepId.parse(STEP_ID),
 		kind: "execution-escalation",
 		allowedCommands: ["resume"],
 		reason: "Interrupted during phase two",
 	};
 	const execution = {
-		runId: RUN_ID,
-		sourceRunId: RUN_ID,
+		runId: RunId.parse(RUN_ID),
+		sourceRunId: RunId.parse(RUN_ID),
 		prId: "PR-1",
 		phaseCount: 2,
 		completedPhases: [],
@@ -983,8 +984,8 @@ it("resumes an execution gate, refreshes after rejection and success", async () 
 
 it("shows unavailable result fields and disables a gate without resume permission", () => {
 	const execution = {
-		runId: RUN_ID,
-		sourceRunId: RUN_ID,
+		runId: RunId.parse(RUN_ID),
+		sourceRunId: RunId.parse(RUN_ID),
 		prId: "PR-1",
 		phaseCount: 0,
 		completedPhases: [],
@@ -1003,8 +1004,8 @@ it("shows unavailable result fields and disables a gate without resume permissio
 		review: null,
 	};
 	const gate = {
-		gateId: GATE_ID,
-		stepId: STEP_ID,
+		gateId: GateId.parse(GATE_ID),
+		stepId: StepId.parse(STEP_ID),
 		kind: "execution-escalation",
 		allowedCommands: [],
 		reason: "Needs attention",
@@ -1102,8 +1103,8 @@ it.each([false, true])(
 					...(execution
 						? {
 								execution: {
-									runId: RUN_ID,
-									sourceRunId: RUN_ID,
+									runId: RunId.parse(RUN_ID),
+									sourceRunId: RunId.parse(RUN_ID),
 									prId: "PR-1",
 									phaseCount: 0,
 									completedPhases: [],
@@ -1214,8 +1215,8 @@ it("opens publication children in their own view and refreshes on checkpoint eve
 				return json(200, {
 					...summary("Push"),
 					publication: {
-						sourceRunId: STEP_ID,
-						executionRunId: GATE_ID,
+						sourceRunId: RunId.parse(STEP_ID),
+						executionRunId: RunId.parse(GATE_ID),
 						stage: reads > 1 ? "CreatePr" : "Push",
 						branch: "branch",
 						reviewedCommit: "a".repeat(40),
@@ -1252,7 +1253,7 @@ it("opens publication children in their own view and refreshes on checkpoint eve
 	await waitFor(() => expect(streamController).toBeDefined());
 	streamController?.enqueue(
 		new TextEncoder().encode(
-			`data: ${JSON.stringify({ runId: RUN_ID, seq: 1, at: timestamp, type: "artifact.recorded", attemptId: null, artifact: { kind: "factory-publication-checkpoint-v1", sha256: "a".repeat(64), size: 1, mediaType: "application/json" } })}\n\n`,
+			`data: ${JSON.stringify({ runId: RunId.parse(RUN_ID), seq: 1, at: timestamp, type: "artifact.recorded", attemptId: null, artifact: { kind: "factory-publication-checkpoint-v1", sha256: "a".repeat(64), size: 1, mediaType: "application/json" } })}\n\n`,
 		),
 	);
 	await waitFor(() => expect(reads).toBeGreaterThan(1));

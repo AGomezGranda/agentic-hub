@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { CostSummary, RunCostTree } from "./cost.ts";
-import { ArtifactRef, Id } from "./primitives.ts";
+import { ArtifactRef, Id, RunId } from "./primitives.ts";
 
 const unique = <T extends { id: string }>(items: T[]) =>
 	new Set(items.map((item) => item.id)).size === items.length;
@@ -115,6 +115,7 @@ const FactoryCheckpointSchema = z.object({
 	answers: z.record(z.string(), z.string()),
 	review: ArtifactRef.nullable(),
 	approvalMetric: ArtifactRef.nullable(),
+	expectedWorkingCopyHash: z.string().nullable().optional(),
 	pendingPlanUpdate: z
 		.object({
 			kind: z.enum(["prompt", "restore"]),
@@ -210,7 +211,7 @@ export const FactoryRunConfig = z.preprocess((input) => {
 export type FactoryRunConfig = z.infer<typeof FactoryRunConfigSchema>;
 
 export const WorkCostTree = z.object({
-	sourceRunId: Id,
+	sourceRunId: RunId,
 	planning: RunCostTree,
 	executions: z.array(z.object({ prId: Id, run: RunCostTree })),
 	total: CostSummary,

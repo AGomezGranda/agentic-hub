@@ -141,5 +141,20 @@ export type ArtifactRef = z.infer<typeof ArtifactRef>;
 
 export const Id = z.string().min(1);
 
+export const RunId = Id.brand<"RunId">();
+export type RunId = z.infer<typeof RunId>;
+export const StepId = Id.brand<"StepId">();
+export type StepId = z.infer<typeof StepId>;
+export const AttemptId = Id.brand<"AttemptId">();
+export type AttemptId = z.infer<typeof AttemptId>;
+export const GateId = Id.brand<"GateId">();
+export type GateId = z.infer<typeof GateId>;
+
+// Raw boundary inputs are accepted; a validated identity of a different kind is not.
+export type RunIdInput = string & Partial<z.$brand<"RunId">>;
+export type StepIdInput = string & Partial<z.$brand<"StepId">>;
+export type AttemptIdInput = string & Partial<z.$brand<"AttemptId">>;
+export type GateIdInput = string & Partial<z.$brand<"GateId">>;
+
 export const ModelId = z.string().min(1).max(256);
 export type ModelId = z.infer<typeof ModelId>;

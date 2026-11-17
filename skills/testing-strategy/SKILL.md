@@ -16,9 +16,9 @@ material: a summary of "Testing Strategies in a Microservice Architecture"
 everything below assumes its vocabulary. Each level's own file
 (`references/unit.md`, `references/integration.md`,
 `references/component.md`, `references/contract.md`, `references/e2e.md`,
-`references/async.md`) goes deeper on that level only — read your own
-level's file (yourself, or paste its path into a child's task per §3), not
-all six.
+`references/async.md`) goes deeper on that level only — read the files for all
+assigned levels (yourself, or pass their paths to a child per §3); omit only
+inapplicable levels.
 
 Scope defaults to the current repository. `$ARGUMENTS` may narrow it to a path,
 a single service in a monorepo, or one concern ("why is CI slow", "our
@@ -93,21 +93,15 @@ invented statistic.
 
 Work through these questions. Evidence in the repo, not impressions.
 
-For a service large enough to have several boundaries and an async surface,
-delegate to keep reads independent: prefer splitting by module/bounded
-context when per-level children would re-read the same suites, or one child
-for a single level (unit, integration, component, contract, e2e, plus
-async if present) when that level's question is genuinely independent — see
-"Fanning out" below for how, per host. Each child's task text must carry
-everything it needs — don't depend on inherited context: the service map
-and test inventory from steps 1-2, that level's own questions from below,
-the absolute path to that level's own file under `references/` in this
-skill directory (`unit.md`, `integration.md`, `component.md`,
-`contract.md`, `e2e.md`, or `async.md`) for background reading — never the
-whole set — plus references/review.md and a read-only restriction.
-Wait for all before step 4. For a small
-or single-layer service, work through the levels yourself — the fan-out
-overhead isn't worth it for a handful of questions.
+For a large service, prefer independent module/context assignments, applying
+all relevant levels within each. When splitting by test concern is clearer,
+group unit + component, integration + contract + async, and E2E + CI/reliability
+into at most three assignments. Async checks apply only when relevant.
+Pass each reviewer the service map and inventory, every assigned level's
+questions and reference file by absolute path, references/review.md and a
+read-only restriction. Read all references assigned to a group; grouping
+must not omit any level's checks. Wait for all results before step 4.
+For a small service, work through the applicable levels yourself.
 
 ### Fanning out
 

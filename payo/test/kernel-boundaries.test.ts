@@ -66,10 +66,10 @@ it("keeps kernel code in owned layers with inward dependencies", () => {
 // Biome's GritQL search matches syntax nodes, so comments and strings are excluded.
 const effects =
 	"or { `setTimeout($args)`, `setInterval($args)`, `setImmediate($args)`, `AbortSignal.timeout($args)`, `Date.now()`, `performance.now()`, `Date($args)`, `new Date($args)`, `Math.random()`, `randomUUID($args)`, `randomBytes($args)`, `randomInt($args)`, `crypto.randomUUID($args)`, `crypto.getRandomValues($args)`, `process.$member`, `fetch($args)`, `new WebSocket($args)`, `new XMLHttpRequest($args)` }";
-function effectMatches(paths: string[]) {
+function effectMatches(paths: string[], pattern = effects) {
 	const result = spawnSync(
 		resolve(root, "node_modules/.bin/biome"),
-		["search", effects, ...paths, "--reporter=json", "--max-diagnostics=none"],
+		["search", pattern, ...paths, "--reporter=json", "--max-diagnostics=none"],
 		{ cwd: root, encoding: "utf8" },
 	);
 	expect(result.status, result.stderr || result.stdout).toBe(0);
@@ -116,11 +116,26 @@ it("rejects computed loading and keeps concrete server construction at the edge"
 			wiring.has(file.slice("apps/server/src/".length))
 		)
 			continue;
-		// Type-only integration types and pure Git read helpers may live outside wiring.
+		// Only declared pure Git helpers may be imported at runtime outside wiring.
 		for (const statement of source.matchAll(
-			/\bimport\s+([^;]*?)\s+from\s+["']@payo\/(?:git|gh|runner-[^"']+|checks-process|store-sqlite|jira-acli)["']/g,
-		))
-			expect(statement[1], file).not.toMatch(/\bcreate[A-Z]/);
+			/\bimport\s+([^;]*?)\s+from\s+["'](@payo\/(?:git|gh|runner-[^"']+|checks-process|store-sqlite|jira-acli))["']/g,
+		)) {
+			const clause = statement[1]?.trim() ?? "";
+			if (clause.startsWith("type ")) continue;
+			expect(statement[2], file).toBe("@payo/git");
+			for (const binding of clause
+				.replace(/[{}]/g, "")
+				.split(",")
+				.map((value) => value.trim())
+				.filter(Boolean))
+				expect(
+					binding.startsWith("type ") ||
+						["readBlobAt", "resolveBaseCommit"].includes(
+							binding.split(/\s+as\s+/)[0] ?? "",
+						),
+					`${file} -> ${binding}`,
+				).toBe(true);
+		}
 	}
 });
 
@@ -149,6 +164,11 @@ it("keeps the whole Payo literal import graph acyclic", () => {
 					: specifier.startsWith("@web/")
 						? `apps/web/src/${specifier.slice(5)}`
 						: packages.get(specifier);
+				if (target && specifier.startsWith("."))
+					expect(
+						target.split("/").slice(0, 2).join("/"),
+						`${file} -> ${specifier}`,
+					).toBe(file.split("/").slice(0, 2).join("/"));
 				if (!target || /\.(?:css|woff2?|svg|png)$/.test(target)) return [];
 				const resolved = [
 					target,
@@ -173,4 +193,24 @@ it("keeps the whole Payo literal import graph acyclic", () => {
 		visited.add(file);
 	}
 	for (const file of files) visit(file, []);
+});
+
+it("loads environment only in bootstrap and configuration modules", () => {
+	const allowed = new Set([
+		"apps/server/src/main.ts",
+		"apps/server/src/config.ts",
+		"apps/cli/src/index.ts",
+		"apps/cli/src/client.ts",
+		"packages/config/src/index.ts",
+	]);
+	const pattern = 'or { `process.env`, `process["env"]` }';
+	expect(
+		effectMatches(
+			files.filter((file) => !allowed.has(file)),
+			pattern,
+		),
+	).toBe(0);
+	expect(effectMatches(["apps/server/src/main.ts"], pattern)).toBeGreaterThan(
+		0,
+	);
 });

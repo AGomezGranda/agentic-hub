@@ -1,10 +1,11 @@
 import type {
 	FactoryCheckpoint,
 	Finding,
+	StepIdInput,
 	VerifiedOutput,
 } from "@payo/contracts";
 import type { RunState } from "@payo/kernel";
-import { CommandError } from "../errors.ts";
+import { CommandError } from "./errors.ts";
 import { resolveImplementation } from "./phase-outline.ts";
 
 export function decideReview(
@@ -56,7 +57,7 @@ export function assertApprovalStage(stage: FactoryCheckpoint["stage"]): void {
 
 export function assertPlanApprovable(
 	state: Pick<RunState, "steps" | "attempts">,
-	gateStepId: string,
+	gateStepId: StepIdInput,
 	plan: import("@payo/contracts").PlanOutput,
 	answers: Record<string, string>,
 	markdown: string,
@@ -74,4 +75,20 @@ export function assertPlanApprovable(
 		(pr) => pr.issues.map((issue) => `${pr.id}: ${issue}`),
 	);
 	if (issues.length) throw new CommandError("conflict", issues.join("\n"));
+}
+
+export function assertAnswerable(stage: FactoryCheckpoint["stage"]): void {
+	if (stage !== "Approval" && stage !== "Escalated")
+		throw new CommandError("conflict", "run cannot accept answers");
+}
+
+export function assertQuestionAnswer(
+	questions: readonly { id: string }[],
+	questionId: string,
+	text: string,
+): void {
+	if (!questions.some((q) => q.id === questionId))
+		throw new CommandError("invalid_request", "unknown question");
+	if (!text.trim())
+		throw new CommandError("invalid_request", "answer must not be blank");
 }

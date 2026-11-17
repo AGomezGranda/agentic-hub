@@ -1,4 +1,4 @@
-import { ExecutionSummary } from "@payo/contracts";
+import { ExecutionSummary, GateId, RunId, StepId } from "@payo/contracts";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
@@ -8,22 +8,25 @@ import { ExecutionView } from "./ExecutionView.tsx";
 
 vi.mock("../plan-review/api.ts", () => ({
 	getRunReview: vi.fn(),
+}));
+vi.mock("../runs/api.ts", () => ({
+	getRun: vi.fn(),
+	startRun: vi.fn(),
 	resumeRun: vi.fn(),
 }));
-vi.mock("../runs/api.ts", () => ({ getRun: vi.fn(), startRun: vi.fn() }));
 
 const issue =
 	"Issue in Phase 1: Expected: Add a history API. Found: An API already exists. Why this matters: Existing clients would break. How should I proceed? Reuse or replace?";
 const gate = {
-	gateId: "gate",
-	stepId: "step",
+	gateId: GateId.parse("gate"),
+	stepId: StepId.parse("step"),
 	kind: "execution-escalation",
 	allowedCommands: ["resume"],
 	reason: `implementer reported plan issues: ${issue}`,
 };
 const execution = ExecutionSummary.parse({
-	runId: "execution",
-	sourceRunId: "source",
+	runId: RunId.parse("execution"),
+	sourceRunId: RunId.parse("source"),
 	prId: "PR-1",
 	phaseCount: 1,
 	status: "active",
@@ -74,7 +77,7 @@ it("shows labelled conflict sections and the original report, and retries the re
 	await user.click(
 		screen.getByRole("button", { name: "Retry on approved plan" }),
 	);
-	expect(planApi.resumeRun).toHaveBeenCalledWith("token", "execution");
+	expect(runApi.resumeRun).toHaveBeenCalledWith("token", "execution");
 	await user.click(screen.getByText("Show full report"));
 	expect(screen.getByText(issue)).toBeVisible();
 	expect(
@@ -96,7 +99,7 @@ it("keeps unstructured reports complete", () => {
 
 function mockContext() {
 	const source = {
-		runId: "source",
+		runId: RunId.parse("source"),
 		repo: "/repo",
 		baseBranch: "main",
 		status: "ended",
@@ -108,7 +111,7 @@ function mockContext() {
 				? source
 				: {
 						...source,
-						runId: "execution",
+						runId: RunId.parse("execution"),
 						status: "active",
 						execution,
 						openGates: [gate],
@@ -179,7 +182,7 @@ it("creates a corrected planning run with context and decision, retaining failed
 		"source",
 	])
 		expect(text).toContain(expected);
-	expect(planApi.resumeRun).not.toHaveBeenCalled();
+	expect(runApi.resumeRun).not.toHaveBeenCalled();
 });
 
 it("blocks correction if the conflict changes while the form is open", async () => {
@@ -220,7 +223,7 @@ it("does not create a run when the original approved plan is unavailable", async
 
 it("answers each distinct issue and resumes the retained execution, preserving failed submissions", async () => {
 	const other = "Which API route should be used?";
-	vi.mocked(planApi.resumeRun)
+	vi.mocked(runApi.resumeRun)
 		.mockRejectedValueOnce(new Error("Workspace unavailable"))
 		.mockResolvedValueOnce({ runId: "execution" });
 	const { user } = setup([issue, other, issue]);
@@ -244,9 +247,9 @@ it("answers each distinct issue and resumes the retained execution, preserving f
 		screen.getByRole("textbox", { name: "Your answer to issue 1" }),
 	).toHaveValue("Reuse the existing API.");
 	await user.click(submit);
-	await waitFor(() => expect(planApi.resumeRun).toHaveBeenCalledTimes(2));
-	expect(planApi.resumeRun).toHaveBeenLastCalledWith("token", "execution", {
-		gateId: "gate",
+	await waitFor(() => expect(runApi.resumeRun).toHaveBeenCalledTimes(2));
+	expect(runApi.resumeRun).toHaveBeenLastCalledWith("token", "execution", {
+		gateId: GateId.parse("gate"),
 		answers: [
 			{ issue, answer: "Reuse the existing API." },
 			{ issue: other, answer: "Use /history." },
@@ -294,6 +297,6 @@ it("shows one resolution at a time and preserves drafts when switching", async (
 	expect(screen.getByRole("textbox", { name: "Your decision" })).toHaveValue(
 		"Preserve existing clients.",
 	);
-	expect(planApi.resumeRun).not.toHaveBeenCalled();
+	expect(runApi.resumeRun).not.toHaveBeenCalled();
 	expect(runApi.startRun).not.toHaveBeenCalled();
 });

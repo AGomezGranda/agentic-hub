@@ -1,6 +1,7 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { readPayoConfigDocument, writePayoConfigDocument } from "@payo/config";
+import { createDoctorProbes } from "./adapters.ts";
 import { ensureServerToken } from "./auth.ts";
 import { type Composition, createComposition } from "./composition.ts";
 import {
@@ -11,17 +12,18 @@ import {
 import { pickDirectory } from "./directory-picker.ts";
 import { runDoctor, startupBlockingFailures } from "./doctor.ts";
 import { createHandler } from "./http.ts";
-import { openWorkspace } from "./open-workspace.ts";
+import { createWorkspaceOpener } from "./open-workspace.ts";
 import { createConfigSettingsService } from "./settings.ts";
 
 async function main(): Promise<void> {
+	const env = { ...process.env };
 	if (process.argv.includes("--check")) {
-		process.exitCode = await preflight();
+		process.exitCode = await preflight(env);
 		return;
 	}
 	let config: ServerConfig;
 	try {
-		config = loadConfig();
+		config = loadConfig(env);
 	} catch (error) {
 		fail(error);
 		return;
@@ -33,7 +35,9 @@ async function main(): Promise<void> {
 			fail(error);
 			return;
 		}
-		const failures = startupBlockingFailures(await runDoctor(config));
+		const failures = startupBlockingFailures(
+			await runDoctor(config, createDoctorProbes(config)),
+		);
 		if (failures.length > 0) {
 			for (const check of failures)
 				console.error(`payo doctor: FAIL ${check.name}: ${check.detail}`);
@@ -47,7 +51,7 @@ async function main(): Promise<void> {
 		readConfig: readPayoConfigDocument,
 		writeConfig: writePayoConfigDocument,
 		configFile: config.configFile,
-		env: process.env,
+		env,
 		cwd: process.cwd(),
 		devFakes: config.devFakes,
 	});
@@ -61,7 +65,7 @@ async function main(): Promise<void> {
 			getServices: () => services,
 			configSettings,
 			pickDirectory,
-			openWorkspace,
+			openWorkspace: createWorkspaceOpener(env),
 		}),
 	);
 
@@ -81,7 +85,7 @@ async function main(): Promise<void> {
 	}
 
 	try {
-		services = await createComposition({ config });
+		services = await createComposition({ config, env });
 		console.log("payo server ready");
 	} catch (error) {
 		await shutdown(server, services);
@@ -101,10 +105,10 @@ async function main(): Promise<void> {
 }
 
 /** Prints config, model and doctor checks without listening; port, token and composition stay serve-only. */
-async function preflight(): Promise<number> {
+async function preflight(env: NodeJS.ProcessEnv): Promise<number> {
 	let config: ServerConfig;
 	try {
-		config = loadConfig();
+		config = loadConfig(env);
 	} catch (error) {
 		console.error(`payo check: FAIL config: ${errorMessage(error)}`);
 		return 1;
@@ -119,7 +123,7 @@ async function preflight(): Promise<number> {
 		console.error(`payo check: FAIL models: ${errorMessage(error)}`);
 		return 1;
 	}
-	const report = await runDoctor(config);
+	const report = await runDoctor(config, createDoctorProbes(config));
 	const blocking = new Set(startupBlockingFailures(report));
 	for (const check of report.checks) {
 		const label = check.ok ? "ok" : blocking.has(check) ? "FAIL" : "warn";

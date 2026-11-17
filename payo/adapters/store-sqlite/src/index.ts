@@ -18,6 +18,7 @@ import {
 	ArtifactRef as ArtifactRefSchema,
 	type RunEvent,
 	RunEventBody,
+	RunId,
 } from "@payo/contracts";
 import {
 	assertSha256,
@@ -90,7 +91,16 @@ export async function createSqliteRunStore(options: {
 
 	const artifactPath = (sha256: string) => join(artifactsDir, sha256);
 
+	let acceptanceTail: Promise<unknown> = Promise.resolve();
 	return {
+		serializeAcceptance(work) {
+			const result = acceptanceTail.then(work, work);
+			acceptanceTail = result.then(
+				() => {},
+				() => {},
+			);
+			return result;
+		},
 		async append(runId, events, expectedSeq) {
 			if (events.length === 0) return;
 			// Parse everything before the transaction opens: a bad row writes nothing.
@@ -121,7 +131,8 @@ export async function createSqliteRunStore(options: {
 			} catch (error) {
 				// A failed write may already have rolled back (e.g. SQLITE_FULL); a second ROLLBACK would mask the original error.
 				if (db.isTransaction) db.exec("ROLLBACK");
-				throw error;
+				if (error instanceof StaleSeqError) throw error;
+				throw new Error("could not write run store", { cause: error });
 			}
 		},
 
@@ -129,7 +140,7 @@ export async function createSqliteRunStore(options: {
 			const rows = db
 				.prepare("SELECT DISTINCT run_id FROM events ORDER BY run_id")
 				.all() as { run_id: string }[];
-			return rows.map((row) => row.run_id);
+			return rows.map((row) => RunId.parse(row.run_id));
 		},
 
 		async read(runId, fromSeq = 1) {
@@ -174,7 +185,8 @@ export async function createSqliteRunStore(options: {
 					renameSync(tmp, final);
 				} catch (error) {
 					rmSync(tmp, { force: true });
-					throw error;
+					if (error instanceof StaleSeqError) throw error;
+					throw new Error("could not write run store", { cause: error });
 				}
 				const dirFd = openSync(artifactsDir, "r");
 				try {
@@ -192,7 +204,8 @@ export async function createSqliteRunStore(options: {
 			try {
 				bytes = readFileSync(artifactPath(sha256));
 			} catch (cause) {
-				if ((cause as NodeJS.ErrnoException).code !== "ENOENT") throw cause;
+				if ((cause as NodeJS.ErrnoException).code !== "ENOENT")
+					throw new Error("could not read artifact", { cause });
 				throw new Error(`artifact ${sha256} not found`, { cause });
 			}
 			const actual = sha256Hex(bytes);
